@@ -266,7 +266,7 @@ async function startApp() {
   tab("today");
   updatePushState();
   const { data } = await db.from("app_settings").select("value").eq("key", "digest_hour").single();
-  if (data) $("digest-hour").value = JSON.parse(JSON.stringify(data.value)).replace(/"/g, "");
+  if (data) $("digest-hour").value = String(data.value).replace(/"/g, "");
 }
 
 async function refreshAll() {
@@ -833,7 +833,7 @@ async function enablePush() {
   } catch (e) { console.error(e); toast("Error enabling push"); }
 }
 async function saveDigestHour() {
-  await db.from("app_settings").update({ value: JSON.stringify($("digest-hour").value) }).eq("key", "digest_hour");
+  try { await dbq(db.from("app_settings").update({ value: $("digest-hour").value }).eq("key", "digest_hour"), "Not saved"); } catch { return; }
   toast("Saved");
 }
 
