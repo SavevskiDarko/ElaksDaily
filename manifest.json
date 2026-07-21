@@ -1,7 +1,7 @@
 {
   "name": "Elaks Ops",
   "short_name": "Elaks Ops",
-  "description": "Дневни задачи, лагер и понуди",
+  "description": "Daily tasks, stock and offers",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#F7F8FA",
