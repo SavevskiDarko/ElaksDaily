@@ -197,8 +197,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pizzip/3.1.7/pizzip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.47.1/docxtemplater.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pizzip@3.2.0/dist/pizzip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.69.0/build/docxtemplater.min.js"></script>
 <script>
 /* ============================================================
    CONFIG — fill in these 3 values (see SETUP.md)
@@ -608,12 +608,19 @@ async function saveOffer(id, generate) {
   if (id) { await db.from("offers").update(row).eq("id", id); saved = { ...row, id }; }
   else { const { data } = await db.from("offers").insert(row).select().single(); saved = data; }
   await refreshAll();
-  if (generate) await generateDocx(saved, meters);
-  closeSheet(); renderOffers(); toast("Offer saved");
+  let genOk = null;
+  if (generate) genOk = await generateDocx(saved, meters);
+  closeSheet(); renderOffers();
+  toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
 }
 async function generateDocx(o, meters) {
   try {
-    const buf = await (await fetch("Ponuda_TEMPLATE.docx")).arrayBuffer();
+    if (!window.PizZip || !window.docxtemplater) throw new Error("Document libraries did not load — check connection and reload the app");
+    const res = await fetch("Ponuda_TEMPLATE.docx", { cache: "no-store" });
+    if (!res.ok) throw new Error("Template not found on server (HTTP " + res.status + ")");
+    const buf = await res.arrayBuffer();
+    const head = new Uint8Array(buf.slice(0, 2));
+    if (head[0] !== 0x50 || head[1] !== 0x4B) throw new Error("Template file on server is not a valid .docx");
     const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true });
     const client = state.clients.find((c) => c.id === o.client_id);
     doc.render({
@@ -635,8 +642,18 @@ async function generateDocx(o, meters) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `Ponuda_${o.number}.docx`;
-    a.click(); URL.revokeObjectURL(a.href);
-  } catch (e) { console.error(e); toast("Generation error — check the template"); }
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    return true;
+  } catch (e) {
+    console.error(e);
+    const det = (e.properties && e.properties.errors)
+      ? e.properties.errors.map((x) => x.properties && x.properties.explanation).filter(Boolean).join("\n")
+      : e.message;
+    alert("Could not generate the offer document:\n\n" + det);
+    return false;
+  }
 }
 async function deductStock(id) {
   const o = state.offers.find((x) => x.id === id);
