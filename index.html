@@ -159,6 +159,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div id="today-list"></div>
     <div class="sec">Next 7 days</div>
     <div id="week-list"></div>
+    <button class="btn ghost" onclick="openHistory()">Completed tasks →</button>
   </div>
 
   <!-- STOCK -->
@@ -364,7 +365,7 @@ async function toggleTask(id) {
   const t = state.tasks.find((x) => x.id === id); const today = todayStr();
   const upd = t.recurrence
     ? { last_done: t.last_done === today ? null : today }
-    : { done: !t.done };
+    : { done: !t.done, last_done: !t.done ? today : null };
   try { await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated"); } catch { return; }
   Object.assign(t, upd); renderToday(); updateBadges();
 }
@@ -419,6 +420,34 @@ async function delTask(id) {
   if (!confirm("Delete this task?")) return;
   try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
   closeSheet(); await refreshAll(); renderToday();
+}
+function openHistory() {
+  const done = state.tasks.filter((t) => !t.recurrence && t.done)
+    .sort((a, b) => (b.last_done || "").localeCompare(a.last_done || ""));
+  const fmtD = (d) => d ? new Date(d + "T12:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "Earlier";
+  let html = `<h2>Completed tasks</h2>`;
+  if (!done.length) html += '<p class="muted">Nothing completed yet.</p>';
+  let lastD = null;
+  for (const t of done.slice(0, 300)) {
+    const d = t.last_done || "";
+    if (d !== lastD) { html += `<div class="sec">${fmtD(t.last_done)}</div>`; lastD = d; }
+    html += `<div class="card task done">
+      <span class="led ${t.context}"></span>
+      <span class="t-title">${esc(t.title)}</span>
+      <button class="btn sm ghost" onclick="restoreTask('${t.id}')">Restore</button>
+      <button style="color:var(--danger);font-size:17px;padding:4px" onclick="histDelTask('${t.id}')" aria-label="delete">✕</button>
+    </div>`;
+  }
+  openSheet(html);
+}
+async function restoreTask(id) {
+  try { await dbq(db.from("tasks").update({ done: false, last_done: null, due_date: todayStr() }).eq("id", id), "Not restored"); } catch { return; }
+  await refreshAll(); openHistory(); renderToday(); updateBadges(); toast("Restored to today");
+}
+async function histDelTask(id) {
+  if (!confirm("Delete this task permanently?")) return;
+  try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
+  await refreshAll(); openHistory(); renderToday();
 }
 
 /* ============================================================
