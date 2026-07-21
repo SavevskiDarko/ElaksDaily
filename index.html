@@ -41,7 +41,10 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .tabbar button{flex:1;padding:9px 0 7px;color:#8DA2BC;font-family:var(--cond);font-weight:600;
   font-size:12px;letter-spacing:.05em;display:flex;flex-direction:column;align-items:center;gap:3px}
 .tabbar button .led{width:5px;height:5px;border-radius:50%;background:transparent}
+.tabbar button{position:relative}
 .tabbar button.on{color:#fff}
+.bdg{position:absolute;top:3px;right:calc(50% - 24px);background:var(--amber);color:var(--navy-deep);font-size:10px;font-weight:700;border-radius:999px;min-width:16px;height:16px;line-height:16px;padding:0 4px;display:none}
+.bdg.on{display:block}
 .tabbar button.on .led{background:var(--amber);box-shadow:0 0 6px var(--amber)}
 
 /* ---- generic ---- */
@@ -123,6 +126,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.on{opacity:1}
 .search{margin-bottom:10px}
+@media (prefers-color-scheme: dark){
+  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5}
+  .chip{background:var(--card);color:var(--ink)}
+  input,select,textarea{background:var(--card);color:var(--ink)}
+  .btn.ghost{background:var(--card);color:var(--ink)}
+  .task .tick{border-color:#39424F}
+}
 </style>
 </head>
 <body>
@@ -144,6 +154,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
   <!-- TODAY -->
   <div class="view" id="v-today">
+    <input class="search" id="qc" placeholder="Quick add: Order cameras tomorrow 14:00 #elaks" onkeydown="qcKey(event)">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
     <div class="sec">Next 7 days</div>
@@ -159,6 +170,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
   <!-- OFFERS -->
   <div class="view" id="v-off">
+    <input class="search" id="off-search" placeholder="Search offers…" oninput="renderOffers()">
+    <div class="chips" id="off-filter" style="margin-bottom:12px"></div>
     <div id="off-list"></div>
   </div>
 
@@ -177,6 +190,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div class="sec">Clients</div>
     <div id="cli-list"></div>
     <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
+    <div class="sec">Export (CSV)</div>
+    <div class="grid2">
+      <button class="btn sm ghost" style="width:100%" onclick="exportCsv('articles')">Articles</button>
+      <button class="btn sm ghost" style="width:100%" onclick="exportCsv('movements')">Movements</button>
+    </div>
+    <button class="btn ghost" onclick="exportCsv('offers')">Offers</button>
     <div class="sec">Account</div>
     <button class="btn ghost" onclick="logout()">Sign out</button>
     <p class="muted" style="margin-top:14px">Elaks Ops · version 1.0</p>
@@ -185,8 +204,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   <button class="fab" id="fab" onclick="fabClick()">+</button>
 
   <div class="tabbar">
-    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Today</button>
-    <button data-tab="inv" onclick="tab('inv')"><span class="led"></span>Stock</button>
+    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Today<span class="bdg" id="bdg-today"></span></button>
+    <button data-tab="inv" onclick="tab('inv')"><span class="led"></span>Stock<span class="bdg" id="bdg-inv"></span></button>
     <button data-tab="off" onclick="tab('off')"><span class="led"></span>Offers</button>
     <button data-tab="set" onclick="tab('set')"><span class="led"></span>Settings</button>
   </div>
@@ -219,7 +238,13 @@ const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString("mk-MK");
 const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let state = { tab: "today", ctxFilter: "all", catFilter: "all", tasks: [], stock: [], clients: [], offers: [] };
+let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", tasks: [], stock: [], clients: [], offers: [] };
+
+async function dbq(q, failMsg) {
+  const { data, error } = await q;
+  if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + error.message); throw error; }
+  return data;
+}
 
 /* ---------------- AUTH ---------------- */
 async function boot() {
@@ -271,6 +296,7 @@ function fabClick() {
   else if (state.tab === "off") openOfferSheet();
 }
 function render() {
+  updateBadges();
   if (state.tab === "today") renderToday();
   if (state.tab === "inv") renderInv();
   if (state.tab === "off") renderOffers();
@@ -301,11 +327,14 @@ function renderToday() {
   const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done);
   const todays = state.tasks.filter((t) => vis(t) && occursOn(t, today));
 
+  const inbox = state.tasks.filter((t) => vis(t) && !t.recurrence && !t.due_date && !t.done);
   let html = "";
   if (overdue.length) {
     html += '<div class="sec" style="color:var(--danger)">Overdue</div>' + overdue.map(taskRow(today)).join("");
   }
-  html += todays.length ? todays.map(taskRow(today)).join("") : '<div class="empty">No tasks for today.<br>Add with +</div>';
+  if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
+  html += todays.length ? todays.map(taskRow(today)).join("")
+    : ((overdue.length || inbox.length) ? "" : '<div class="empty">No tasks for today.<br>Add with +</div>');
   $("today-list").innerHTML = html;
 
   // week
@@ -336,8 +365,8 @@ async function toggleTask(id) {
   const upd = t.recurrence
     ? { last_done: t.last_done === today ? null : today }
     : { done: !t.done };
-  await db.from("tasks").update(upd).eq("id", id);
-  Object.assign(t, upd); renderToday();
+  try { await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated"); } catch { return; }
+  Object.assign(t, upd); renderToday(); updateBadges();
 }
 function openTaskSheet(id) {
   const t = id ? state.tasks.find((x) => x.id === id) : { context: "work", due_date: todayStr() };
@@ -363,6 +392,7 @@ function openTaskSheet(id) {
       <div><label>Reminder</label>
         <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
     </div>
+    <label>Notes (opt.)</label><textarea id="tk-notes" rows="2">${esc(t.notes || "")}</textarea>
     <button class="btn" onclick="saveTask('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delTask('${id}')">Delete</button>` : ""}
   `);
@@ -379,13 +409,17 @@ async function saveTask(id) {
     recur_dow: rec === "weekly" ? d.getDay() : null,
     recur_dom: rec === "monthly" ? d.getDate() : null,
     remind: $("tk-rem").value === "1",
+    notes: $("tk-notes").value.trim() || null,
   };
   if (!row.title) return toast("Enter a title");
-  if (id) await db.from("tasks").update(row).eq("id", id);
-  else await db.from("tasks").insert(row);
+  try { await dbq(id ? db.from("tasks").update(row).eq("id", id) : db.from("tasks").insert(row), "Task not saved"); } catch { return; }
   closeSheet(); await refreshAll(); renderToday(); toast("Saved");
 }
-async function delTask(id) { await db.from("tasks").delete().eq("id", id); closeSheet(); await refreshAll(); renderToday(); }
+async function delTask(id) {
+  if (!confirm("Delete this task?")) return;
+  try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
+  closeSheet(); await refreshAll(); renderToday();
+}
 
 /* ============================================================
    STOCK
@@ -398,12 +432,20 @@ function renderInv() {
   const list = state.stock.filter((a) =>
     (state.catFilter === "all" || a.category === state.catFilter) &&
     (!q || a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)));
-  $("inv-list").innerHTML = list.length ? list.map((a) => `
+  const pv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.purchase_price || 0), 0);
+  const sv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.sell_price || 0), 0);
+  const lowN = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
+  const sum = `<div class="card">
+    <div class="row" style="justify-content:space-between"><span class="muted">Stock value (purchase)</span><b class="mono">${fmt(pv)} ден.</b></div>
+    <div class="row" style="justify-content:space-between"><span class="muted">Stock value (sell)</span><b class="mono">${fmt(sv)} ден.</b></div>
+    <div class="row" style="justify-content:space-between"><span class="muted">${state.stock.length} articles</span><b style="color:${lowN ? "var(--danger)" : "inherit"}">${lowN} low</b></div>
+  </div>`;
+  $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
     <div class="card art" onclick="openArticleDetail('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
       <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
       <div class="a-qty">${fmt(a.stock)}<small>${unitLbl(a.unit)}</small></div>
-    </div>`).join("") : '<div class="empty">No articles.<br>Add with +</div>';
+    </div>`).join("") : '<div class="empty">No articles.<br>Add with +</div>');
 }
 async function openArticleDetail(id) {
   const a = state.stock.find((x) => x.id === id);
@@ -435,7 +477,7 @@ function moveSheet(id, type) {
 async function saveMove(id, type) {
   const qty = parseFloat($("mv-qty").value);
   if (!qty || qty <= 0) return toast("Enter a quantity");
-  await db.from("movements").insert({ article_id: id, type, qty, note: $("mv-note").value.trim() || null });
+  try { await dbq(db.from("movements").insert({ article_id: id, type, qty, note: $("mv-note").value.trim() || null }), "Movement not saved"); } catch { return; }
   closeSheet(); await refreshAll(); renderInv(); toast(type === "in" ? "Received" : "Issued");
 }
 function openArticleSheet(id) {
@@ -473,18 +515,27 @@ async function saveArticle(id) {
     specs: $("ar-specs").value.trim() || null,
   };
   if (!row.name) return toast("Enter a name");
-  if (id) await db.from("articles").update(row).eq("id", id);
-  else await db.from("articles").insert(row);
+  try { await dbq(id ? db.from("articles").update(row).eq("id", id) : db.from("articles").insert(row), "Article not saved"); } catch { return; }
   closeSheet(); await refreshAll(); renderInv(); toast("Saved");
 }
-async function delArticle(id) { await db.from("articles").update({ active: false }).eq("id", id); closeSheet(); await refreshAll(); renderInv(); }
+async function delArticle(id) {
+  if (!confirm("Deactivate this article?")) return;
+  try { await dbq(db.from("articles").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
+  closeSheet(); await refreshAll(); renderInv();
+}
 
 /* ============================================================
    OFFERS
 ============================================================ */
 let offerItems = [];
 function renderOffers() {
-  $("off-list").innerHTML = state.offers.length ? state.offers.map((o) => `
+  $("off-filter").innerHTML = ["all", ...Object.keys(STATUS)].map((s) =>
+    `<button class="chip ${state.offStatus === s ? "on" : ""}" onclick="state.offStatus='${s}';renderOffers()">${s === "all" ? "All" : STATUS[s]}</button>`).join("");
+  const q = (($("off-search") || {}).value || "").toLowerCase();
+  const list = state.offers.filter((o) =>
+    (state.offStatus === "all" || o.status === state.offStatus) &&
+    (!q || o.number.toLowerCase().includes(q) || o.title.toLowerCase().includes(q) || (o.clients?.name || "").toLowerCase().includes(q)));
+  $("off-list").innerHTML = list.length ? list.map((o) => `
     <div class="card offer row" onclick="openOfferSheet('${o.id}')">
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
@@ -528,9 +579,11 @@ function openOfferSheet(id) {
     <div id="of-items"></div>
     <button class="btn sm ghost" onclick="addFreeItem()">+ Manual item (installation…)</button>
     <div class="totalbar"><span>Total</span><span class="mono" id="of-total">0 ден.</span></div>
-    <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" placeholder="automatic">
+    <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
+    ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
+    ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
     ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
     ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Delete</button>` : ""}
   `);
@@ -556,7 +609,7 @@ function addFreeItem() {
   renderOfferItems();
 }
 function itemTotal(it) {
-  if (it.unit === "m") return null;                       // measured after install
+  if (it.unit === "m") return it.consumed ? it.consumed * (it.price || 0) : null; // measured after install
   if (it.free) return it.price || 0;
   return (it.qty || 0) * (it.price || 0);
 }
@@ -566,7 +619,7 @@ function renderOfferItems() {
     return `<div class="oitem">
       <input value="${esc(it.name)}" oninput="offerItems[${i}].name=this.value">
       ${it.unit === "m"
-        ? '<input value="m" disabled>'
+        ? `<input value="${it.consumed ? fmt(it.consumed) + ' m' : 'm'}" disabled>`
         : it.free
           ? '<input value="" disabled>'
           : `<input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="offerItems[${i}].qty=parseFloat(this.value)||0;updateTotal()">`}
@@ -586,9 +639,10 @@ function updateTotal() {
     if (t !== null) sum += t;
   });
   $("of-total").textContent = fmt(sum) + " ден.";
-  const meters = offerItems.filter((it) => it.unit === "m");
-  if (!$("of-note").value || $("of-note").dataset.auto !== "0") {
-    $("of-note").value = meters.length ? "(не се вклучени " + meters.map((m) => m.name.split(" ")[0].toLowerCase()).join(" и ") + ")" : "";
+  const metersOpen = offerItems.filter((it) => it.unit === "m" && !it.consumed);
+  const noteEl = $("of-note");
+  if (noteEl && !noteEl.dataset.manual) {
+    noteEl.value = metersOpen.length ? "(не се вклучени " + metersOpen.map((m) => m.name.split(" ")[0].toLowerCase()).join(" и ") + ")" : "";
   }
   return sum;
 }
@@ -605,15 +659,26 @@ async function saveOffer(id, generate) {
   if (!row.title) return toast("Enter a title");
   if (!offerItems.length) return toast("Add items");
   let saved;
-  if (id) { await db.from("offers").update(row).eq("id", id); saved = { ...row, id }; }
-  else { const { data } = await db.from("offers").insert(row).select().single(); saved = data; }
+  try {
+    if (id) { await dbq(db.from("offers").update(row).eq("id", id), "Offer not saved"); saved = { ...row, id }; }
+    else {
+      let ins = await db.from("offers").insert(row).select().single();
+      if (ins.error && ins.error.code === "23505") {   // number collision → refresh, renumber, retry once
+        await refreshAll(); row.number = nextOfferNumber();
+        ins = await db.from("offers").insert(row).select().single();
+      }
+      if (ins.error) { toast("Offer not saved — " + ins.error.message); return; }
+      saved = ins.data;
+    }
+  } catch { return; }
   await refreshAll();
   let genOk = null;
-  if (generate) genOk = await generateDocx(saved, meters);
+  if (generate) genOk = await generateDocx(saved);
   closeSheet(); renderOffers();
   toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
 }
-async function generateDocx(o, meters) {
+async function generateDocx(o) {
+  const metersOpen = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !x.it.consumed);
   try {
     if (!window.PizZip || !window.docxtemplater) throw new Error("Document libraries did not load — check connection and reload the app");
     const res = await fetch("Ponuda_TEMPLATE.docx", { cache: "no-store" });
@@ -629,13 +694,13 @@ async function generateDocx(o, meters) {
       client: client ? client.name : "", validity: o.validity,
       items: o.items.map((it, i) => ({
         num: i + 1, name: it.name, specs: it.specs || "",
-        qty: it.unit === "m" ? "m" : (it.free ? "" : fmt(it.qty || 0)),
+        qty: it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0)),
         price: it.free ? "" : fmt(it.price || 0),
-        total: it.unit === "m" ? "???" : fmt(itemTotal(it) || 0),
+        total: itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0),
       })),
       total_note: o.total_note || "", grand_total: fmt(o.grand_total),
-      footnote: meters.length
-        ? `* Ставките ${meters.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
+      footnote: metersOpen.length
+        ? `* Ставките ${metersOpen.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
         : "",
     });
     const blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
@@ -656,14 +721,69 @@ async function generateDocx(o, meters) {
   }
 }
 async function deductStock(id) {
+  if (!confirm("Deduct all piece items of this offer from stock?")) return;
   const o = state.offers.find((x) => x.id === id);
   const rows = o.items.filter((it) => it.article_id && it.unit !== "m")
     .map((it) => ({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number }));
-  if (rows.length) await db.from("movements").insert(rows);
-  await db.from("offers").update({ stock_deducted: true }).eq("id", id);
+  try {
+    if (rows.length) await dbq(db.from("movements").insert(rows), "Stock not updated");
+    await dbq(db.from("offers").update({ stock_deducted: true }).eq("id", id), "Offer not updated");
+  } catch { return; }
   closeSheet(); await refreshAll(); renderOffers(); toast("Deducted from stock");
 }
-async function delOffer(id) { await db.from("offers").delete().eq("id", id); closeSheet(); await refreshAll(); renderOffers(); }
+async function delOffer(id) {
+  if (!confirm("Delete this offer?")) return;
+  try { await dbq(db.from("offers").delete().eq("id", id), "Not deleted"); } catch { return; }
+  closeSheet(); await refreshAll(); renderOffers();
+}
+function duplicateOffer(id) {
+  const src = state.offers.find((x) => x.id === id);
+  closeSheet();
+  setTimeout(() => {
+    openOfferSheet();
+    $("of-title").value = src.title; $("of-system").value = src.system || "";
+    $("of-client").value = src.client_id || ""; $("of-val").value = src.validity;
+    offerItems = JSON.parse(JSON.stringify(src.items || [])).map((it) => { delete it.consumed; return it; });
+    renderOfferItems();
+  }, 240);
+}
+function closeJobSheet(id) {
+  const o = state.offers.find((x) => x.id === id);
+  const ms = o.items.map((it, i) => ({ it, i })).filter((x) => x.it.unit === "m" && !x.it.consumed);
+  openSheet(`
+    <h2>Close job — ${o.number}</h2>
+    <p class="muted">Enter consumed length per item. The offer total and stock will be updated.</p>
+    ${ms.map((x) => `<label>${esc(x.it.name)} (@ ${fmt(x.it.price || 0)} /m)</label>
+      <input type="number" inputmode="decimal" min="0" step="any" id="cj-${x.i}">`).join("")}
+    <button class="btn" onclick="closeJob('${id}')">Confirm — update offer & stock</button>
+  `);
+}
+async function closeJob(id) {
+  const o = state.offers.find((x) => x.id === id);
+  const items = JSON.parse(JSON.stringify(o.items));
+  const movRows = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.unit === "m" && !it.consumed) {
+      const v = parseFloat(($("cj-" + i) || {}).value);
+      if (!v || v <= 0) return toast("Enter meters for every item");
+      it.consumed = v;
+      if (it.article_id) movRows.push({ article_id: it.article_id, type: "out", qty: v, ref: o.number, note: "Offer " + o.number });
+    }
+  }
+  if (!o.stock_deducted) items.forEach((it) => {
+    if (it.article_id && it.unit !== "m") movRows.push({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number });
+  });
+  const total = items.reduce((s, it) => {
+    const t = it.unit === "m" ? it.consumed * (it.price || 0) : (it.free ? (it.price || 0) : (it.qty || 0) * (it.price || 0));
+    return s + (t || 0);
+  }, 0);
+  try {
+    if (movRows.length) await dbq(db.from("movements").insert(movRows), "Stock not updated");
+    await dbq(db.from("offers").update({ items, grand_total: total, total_note: null, stock_deducted: true }).eq("id", id), "Offer not updated");
+  } catch { return; }
+  closeSheet(); await refreshAll(); renderOffers(); toast("Job closed — total and stock updated");
+}
 
 /* ============================================================
    CLIENTS + PUSH
@@ -682,13 +802,14 @@ function openClientSheet(id) {
     <label>Contact</label><input id="cl-contact" value="${esc(c.contact || "")}" placeholder="phone / email">
     <label>Note</label><input id="cl-note" value="${esc(c.note || "")}">
     <button class="btn" onclick="saveClient('${id || ""}')">Save</button>
+    ${id ? '<div class="sec">Offers</div>' + (state.offers.filter((o) => o.client_id === id).map((o) =>
+      `<div class="mov"><span>${o.number} · ${esc(o.title)} · ${STATUS[o.status]}</span><span class="mono">${fmt(o.grand_total)} ден.</span></div>`).join("") || '<p class="muted">No offers yet.</p>') : ""}
   `);
 }
 async function saveClient(id) {
   const row = { name: $("cl-name").value.trim(), contact: $("cl-contact").value.trim() || null, note: $("cl-note").value.trim() || null };
   if (!row.name) return toast("Enter a name");
-  if (id) await db.from("clients").update(row).eq("id", id);
-  else await db.from("clients").insert(row);
+  try { await dbq(id ? db.from("clients").update(row).eq("id", id) : db.from("clients").insert(row), "Client not saved"); } catch { return; }
   closeSheet(); await refreshAll(); renderClients(); toast("Saved");
 }
 
@@ -714,6 +835,65 @@ async function enablePush() {
 async function saveDigestHour() {
   await db.from("app_settings").update({ value: JSON.stringify($("digest-hour").value) }).eq("key", "digest_hour");
   toast("Saved");
+}
+
+async function qcKey(ev) {
+  if (ev.key !== "Enter") return;
+  const raw = ev.target.value.trim(); if (!raw) return;
+  const t = { title: [], context: "work", due_date: todayStr(), due_time: null };
+  for (const w of raw.split(/\s+/)) {
+    const lw = w.toLowerCase();
+    if (lw === "#work" || lw === "#w") t.context = "work";
+    else if (lw === "#elaks" || lw === "#e") t.context = "elaks";
+    else if (lw === "#personal" || lw === "#p") t.context = "personal";
+    else if (lw === "today") t.due_date = todayStr();
+    else if (lw === "tomorrow") { const d = new Date(); d.setDate(d.getDate() + 1); t.due_date = d.toLocaleDateString("sv-SE"); }
+    else if (/^\d{1,2}\.\d{1,2}\.?$/.test(lw)) {
+      const p = lw.replace(/\.$/, "").split(".");
+      const d = new Date(); d.setMonth(parseInt(p[1]) - 1, parseInt(p[0]));
+      if (d < new Date(new Date().toDateString())) d.setFullYear(d.getFullYear() + 1);
+      t.due_date = d.toLocaleDateString("sv-SE");
+    }
+    else if (/^\d{1,2}:\d{2}$/.test(lw)) t.due_time = lw.padStart(5, "0");
+    else t.title.push(w);
+  }
+  const row = { title: t.title.join(" "), context: t.context, due_date: t.due_date, due_time: t.due_time, remind: !!t.due_time };
+  if (!row.title) return toast("Enter a title");
+  try { await dbq(db.from("tasks").insert(row), "Task not saved"); } catch { return; }
+  ev.target.value = ""; await refreshAll(); renderToday(); updateBadges(); toast(row.due_time ? "Added · reminder at " + row.due_time : "Added");
+}
+
+function updateBadges() {
+  const today = todayStr();
+  const n = state.tasks.filter((t) =>
+    (occursOn(t, today) && !isDoneOn(t, today)) ||
+    (!t.recurrence && t.due_date && t.due_date < today && !t.done)).length;
+  const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
+  const set = (name, v) => { const e = $("bdg-" + name); if (e) { e.textContent = v; e.classList.toggle("on", v > 0); } };
+  set("today", n); set("inv", low);
+}
+
+async function exportCsv(kind) {
+  const cell = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  let rows = [];
+  if (kind === "articles") {
+    rows = [["name", "code", "category", "unit", "stock", "min_stock", "purchase_price", "sell_price", "supplier"]]
+      .concat(state.stock.map((a) => [a.name, a.code, a.category, a.unit, a.stock, a.min_stock, a.purchase_price, a.sell_price, a.supplier]));
+  } else if (kind === "movements") {
+    let data = [];
+    try { data = await dbq(db.from("movements").select("*, articles(name)").order("created_at"), "Export failed"); } catch { return; }
+    rows = [["date", "article", "type", "qty", "ref", "note"]]
+      .concat((data || []).map((m) => [m.created_at.slice(0, 10), m.articles?.name, m.type, m.qty, m.ref, m.note]));
+  } else {
+    rows = [["number", "date", "title", "client", "status", "grand_total"]]
+      .concat(state.offers.map((o) => [o.number, o.offer_date, o.title, o.clients?.name, o.status, o.grand_total]));
+  }
+  const csv = rows.map((r) => r.map(cell).join(";")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+  a.download = "elaks-" + kind + "-" + todayStr() + ".csv";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000);
 }
 
 boot();
