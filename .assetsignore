@@ -1,0 +1,6 @@
+.git
+.wrangler
+schema.sql
+SETUP.md
+.gitignore
+wrangler.jsonc
