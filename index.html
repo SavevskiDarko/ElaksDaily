@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="mk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Elaks Ops</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1E3A5F">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap&subset=cyrillic-ext" rel="stylesheet">
+<style>
+:root{
+  --navy:#1E3A5F; --navy-deep:#152A46; --amber:#F5B301; --paper:#F7F8FA;
+  --card:#FFFFFF; --ink:#23272E; --muted:#6B7280; --line:#E5E8EC;
+  --work:#4C6EF5; --elaks:#1E3A5F; --personal:#2F9E68; --danger:#D6455D;
+  --r:14px; --pad:16px;
+  --sans:'IBM Plex Sans',system-ui,sans-serif;
+  --cond:'IBM Plex Sans Condensed',var(--sans);
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:var(--sans);background:var(--paper);color:var(--ink);font-size:15px;line-height:1.45;
+  padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+button{font-family:inherit;font-size:inherit;border:0;background:none;cursor:pointer;color:inherit}
+input,select,textarea{font-family:inherit;font-size:16px;border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;width:100%;background:#fff;color:var(--ink)}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+
+/* ---- top bar ---- */
+.topbar{position:sticky;top:0;z-index:20;background:var(--navy);color:#fff;
+  padding:calc(10px + env(safe-area-inset-top)) var(--pad) 10px;display:flex;align-items:baseline;gap:10px}
+.topbar h1{font-family:var(--cond);font-weight:700;font-size:19px;letter-spacing:.02em}
+.topbar .date{margin-left:auto;font-size:12.5px;opacity:.75;font-family:var(--mono)}
+
+/* ---- tab bar ---- */
+.tabbar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--navy-deep);
+  display:flex;padding-bottom:env(safe-area-inset-bottom)}
+.tabbar button{flex:1;padding:9px 0 7px;color:#8DA2BC;font-family:var(--cond);font-weight:600;
+  font-size:12px;letter-spacing:.05em;display:flex;flex-direction:column;align-items:center;gap:3px}
+.tabbar button .led{width:5px;height:5px;border-radius:50%;background:transparent}
+.tabbar button.on{color:#fff}
+.tabbar button.on .led{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+
+/* ---- generic ---- */
+.view{display:none;padding:var(--pad)}
+.view.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px}
+.led{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.led.work{background:var(--work)} .led.elaks{background:var(--elaks)} .led.personal{background:var(--personal)}
+.led.ok{background:var(--personal)} .led.low{background:var(--amber);box-shadow:0 0 5px var(--amber)}
+.led.out{background:var(--danger);box-shadow:0 0 5px var(--danger)}
+.led.draft{background:#9AA4B2} .led.sent{background:var(--work)} .led.accepted{background:var(--personal)} .led.rejected{background:var(--danger)}
+.sec{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);margin:18px 0 8px}
+.muted{color:var(--muted);font-size:13px}
+.mono{font-family:var(--mono)}
+.row{display:flex;align-items:center;gap:10px}
+.empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:14px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;overflow-x:auto;padding-bottom:2px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 13px;font-size:13.5px;font-weight:500;white-space:nowrap}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn{background:var(--navy);color:#fff;border-radius:11px;padding:12px 16px;font-weight:600;width:100%;margin-top:14px}
+.btn.amber{background:var(--amber);color:var(--navy-deep)}
+.btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink)}
+.btn.danger{background:var(--danger)}
+.btn.sm{width:auto;padding:8px 13px;margin:0;font-size:13.5px;border-radius:9px}
+.fab{position:fixed;right:18px;bottom:calc(78px + env(safe-area-inset-bottom));z-index:19;
+  width:56px;height:56px;border-radius:50%;background:var(--amber);color:var(--navy-deep);
+  font-size:30px;font-weight:600;box-shadow:0 4px 14px rgba(30,58,95,.35);display:none;align-items:center;justify-content:center;line-height:1}
+.fab.on{display:flex}
+
+/* ---- sheet ---- */
+.overlay{position:fixed;inset:0;background:rgba(21,42,70,.45);z-index:30;display:none}
+.overlay.on{display:block}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--paper);
+  border-radius:18px 18px 0 0;max-height:88vh;overflow-y:auto;padding:14px var(--pad) calc(20px + env(safe-area-inset-bottom));
+  transform:translateY(100%);transition:transform .22s ease;display:none}
+.sheet.on{display:block;transform:translateY(0)}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+.sheet h2{font-family:var(--cond);font-weight:700;font-size:17px;margin-bottom:4px}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* ---- tasks ---- */
+.task{display:flex;align-items:center;gap:11px}
+.task .tick{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff}
+.task.done .tick{background:var(--personal);border-color:var(--personal)}
+.task.done .t-title{text-decoration:line-through;color:var(--muted)}
+.task .t-title{flex:1;font-weight:500}
+.task .t-time{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.task .rec{font-size:11px;color:var(--muted)}
+
+/* ---- inventory ---- */
+.art{display:flex;align-items:center;gap:11px}
+.art .a-name{flex:1;min-width:0}
+.art .a-name b{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.art .a-name span{font-size:12px;color:var(--muted)}
+.art .a-qty{font-family:var(--mono);font-weight:600;font-size:16px;text-align:right}
+.art .a-qty small{display:block;font-size:10.5px;color:var(--muted);font-weight:500}
+.mov{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid var(--line)}
+.mov:last-child{border:0}
+
+/* ---- offers ---- */
+.offer .o-num{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.offer .o-total{font-family:var(--mono);font-weight:600;white-space:nowrap}
+.oitem{display:grid;grid-template-columns:1fr 58px 74px 74px 28px;gap:6px;align-items:center;margin-bottom:6px;font-size:13.5px}
+.oitem input{padding:7px 8px;font-size:14px}
+.oitem .del{color:var(--danger);font-size:18px;text-align:center}
+.ohead{display:grid;grid-template-columns:1fr 58px 74px 74px 28px;gap:6px;font-size:11px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:4px}
+.totalbar{display:flex;justify-content:space-between;align-items:center;background:var(--navy);color:#fff;
+  border-radius:11px;padding:11px 14px;margin-top:10px;font-weight:600}
+.totalbar .mono{color:var(--amber);font-size:17px}
+
+/* ---- login ---- */
+#login{max-width:360px;margin:16vh auto 0;padding:0 var(--pad)}
+#login .logo{width:64px;height:64px;border-radius:16px;margin-bottom:16px}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  background:var(--navy-deep);color:#fff;padding:10px 18px;border-radius:999px;font-size:13.5px;z-index:40;
+  opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.on{opacity:1}
+.search{margin-bottom:10px}
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login" style="display:none">
+  <img src="icon-192.png" class="logo" alt="">
+  <h1 style="font-family:var(--cond);font-size:24px;margin-bottom:2px">Elaks Ops</h1>
+  <p class="muted" style="margin-bottom:18px">Задачи · Лагер · Понуди</p>
+  <label>Е-пошта</label><input id="lg-email" type="email" autocomplete="username">
+  <label>Лозинка</label><input id="lg-pass" type="password" autocomplete="current-password">
+  <button class="btn" onclick="login()">Најави се</button>
+  <p id="lg-err" class="muted" style="color:var(--danger);margin-top:10px"></p>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app" style="display:none">
+  <div class="topbar"><h1 id="bar-title">Денес</h1><span class="date" id="bar-date"></span></div>
+
+  <!-- ДЕНЕС -->
+  <div class="view" id="v-today">
+    <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
+    <div id="today-list"></div>
+    <div class="sec">Следни 7 дена</div>
+    <div id="week-list"></div>
+  </div>
+
+  <!-- ЛАГЕР -->
+  <div class="view" id="v-inv">
+    <input class="search" id="inv-search" placeholder="Барај артикал…" oninput="renderInv()">
+    <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
+    <div id="inv-list"></div>
+  </div>
+
+  <!-- ПОНУДИ -->
+  <div class="view" id="v-off">
+    <div id="off-list"></div>
+  </div>
+
+  <!-- ОПЦИИ -->
+  <div class="view" id="v-set">
+    <div class="sec">Известувања</div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><b>Push известувања</b><div class="muted" id="push-state">—</div></div>
+        <button class="btn sm amber" onclick="enablePush()">Вклучи</button>
+      </div>
+      <label>Дневен преглед во</label>
+      <div class="row"><input id="digest-hour" type="time" value="07:30" style="flex:1">
+        <button class="btn sm" onclick="saveDigestHour()">Зачувај</button></div>
+    </div>
+    <div class="sec">Клиенти</div>
+    <div id="cli-list"></div>
+    <button class="btn ghost" onclick="openClientSheet()">+ Нов клиент</button>
+    <div class="sec">Сметка</div>
+    <button class="btn ghost" onclick="logout()">Одјави се</button>
+    <p class="muted" style="margin-top:14px">Elaks Ops · верзија 1.0</p>
+  </div>
+
+  <button class="fab" id="fab" onclick="fabClick()">+</button>
+
+  <div class="tabbar">
+    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Денес</button>
+    <button data-tab="inv" onclick="tab('inv')"><span class="led"></span>Лагер</button>
+    <button data-tab="off" onclick="tab('off')"><span class="led"></span>Понуди</button>
+    <button data-tab="set" onclick="tab('set')"><span class="led"></span>Опции</button>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pizzip/3.1.7/pizzip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.47.1/docxtemplater.js"></script>
+<script>
+/* ============================================================
+   CONFIG — пополни ги овие 3 вредности (види SETUP.md)
+============================================================ */
+const CONFIG = {
+  SUPABASE_URL: "PASTE_SUPABASE_URL",
+  SUPABASE_ANON_KEY: "PASTE_SUPABASE_ANON_KEY",
+  VAPID_PUBLIC_KEY: "PASTE_VAPID_PUBLIC_KEY",
+};
+
+const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const $ = (id) => document.getElementById(id);
+const CTX = { work: "Работа", elaks: "Elaks", personal: "Лично" };
+const CATS = ["CCTV", "DVR", "Аларм", "Пристап", "Кабли", "Друго"];
+const STATUS = { draft: "Нацрт", sent: "Испратена", accepted: "Прифатена", rejected: "Одбиена" };
+const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString("mk-MK");
+const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let state = { tab: "today", ctxFilter: "all", catFilter: "all", tasks: [], stock: [], clients: [], offers: [] };
+
+/* ---------------- AUTH ---------------- */
+async function boot() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+  const { data: { session } } = await db.auth.getSession();
+  if (session) startApp(); else $("login").style.display = "block";
+}
+async function login() {
+  const { error } = await db.auth.signInWithPassword({ email: $("lg-email").value.trim(), password: $("lg-pass").value });
+  if (error) { $("lg-err").textContent = "Погрешна е-пошта или лозинка."; return; }
+  $("login").style.display = "none"; startApp();
+}
+async function logout() { await db.auth.signOut(); location.reload(); }
+
+async function startApp() {
+  $("app").style.display = "block";
+  $("bar-date").textContent = new Date().toLocaleDateString("mk-MK", { weekday: "short", day: "numeric", month: "short" });
+  await refreshAll();
+  tab("today");
+  updatePushState();
+  const { data } = await db.from("app_settings").select("value").eq("key", "digest_hour").single();
+  if (data) $("digest-hour").value = JSON.parse(JSON.stringify(data.value)).replace(/"/g, "");
+}
+
+async function refreshAll() {
+  const [t, s, c, o] = await Promise.all([
+    db.from("tasks").select("*").order("due_time", { ascending: true, nullsFirst: false }),
+    db.from("article_stock").select("*").eq("active", true).order("name"),
+    db.from("clients").select("*").order("name"),
+    db.from("offers").select("*, clients(name)").order("created_at", { ascending: false }),
+  ]);
+  state.tasks = t.data ?? []; state.stock = s.data ?? [];
+  state.clients = c.data ?? []; state.offers = o.data ?? [];
+}
+
+/* ---------------- NAV ---------------- */
+function tab(name) {
+  state.tab = name;
+  document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
+  $("v-" + { today: "today", inv: "inv", off: "off", set: "set" }[name]).classList.add("on");
+  document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  $("bar-title").textContent = { today: "Денес", inv: "Лагер", off: "Понуди", set: "Опции" }[name];
+  $("fab").classList.toggle("on", ["today", "inv", "off"].includes(name));
+  render();
+}
+function fabClick() {
+  if (state.tab === "today") openTaskSheet();
+  else if (state.tab === "inv") openArticleSheet();
+  else if (state.tab === "off") openOfferSheet();
+}
+function render() {
+  if (state.tab === "today") renderToday();
+  if (state.tab === "inv") renderInv();
+  if (state.tab === "off") renderOffers();
+  if (state.tab === "set") renderClients();
+}
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2200); }
+function openSheet(html) { $("sheet").innerHTML = '<div class="grab"></div>' + html; $("overlay").classList.add("on"); requestAnimationFrame(() => $("sheet").classList.add("on")); $("sheet").style.display = "block"; }
+function closeSheet() { $("sheet").classList.remove("on"); $("overlay").classList.remove("on"); setTimeout(() => { $("sheet").style.display = "none"; }, 220); }
+
+/* ============================================================
+   ЗАДАЧИ
+============================================================ */
+function occursOn(t, dateStr) {
+  const d = new Date(dateStr + "T12:00");
+  if (t.recurrence === "daily") return true;
+  if (t.recurrence === "weekly") return t.recur_dow === d.getDay();
+  if (t.recurrence === "monthly") return t.recur_dom === d.getDate();
+  return t.due_date === dateStr;
+}
+function isDoneOn(t, dateStr) { return t.recurrence ? t.last_done === dateStr : t.done; }
+
+function renderToday() {
+  const today = todayStr();
+  $("ctx-filter").innerHTML = ["all", "work", "elaks", "personal"].map((c) =>
+    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "Сите" : CTX[c]}</button>`).join("");
+  const vis = (t) => state.ctxFilter === "all" || t.context === state.ctxFilter;
+
+  const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done);
+  const todays = state.tasks.filter((t) => vis(t) && occursOn(t, today));
+
+  let html = "";
+  if (overdue.length) {
+    html += '<div class="sec" style="color:var(--danger)">Задоцнети</div>' + overdue.map(taskRow(today)).join("");
+  }
+  html += todays.length ? todays.map(taskRow(today)).join("") : '<div class="empty">Нема задачи за денес.<br>Додај со +</div>';
+  $("today-list").innerHTML = html;
+
+  // week
+  let week = "";
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    const ds = d.toLocaleDateString("sv-SE");
+    const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds));
+    if (!list.length) continue;
+    week += `<div class="sec">${d.toLocaleDateString("mk-MK", { weekday: "long", day: "numeric", month: "short" })}</div>` +
+      list.map((t) => `<div class="card task"><span class="led ${t.context}"></span><span class="t-title">${esc(t.title)}</span>
+        ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
+  }
+  $("week-list").innerHTML = week || '<div class="empty">Ништо закажано.</div>';
+}
+const taskRow = (today) => (t) => {
+  const done = isDoneOn(t, today);
+  return `<div class="card task ${done ? "done" : ""}">
+    <button class="tick" onclick="toggleTask('${t.id}')" aria-label="заврши">${done ? "✓" : ""}</button>
+    <span class="led ${t.context}"></span>
+    <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
+      ${t.recurrence ? '<span class="rec"> ↻</span>' : ""}</span>
+    ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}
+  </div>`;
+};
+async function toggleTask(id) {
+  const t = state.tasks.find((x) => x.id === id); const today = todayStr();
+  const upd = t.recurrence
+    ? { last_done: t.last_done === today ? null : today }
+    : { done: !t.done };
+  await db.from("tasks").update(upd).eq("id", id);
+  Object.assign(t, upd); renderToday();
+}
+function openTaskSheet(id) {
+  const t = id ? state.tasks.find((x) => x.id === id) : { context: "work", due_date: todayStr() };
+  openSheet(`
+    <h2>${id ? "Уреди задача" : "Нова задача"}</h2>
+    <label>Наслов</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="пр. Стендап · Нарачај камери">
+    <label>Контекст</label>
+    <div class="chips" id="tk-ctx">${Object.keys(CTX).map((c) =>
+      `<button class="chip ${t.context === c ? "on" : ""}" data-c="${c}"
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${CTX[c]}</button>`).join("")}</div>
+    <div class="grid2">
+      <div><label>Датум</label><input id="tk-date" type="date" value="${t.due_date || todayStr()}"></div>
+      <div><label>Време (опц.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Повторување</label>
+        <select id="tk-rec">
+          <option value="">Никогаш</option>
+          <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Секој ден</option>
+          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Неделно (тој ден)</option>
+          <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Месечно (тој датум)</option>
+        </select></div>
+      <div><label>Потсетник</label>
+        <select id="tk-rem"><option value="0">Не</option><option value="1" ${t.remind ? "selected" : ""}>Push во времето</option></select></div>
+    </div>
+    <button class="btn" onclick="saveTask('${id || ""}')">Зачувај</button>
+    ${id ? `<button class="btn danger" onclick="delTask('${id}')">Избриши</button>` : ""}
+  `);
+}
+async function saveTask(id) {
+  const d = new Date($("tk-date").value + "T12:00");
+  const rec = $("tk-rec").value || null;
+  const row = {
+    title: $("tk-title").value.trim(),
+    context: $("tk-ctx").querySelector(".chip.on").dataset.c,
+    due_date: $("tk-date").value || null,
+    due_time: $("tk-time").value || null,
+    recurrence: rec,
+    recur_dow: rec === "weekly" ? d.getDay() : null,
+    recur_dom: rec === "monthly" ? d.getDate() : null,
+    remind: $("tk-rem").value === "1",
+  };
+  if (!row.title) return toast("Внеси наслов");
+  if (id) await db.from("tasks").update(row).eq("id", id);
+  else await db.from("tasks").insert(row);
+  closeSheet(); await refreshAll(); renderToday(); toast("Зачувано");
+}
+async function delTask(id) { await db.from("tasks").delete().eq("id", id); closeSheet(); await refreshAll(); renderToday(); }
+
+/* ============================================================
+   ЛАГЕР
+============================================================ */
+function stockLed(a) { return a.stock <= 0 ? "out" : (a.min_stock > 0 && a.stock <= a.min_stock ? "low" : "ok"); }
+function renderInv() {
+  $("cat-filter").innerHTML = ["all", ...CATS].map((c) =>
+    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "Сите" : c}</button>`).join("");
+  const q = ($("inv-search").value || "").toLowerCase();
+  const list = state.stock.filter((a) =>
+    (state.catFilter === "all" || a.category === state.catFilter) &&
+    (!q || a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)));
+  $("inv-list").innerHTML = list.length ? list.map((a) => `
+    <div class="card art" onclick="openArticleDetail('${a.id}')">
+      <span class="led ${stockLed(a)}"></span>
+      <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
+      <div class="a-qty">${fmt(a.stock)}<small>${a.unit}</small></div>
+    </div>`).join("") : '<div class="empty">Нема артикли.<br>Додај со +</div>';
+}
+async function openArticleDetail(id) {
+  const a = state.stock.find((x) => x.id === id);
+  const { data: movs } = await db.from("movements").select("*").eq("article_id", id).order("created_at", { ascending: false }).limit(10);
+  openSheet(`
+    <h2>${esc(a.name)}</h2>
+    <p class="muted">${esc(a.category)} · ${esc(a.code || "без шифра")} · продажна ${fmt(a.sell_price)} ден.</p>
+    <div class="totalbar"><span>На лагер</span><span class="mono">${fmt(a.stock)} ${a.unit}</span></div>
+    <div class="grid2" style="margin-top:12px">
+      <button class="btn sm" style="width:100%" onclick="moveSheet('${id}','in')">+ Прием</button>
+      <button class="btn sm ghost" style="width:100%" onclick="moveSheet('${id}','out')">− Издавање</button>
+    </div>
+    <div class="sec">Последни движења</div>
+    ${(movs || []).map((m) => `<div class="mov"><span>${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))} ${a.unit} ${esc(m.note || m.ref || "")}</span>
+      <span class="muted">${new Date(m.created_at).toLocaleDateString("mk-MK")}</span></div>`).join("") || '<p class="muted">Нема движења.</p>'}
+    <button class="btn ghost" onclick="openArticleSheet('${id}')">Уреди артикал</button>
+  `);
+}
+function moveSheet(id, type) {
+  const a = state.stock.find((x) => x.id === id);
+  openSheet(`
+    <h2>${type === "in" ? "Прием" : "Издавање"} — ${esc(a.name)}</h2>
+    <label>Количина (${a.unit})</label><input id="mv-qty" type="number" inputmode="decimal" min="0" step="any">
+    <label>Белешка (опц.)</label><input id="mv-note" placeholder="пр. набавка · објект Марковски">
+    <button class="btn ${type === "in" ? "" : "amber"}" onclick="saveMove('${id}','${type}')">Потврди</button>
+  `);
+  setTimeout(() => $("mv-qty").focus(), 250);
+}
+async function saveMove(id, type) {
+  const qty = parseFloat($("mv-qty").value);
+  if (!qty || qty <= 0) return toast("Внеси количина");
+  await db.from("movements").insert({ article_id: id, type, qty, note: $("mv-note").value.trim() || null });
+  closeSheet(); await refreshAll(); renderInv(); toast(type === "in" ? "Примено" : "Издадено");
+}
+function openArticleSheet(id) {
+  const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
+  openSheet(`
+    <h2>${id ? "Уреди артикал" : "Нов артикал"}</h2>
+    <label>Име</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="пр. 5MP Hikvision DS-2CE17K0T-LFS">
+    <div class="grid2">
+      <div><label>Шифра</label><input id="ar-code" value="${esc(a.code || "")}"></div>
+      <div><label>Категорија</label><select id="ar-cat">${CATS.map((c) => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+    </div>
+    <div class="grid2">
+      <div><label>Единица</label><select id="ar-unit"><option ${a.unit === "ком" ? "selected" : ""}>ком</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
+      <div><label>Мин. лагер</label><input id="ar-min" type="number" inputmode="decimal" value="${a.min_stock ?? 0}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Набавна цена</label><input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}"></div>
+      <div><label>Продажна цена</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
+    </div>
+    <label>Добавувач</label><input id="ar-sup" value="${esc(a.supplier || "")}">
+    <label>Спецификации за понуда (секој ред почнува со --)</label>
+    <textarea id="ar-specs" rows="5" placeholder="-- 40m White Light&#10;-- 2.8 mm објектив">${esc(a.specs || "")}</textarea>
+    <button class="btn" onclick="saveArticle('${id || ""}')">Зачувај</button>
+    ${id ? `<button class="btn danger" onclick="delArticle('${id}')">Деактивирај</button>` : ""}
+  `);
+}
+async function saveArticle(id) {
+  const row = {
+    name: $("ar-name").value.trim(), code: $("ar-code").value.trim() || null,
+    category: $("ar-cat").value, unit: $("ar-unit").value,
+    min_stock: parseFloat($("ar-min").value) || 0,
+    purchase_price: parseFloat($("ar-pp").value) || 0,
+    sell_price: parseFloat($("ar-sp").value) || 0,
+    supplier: $("ar-sup").value.trim() || null,
+    specs: $("ar-specs").value.trim() || null,
+  };
+  if (!row.name) return toast("Внеси име");
+  if (id) await db.from("articles").update(row).eq("id", id);
+  else await db.from("articles").insert(row);
+  closeSheet(); await refreshAll(); renderInv(); toast("Зачувано");
+}
+async function delArticle(id) { await db.from("articles").update({ active: false }).eq("id", id); closeSheet(); await refreshAll(); renderInv(); }
+
+/* ============================================================
+   ПОНУДИ
+============================================================ */
+let offerItems = [];
+function renderOffers() {
+  $("off-list").innerHTML = state.offers.length ? state.offers.map((o) => `
+    <div class="card offer row" onclick="openOfferSheet('${o.id}')">
+      <span class="led ${o.status}"></span>
+      <div style="flex:1;min-width:0">
+        <b>${esc(o.title)}</b>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "без клиент")} · ${STATUS[o.status]}</div>
+      </div>
+      <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
+    </div>`).join("") : '<div class="empty">Нема понуди.<br>Направи со +</div>';
+}
+function nextOfferNumber() {
+  const y = new Date().getFullYear();
+  const nums = state.offers.map((o) => o.number).filter((n) => n.startsWith(y + "-")).map((n) => parseInt(n.split("-")[1]) || 0);
+  return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
+}
+function openOfferSheet(id) {
+  const o = id ? state.offers.find((x) => x.id === id) : {
+    number: nextOfferNumber(), title: "", system: "", validity: 7, status: "draft",
+    offer_date: todayStr(), items: [], total_note: "", client_id: "",
+  };
+  offerItems = JSON.parse(JSON.stringify(o.items || []));
+  openSheet(`
+    <h2>${id ? "Понуда " + o.number : "Нова понуда " + o.number}</h2>
+    <label>Наслов на системот</label><input id="of-title" value="${esc(o.title)}" placeholder="пр. 2 Камери + Аларм Систем">
+    <label>Опис (Систем:)</label><input id="of-system" value="${esc(o.system || "")}" placeholder="пр. 2 IP камери + DVR + Централа">
+    <div class="grid2">
+      <div><label>Клиент</label><select id="of-client">
+        <option value="">— избери —</option>
+        ${state.clients.map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select></div>
+      <div><label>Датум</label><input id="of-date" type="date" value="${o.offer_date}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Важност (дена)</label><input id="of-val" type="number" value="${o.validity}"></div>
+      <div><label>Статус</label><select id="of-status">${Object.keys(STATUS).map((s) =>
+        `<option value="${s}" ${o.status === s ? "selected" : ""}>${STATUS[s]}</option>`).join("")}</select></div>
+    </div>
+    <div class="sec">Ставки</div>
+    <input id="of-search" placeholder="Барај артикал за додавање…" oninput="renderPicker()">
+    <div id="of-picker"></div>
+    <div class="ohead" style="margin-top:10px"><span>Име</span><span>Кол.</span><span>Цена</span><span>Вкупно</span><span></span></div>
+    <div id="of-items"></div>
+    <button class="btn sm ghost" onclick="addFreeItem()">+ Рачна ставка (монтажа…)</button>
+    <div class="totalbar"><span>Вкупно</span><span class="mono" id="of-total">0 ден.</span></div>
+    <label>Белешка кон вкупно</label><input id="of-note" value="${esc(o.total_note || "")}" placeholder="автоматски">
+    <button class="btn" onclick="saveOffer('${id || ""}')">Зачувај понуда</button>
+    <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Зачувај + Генерирај .docx</button>
+    ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Одземи од лагер</button>` : ""}
+    ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Избриши</button>` : ""}
+  `);
+  renderOfferItems();
+}
+function renderPicker() {
+  const q = ($("of-search").value || "").toLowerCase();
+  if (!q) { $("of-picker").innerHTML = ""; return; }
+  const list = state.stock.filter((a) => a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)).slice(0, 5);
+  $("of-picker").innerHTML = list.map((a) => `
+    <div class="card art" onclick="addOfferItem('${a.id}')">
+      <span class="led ${stockLed(a)}"></span>
+      <div class="a-name"><b>${esc(a.name)}</b><span>лагер: ${fmt(a.stock)} ${a.unit} · ${fmt(a.sell_price)} ден.</span></div>
+    </div>`).join("");
+}
+function addOfferItem(articleId) {
+  const a = state.stock.find((x) => x.id === articleId);
+  offerItems.push({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit, qty: a.unit === "m" ? null : 1, price: a.sell_price });
+  $("of-search").value = ""; $("of-picker").innerHTML = ""; renderOfferItems();
+}
+function addFreeItem() {
+  offerItems.push({ free: true, name: "Монтажа, подесување и обука", specs: "", unit: "ком", qty: null, price: 0 });
+  renderOfferItems();
+}
+function itemTotal(it) {
+  if (it.unit === "m") return null;                       // measured after install
+  if (it.free) return it.price || 0;
+  return (it.qty || 0) * (it.price || 0);
+}
+function renderOfferItems() {
+  $("of-items").innerHTML = offerItems.map((it, i) => {
+    const tot = itemTotal(it);
+    return `<div class="oitem">
+      <input value="${esc(it.name)}" oninput="offerItems[${i}].name=this.value">
+      ${it.unit === "m"
+        ? '<input value="m" disabled>'
+        : it.free
+          ? '<input value="" disabled>'
+          : `<input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="offerItems[${i}].qty=parseFloat(this.value)||0;updateTotal()">`}
+      <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="offerItems[${i}].price=parseFloat(this.value)||0;updateTotal()">
+      <input class="mono" value="${tot === null ? "???" : fmt(tot)}" disabled id="of-it-tot-${i}">
+      <button class="del" onclick="offerItems.splice(${i},1);renderOfferItems()">✕</button>
+    </div>`;
+  }).join("");
+  updateTotal();
+}
+function updateTotal() {
+  let sum = 0;
+  offerItems.forEach((it, i) => {
+    const t = itemTotal(it);
+    const cell = $("of-it-tot-" + i);
+    if (cell) cell.value = t === null ? "???" : fmt(t);
+    if (t !== null) sum += t;
+  });
+  $("of-total").textContent = fmt(sum) + " ден.";
+  const meters = offerItems.filter((it) => it.unit === "m");
+  if (!$("of-note").value || $("of-note").dataset.auto !== "0") {
+    $("of-note").value = meters.length ? "(не се вклучени " + meters.map((m) => m.name.split(" ")[0].toLowerCase()).join(" и ") + ")" : "";
+  }
+  return sum;
+}
+async function saveOffer(id, generate) {
+  const meters = offerItems.map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m");
+  const row = {
+    number: id ? state.offers.find((x) => x.id === id).number : nextOfferNumber(),
+    title: $("of-title").value.trim(), system: $("of-system").value.trim() || null,
+    client_id: $("of-client").value || null, offer_date: $("of-date").value,
+    validity: parseInt($("of-val").value) || 7, status: $("of-status").value,
+    items: offerItems, total_note: $("of-note").value.trim() || null,
+    grand_total: updateTotal(),
+  };
+  if (!row.title) return toast("Внеси наслов");
+  if (!offerItems.length) return toast("Додај ставки");
+  let saved;
+  if (id) { await db.from("offers").update(row).eq("id", id); saved = { ...row, id }; }
+  else { const { data } = await db.from("offers").insert(row).select().single(); saved = data; }
+  await refreshAll();
+  if (generate) await generateDocx(saved, meters);
+  closeSheet(); renderOffers(); toast("Понудата е зачувана");
+}
+async function generateDocx(o, meters) {
+  try {
+    const buf = await (await fetch("Ponuda_TEMPLATE.docx")).arrayBuffer();
+    const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true });
+    const client = state.clients.find((c) => c.id === o.client_id);
+    doc.render({
+      title: o.title, system: o.system || "",
+      offer_number: o.number, date: new Date(o.offer_date).toLocaleDateString("mk-MK"),
+      client: client ? client.name : "", validity: o.validity,
+      items: o.items.map((it, i) => ({
+        num: i + 1, name: it.name, specs: it.specs || "",
+        qty: it.unit === "m" ? "m" : (it.free ? "" : fmt(it.qty || 0)),
+        price: it.free ? "" : fmt(it.price || 0),
+        total: it.unit === "m" ? "???" : fmt(itemTotal(it) || 0),
+      })),
+      total_note: o.total_note || "", grand_total: fmt(o.grand_total),
+      footnote: meters.length
+        ? `* Ставките ${meters.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
+        : "",
+    });
+    const blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `Ponuda_${o.number}.docx`;
+    a.click(); URL.revokeObjectURL(a.href);
+  } catch (e) { console.error(e); toast("Грешка при генерирање — провери го шаблонот"); }
+}
+async function deductStock(id) {
+  const o = state.offers.find((x) => x.id === id);
+  const rows = o.items.filter((it) => it.article_id && it.unit !== "m")
+    .map((it) => ({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Понуда " + o.number }));
+  if (rows.length) await db.from("movements").insert(rows);
+  await db.from("offers").update({ stock_deducted: true }).eq("id", id);
+  closeSheet(); await refreshAll(); renderOffers(); toast("Одземено од лагер");
+}
+async function delOffer(id) { await db.from("offers").delete().eq("id", id); closeSheet(); await refreshAll(); renderOffers(); }
+
+/* ============================================================
+   КЛИЕНТИ + PUSH
+============================================================ */
+function renderClients() {
+  $("cli-list").innerHTML = state.clients.map((c) => `
+    <div class="card row" onclick="openClientSheet('${c.id}')">
+      <div style="flex:1"><b>${esc(c.name)}</b><div class="muted">${esc(c.contact || "")}</div></div>
+    </div>`).join("") || '<p class="muted">Нема клиенти.</p>';
+}
+function openClientSheet(id) {
+  const c = id ? state.clients.find((x) => x.id === id) : {};
+  openSheet(`
+    <h2>${id ? "Уреди клиент" : "Нов клиент"}</h2>
+    <label>Име / фирма</label><input id="cl-name" value="${esc(c.name || "")}">
+    <label>Контакт</label><input id="cl-contact" value="${esc(c.contact || "")}" placeholder="телефон / е-пошта">
+    <label>Белешка</label><input id="cl-note" value="${esc(c.note || "")}">
+    <button class="btn" onclick="saveClient('${id || ""}')">Зачувај</button>
+  `);
+}
+async function saveClient(id) {
+  const row = { name: $("cl-name").value.trim(), contact: $("cl-contact").value.trim() || null, note: $("cl-note").value.trim() || null };
+  if (!row.name) return toast("Внеси име");
+  if (id) await db.from("clients").update(row).eq("id", id);
+  else await db.from("clients").insert(row);
+  closeSheet(); await refreshAll(); renderClients(); toast("Зачувано");
+}
+
+function urlB64(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+async function updatePushState() {
+  if (!("Notification" in window)) { $("push-state").textContent = "Не е поддржано"; return; }
+  $("push-state").textContent = Notification.permission === "granted" ? "Вклучени на овој уред" : "Исклучени";
+}
+async function enablePush() {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return toast("Дозволата е одбиена");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(CONFIG.VAPID_PUBLIC_KEY) });
+    await db.from("push_subscriptions").upsert({ endpoint: sub.endpoint, sub: sub.toJSON() }, { onConflict: "endpoint" });
+    updatePushState(); toast("Известувањата се вклучени");
+  } catch (e) { console.error(e); toast("Грешка при вклучување"); }
+}
+async function saveDigestHour() {
+  await db.from("app_settings").update({ value: JSON.stringify($("digest-hour").value) }).eq("key", "digest_hour");
+  toast("Зачувано");
+}
+
+boot();
+</script>
+</body>
+</html>
