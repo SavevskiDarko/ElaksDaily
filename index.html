@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="mk">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -131,64 +131,64 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 <div id="login" style="display:none">
   <img src="icon-192.png" class="logo" alt="">
   <h1 style="font-family:var(--cond);font-size:24px;margin-bottom:2px">Elaks Ops</h1>
-  <p class="muted" style="margin-bottom:18px">Задачи · Лагер · Понуди</p>
-  <label>Е-пошта</label><input id="lg-email" type="email" autocomplete="username">
-  <label>Лозинка</label><input id="lg-pass" type="password" autocomplete="current-password">
-  <button class="btn" onclick="login()">Најави се</button>
+  <p class="muted" style="margin-bottom:18px">Tasks · Stock · Offers</p>
+  <label>Email</label><input id="lg-email" type="email" autocomplete="username">
+  <label>Password</label><input id="lg-pass" type="password" autocomplete="current-password">
+  <button class="btn" onclick="login()">Sign in</button>
   <p id="lg-err" class="muted" style="color:var(--danger);margin-top:10px"></p>
 </div>
 
 <!-- ================= APP ================= -->
 <div id="app" style="display:none">
-  <div class="topbar"><h1 id="bar-title">Денес</h1><span class="date" id="bar-date"></span></div>
+  <div class="topbar"><h1 id="bar-title">Today</h1><span class="date" id="bar-date"></span></div>
 
-  <!-- ДЕНЕС -->
+  <!-- TODAY -->
   <div class="view" id="v-today">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
-    <div class="sec">Следни 7 дена</div>
+    <div class="sec">Next 7 days</div>
     <div id="week-list"></div>
   </div>
 
-  <!-- ЛАГЕР -->
+  <!-- STOCK -->
   <div class="view" id="v-inv">
-    <input class="search" id="inv-search" placeholder="Барај артикал…" oninput="renderInv()">
+    <input class="search" id="inv-search" placeholder="Search article…" oninput="renderInv()">
     <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
     <div id="inv-list"></div>
   </div>
 
-  <!-- ПОНУДИ -->
+  <!-- OFFERS -->
   <div class="view" id="v-off">
     <div id="off-list"></div>
   </div>
 
-  <!-- ОПЦИИ -->
+  <!-- SETTINGS -->
   <div class="view" id="v-set">
-    <div class="sec">Известувања</div>
+    <div class="sec">Notifications</div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div><b>Push известувања</b><div class="muted" id="push-state">—</div></div>
-        <button class="btn sm amber" onclick="enablePush()">Вклучи</button>
+        <div><b>Push notifications</b><div class="muted" id="push-state">—</div></div>
+        <button class="btn sm amber" onclick="enablePush()">Enable</button>
       </div>
-      <label>Дневен преглед во</label>
+      <label>Daily digest at</label>
       <div class="row"><input id="digest-hour" type="time" value="07:30" style="flex:1">
-        <button class="btn sm" onclick="saveDigestHour()">Зачувај</button></div>
+        <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
     </div>
-    <div class="sec">Клиенти</div>
+    <div class="sec">Clients</div>
     <div id="cli-list"></div>
-    <button class="btn ghost" onclick="openClientSheet()">+ Нов клиент</button>
-    <div class="sec">Сметка</div>
-    <button class="btn ghost" onclick="logout()">Одјави се</button>
-    <p class="muted" style="margin-top:14px">Elaks Ops · верзија 1.0</p>
+    <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
+    <div class="sec">Account</div>
+    <button class="btn ghost" onclick="logout()">Sign out</button>
+    <p class="muted" style="margin-top:14px">Elaks Ops · version 1.0</p>
   </div>
 
   <button class="fab" id="fab" onclick="fabClick()">+</button>
 
   <div class="tabbar">
-    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Денес</button>
-    <button data-tab="inv" onclick="tab('inv')"><span class="led"></span>Лагер</button>
-    <button data-tab="off" onclick="tab('off')"><span class="led"></span>Понуди</button>
-    <button data-tab="set" onclick="tab('set')"><span class="led"></span>Опции</button>
+    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Today</button>
+    <button data-tab="inv" onclick="tab('inv')"><span class="led"></span>Stock</button>
+    <button data-tab="off" onclick="tab('off')"><span class="led"></span>Offers</button>
+    <button data-tab="set" onclick="tab('set')"><span class="led"></span>Settings</button>
   </div>
 </div>
 
@@ -201,7 +201,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 <script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.47.1/docxtemplater.js"></script>
 <script>
 /* ============================================================
-   CONFIG — пополни ги овие 3 вредности (види SETUP.md)
+   CONFIG — fill in these 3 values (see SETUP.md)
 ============================================================ */
 const CONFIG = {
   SUPABASE_URL: "https://inbxjztezjfrbnidzofy.supabase.co",
@@ -211,9 +211,10 @@ const CONFIG = {
 
 const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
-const CTX = { work: "Работа", elaks: "Elaks", personal: "Лично" };
-const CATS = ["CCTV", "DVR", "Аларм", "Пристап", "Кабли", "Друго"];
-const STATUS = { draft: "Нацрт", sent: "Испратена", accepted: "Прифатена", rejected: "Одбиена" };
+const CTX = { work: "Work", elaks: "Elaks", personal: "Personal" };
+const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
+const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
+const unitLbl = (u) => u === "m" ? "m" : "pcs";
 const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString("mk-MK");
 const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -228,14 +229,14 @@ async function boot() {
 }
 async function login() {
   const { error } = await db.auth.signInWithPassword({ email: $("lg-email").value.trim(), password: $("lg-pass").value });
-  if (error) { $("lg-err").textContent = "Погрешна е-пошта или лозинка."; return; }
+  if (error) { $("lg-err").textContent = "Wrong email or password."; return; }
   $("login").style.display = "none"; startApp();
 }
 async function logout() { await db.auth.signOut(); location.reload(); }
 
 async function startApp() {
   $("app").style.display = "block";
-  $("bar-date").textContent = new Date().toLocaleDateString("mk-MK", { weekday: "short", day: "numeric", month: "short" });
+  $("bar-date").textContent = new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
   await refreshAll();
   tab("today");
   updatePushState();
@@ -260,7 +261,7 @@ function tab(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
   $("v-" + { today: "today", inv: "inv", off: "off", set: "set" }[name]).classList.add("on");
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-  $("bar-title").textContent = { today: "Денес", inv: "Лагер", off: "Понуди", set: "Опции" }[name];
+  $("bar-title").textContent = { today: "Today", inv: "Stock", off: "Offers", set: "Settings" }[name];
   $("fab").classList.toggle("on", ["today", "inv", "off"].includes(name));
   render();
 }
@@ -280,7 +281,7 @@ function openSheet(html) { $("sheet").innerHTML = '<div class="grab"></div>' + h
 function closeSheet() { $("sheet").classList.remove("on"); $("overlay").classList.remove("on"); setTimeout(() => { $("sheet").style.display = "none"; }, 220); }
 
 /* ============================================================
-   ЗАДАЧИ
+   TASKS
 ============================================================ */
 function occursOn(t, dateStr) {
   const d = new Date(dateStr + "T12:00");
@@ -294,7 +295,7 @@ function isDoneOn(t, dateStr) { return t.recurrence ? t.last_done === dateStr : 
 function renderToday() {
   const today = todayStr();
   $("ctx-filter").innerHTML = ["all", "work", "elaks", "personal"].map((c) =>
-    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "Сите" : CTX[c]}</button>`).join("");
+    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("");
   const vis = (t) => state.ctxFilter === "all" || t.context === state.ctxFilter;
 
   const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done);
@@ -302,9 +303,9 @@ function renderToday() {
 
   let html = "";
   if (overdue.length) {
-    html += '<div class="sec" style="color:var(--danger)">Задоцнети</div>' + overdue.map(taskRow(today)).join("");
+    html += '<div class="sec" style="color:var(--danger)">Overdue</div>' + overdue.map(taskRow(today)).join("");
   }
-  html += todays.length ? todays.map(taskRow(today)).join("") : '<div class="empty">Нема задачи за денес.<br>Додај со +</div>';
+  html += todays.length ? todays.map(taskRow(today)).join("") : '<div class="empty">No tasks for today.<br>Add with +</div>';
   $("today-list").innerHTML = html;
 
   // week
@@ -314,16 +315,16 @@ function renderToday() {
     const ds = d.toLocaleDateString("sv-SE");
     const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds));
     if (!list.length) continue;
-    week += `<div class="sec">${d.toLocaleDateString("mk-MK", { weekday: "long", day: "numeric", month: "short" })}</div>` +
+    week += `<div class="sec">${d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}</div>` +
       list.map((t) => `<div class="card task"><span class="led ${t.context}"></span><span class="t-title">${esc(t.title)}</span>
         ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
   }
-  $("week-list").innerHTML = week || '<div class="empty">Ништо закажано.</div>';
+  $("week-list").innerHTML = week || '<div class="empty">Nothing scheduled.</div>';
 }
 const taskRow = (today) => (t) => {
   const done = isDoneOn(t, today);
   return `<div class="card task ${done ? "done" : ""}">
-    <button class="tick" onclick="toggleTask('${t.id}')" aria-label="заврши">${done ? "✓" : ""}</button>
+    <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
     <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
       ${t.recurrence ? '<span class="rec"> ↻</span>' : ""}</span>
@@ -341,29 +342,29 @@ async function toggleTask(id) {
 function openTaskSheet(id) {
   const t = id ? state.tasks.find((x) => x.id === id) : { context: "work", due_date: todayStr() };
   openSheet(`
-    <h2>${id ? "Уреди задача" : "Нова задача"}</h2>
-    <label>Наслов</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="пр. Стендап · Нарачај камери">
-    <label>Контекст</label>
+    <h2>${id ? "Edit task" : "New task"}</h2>
+    <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras">
+    <label>Context</label>
     <div class="chips" id="tk-ctx">${Object.keys(CTX).map((c) =>
       `<button class="chip ${t.context === c ? "on" : ""}" data-c="${c}"
         onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${CTX[c]}</button>`).join("")}</div>
     <div class="grid2">
-      <div><label>Датум</label><input id="tk-date" type="date" value="${t.due_date || todayStr()}"></div>
-      <div><label>Време (опц.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}"></div>
+      <div><label>Date</label><input id="tk-date" type="date" value="${t.due_date || todayStr()}"></div>
+      <div><label>Time (opt.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}"></div>
     </div>
     <div class="grid2">
-      <div><label>Повторување</label>
+      <div><label>Repeat</label>
         <select id="tk-rec">
-          <option value="">Никогаш</option>
-          <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Секој ден</option>
-          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Неделно (тој ден)</option>
-          <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Месечно (тој датум)</option>
+          <option value="">Never</option>
+          <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Every day</option>
+          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Weekly (that day)</option>
+          <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Monthly (that date)</option>
         </select></div>
-      <div><label>Потсетник</label>
-        <select id="tk-rem"><option value="0">Не</option><option value="1" ${t.remind ? "selected" : ""}>Push во времето</option></select></div>
+      <div><label>Reminder</label>
+        <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
     </div>
-    <button class="btn" onclick="saveTask('${id || ""}')">Зачувај</button>
-    ${id ? `<button class="btn danger" onclick="delTask('${id}')">Избриши</button>` : ""}
+    <button class="btn" onclick="saveTask('${id || ""}')">Save</button>
+    ${id ? `<button class="btn danger" onclick="delTask('${id}')">Delete</button>` : ""}
   `);
 }
 async function saveTask(id) {
@@ -379,20 +380,20 @@ async function saveTask(id) {
     recur_dom: rec === "monthly" ? d.getDate() : null,
     remind: $("tk-rem").value === "1",
   };
-  if (!row.title) return toast("Внеси наслов");
+  if (!row.title) return toast("Enter a title");
   if (id) await db.from("tasks").update(row).eq("id", id);
   else await db.from("tasks").insert(row);
-  closeSheet(); await refreshAll(); renderToday(); toast("Зачувано");
+  closeSheet(); await refreshAll(); renderToday(); toast("Saved");
 }
 async function delTask(id) { await db.from("tasks").delete().eq("id", id); closeSheet(); await refreshAll(); renderToday(); }
 
 /* ============================================================
-   ЛАГЕР
+   STOCK
 ============================================================ */
 function stockLed(a) { return a.stock <= 0 ? "out" : (a.min_stock > 0 && a.stock <= a.min_stock ? "low" : "ok"); }
 function renderInv() {
   $("cat-filter").innerHTML = ["all", ...CATS].map((c) =>
-    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "Сите" : c}</button>`).join("");
+    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "All" : c}</button>`).join("");
   const q = ($("inv-search").value || "").toLowerCase();
   const list = state.stock.filter((a) =>
     (state.catFilter === "all" || a.category === state.catFilter) &&
@@ -401,64 +402,64 @@ function renderInv() {
     <div class="card art" onclick="openArticleDetail('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
       <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
-      <div class="a-qty">${fmt(a.stock)}<small>${a.unit}</small></div>
-    </div>`).join("") : '<div class="empty">Нема артикли.<br>Додај со +</div>';
+      <div class="a-qty">${fmt(a.stock)}<small>${unitLbl(a.unit)}</small></div>
+    </div>`).join("") : '<div class="empty">No articles.<br>Add with +</div>';
 }
 async function openArticleDetail(id) {
   const a = state.stock.find((x) => x.id === id);
   const { data: movs } = await db.from("movements").select("*").eq("article_id", id).order("created_at", { ascending: false }).limit(10);
   openSheet(`
     <h2>${esc(a.name)}</h2>
-    <p class="muted">${esc(a.category)} · ${esc(a.code || "без шифра")} · продажна ${fmt(a.sell_price)} ден.</p>
-    <div class="totalbar"><span>На лагер</span><span class="mono">${fmt(a.stock)} ${a.unit}</span></div>
+    <p class="muted">${esc(a.category)} · ${esc(a.code || "no code")} · sell price ${fmt(a.sell_price)} ден.</p>
+    <div class="totalbar"><span>In stock</span><span class="mono">${fmt(a.stock)} ${unitLbl(a.unit)}</span></div>
     <div class="grid2" style="margin-top:12px">
-      <button class="btn sm" style="width:100%" onclick="moveSheet('${id}','in')">+ Прием</button>
-      <button class="btn sm ghost" style="width:100%" onclick="moveSheet('${id}','out')">− Издавање</button>
+      <button class="btn sm" style="width:100%" onclick="moveSheet('${id}','in')">+ Stock in</button>
+      <button class="btn sm ghost" style="width:100%" onclick="moveSheet('${id}','out')">− Stock out</button>
     </div>
-    <div class="sec">Последни движења</div>
-    ${(movs || []).map((m) => `<div class="mov"><span>${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))} ${a.unit} ${esc(m.note || m.ref || "")}</span>
-      <span class="muted">${new Date(m.created_at).toLocaleDateString("mk-MK")}</span></div>`).join("") || '<p class="muted">Нема движења.</p>'}
-    <button class="btn ghost" onclick="openArticleSheet('${id}')">Уреди артикал</button>
+    <div class="sec">Recent movements</div>
+    ${(movs || []).map((m) => `<div class="mov"><span>${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))} ${unitLbl(a.unit)} ${esc(m.note || m.ref || "")}</span>
+      <span class="muted">${new Date(m.created_at).toLocaleDateString("mk-MK")}</span></div>`).join("") || '<p class="muted">No movements.</p>'}
+    <button class="btn ghost" onclick="openArticleSheet('${id}')">Edit article</button>
   `);
 }
 function moveSheet(id, type) {
   const a = state.stock.find((x) => x.id === id);
   openSheet(`
-    <h2>${type === "in" ? "Прием" : "Издавање"} — ${esc(a.name)}</h2>
-    <label>Количина (${a.unit})</label><input id="mv-qty" type="number" inputmode="decimal" min="0" step="any">
-    <label>Белешка (опц.)</label><input id="mv-note" placeholder="пр. набавка · објект Марковски">
-    <button class="btn ${type === "in" ? "" : "amber"}" onclick="saveMove('${id}','${type}')">Потврди</button>
+    <h2>${type === "in" ? "Stock in" : "Stock out"} — ${esc(a.name)}</h2>
+    <label>Quantity (${unitLbl(a.unit)})</label><input id="mv-qty" type="number" inputmode="decimal" min="0" step="any">
+    <label>Note (opt.)</label><input id="mv-note" placeholder="e.g. purchase · site Markovski">
+    <button class="btn ${type === "in" ? "" : "amber"}" onclick="saveMove('${id}','${type}')">Confirm</button>
   `);
   setTimeout(() => $("mv-qty").focus(), 250);
 }
 async function saveMove(id, type) {
   const qty = parseFloat($("mv-qty").value);
-  if (!qty || qty <= 0) return toast("Внеси количина");
+  if (!qty || qty <= 0) return toast("Enter a quantity");
   await db.from("movements").insert({ article_id: id, type, qty, note: $("mv-note").value.trim() || null });
-  closeSheet(); await refreshAll(); renderInv(); toast(type === "in" ? "Примено" : "Издадено");
+  closeSheet(); await refreshAll(); renderInv(); toast(type === "in" ? "Received" : "Issued");
 }
 function openArticleSheet(id) {
   const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
   openSheet(`
-    <h2>${id ? "Уреди артикал" : "Нов артикал"}</h2>
-    <label>Име</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="пр. 5MP Hikvision DS-2CE17K0T-LFS">
+    <h2>${id ? "Edit article" : "New article"}</h2>
+    <label>Name</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="e.g. 5MP Hikvision DS-2CE17K0T-LFS">
     <div class="grid2">
-      <div><label>Шифра</label><input id="ar-code" value="${esc(a.code || "")}"></div>
-      <div><label>Категорија</label><select id="ar-cat">${CATS.map((c) => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+      <div><label>Code</label><input id="ar-code" value="${esc(a.code || "")}"></div>
+      <div><label>Category</label><select id="ar-cat">${CATS.map((c) => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
     </div>
     <div class="grid2">
-      <div><label>Единица</label><select id="ar-unit"><option ${a.unit === "ком" ? "selected" : ""}>ком</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
-      <div><label>Мин. лагер</label><input id="ar-min" type="number" inputmode="decimal" value="${a.min_stock ?? 0}"></div>
+      <div><label>Unit</label><select id="ar-unit"><option value="ком" ${a.unit === "ком" ? "selected" : ""}>pcs</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
+      <div><label>Min. stock</label><input id="ar-min" type="number" inputmode="decimal" value="${a.min_stock ?? 0}"></div>
     </div>
     <div class="grid2">
-      <div><label>Набавна цена</label><input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}"></div>
-      <div><label>Продажна цена</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
+      <div><label>Purchase price</label><input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}"></div>
+      <div><label>Sell price</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
     </div>
-    <label>Добавувач</label><input id="ar-sup" value="${esc(a.supplier || "")}">
-    <label>Спецификации за понуда (секој ред почнува со --)</label>
+    <label>Supplier</label><input id="ar-sup" value="${esc(a.supplier || "")}">
+    <label>Specs for offers (each line starts with --)</label>
     <textarea id="ar-specs" rows="5" placeholder="-- 40m White Light&#10;-- 2.8 mm објектив">${esc(a.specs || "")}</textarea>
-    <button class="btn" onclick="saveArticle('${id || ""}')">Зачувај</button>
-    ${id ? `<button class="btn danger" onclick="delArticle('${id}')">Деактивирај</button>` : ""}
+    <button class="btn" onclick="saveArticle('${id || ""}')">Save</button>
+    ${id ? `<button class="btn danger" onclick="delArticle('${id}')">Deactivate</button>` : ""}
   `);
 }
 async function saveArticle(id) {
@@ -471,15 +472,15 @@ async function saveArticle(id) {
     supplier: $("ar-sup").value.trim() || null,
     specs: $("ar-specs").value.trim() || null,
   };
-  if (!row.name) return toast("Внеси име");
+  if (!row.name) return toast("Enter a name");
   if (id) await db.from("articles").update(row).eq("id", id);
   else await db.from("articles").insert(row);
-  closeSheet(); await refreshAll(); renderInv(); toast("Зачувано");
+  closeSheet(); await refreshAll(); renderInv(); toast("Saved");
 }
 async function delArticle(id) { await db.from("articles").update({ active: false }).eq("id", id); closeSheet(); await refreshAll(); renderInv(); }
 
 /* ============================================================
-   ПОНУДИ
+   OFFERS
 ============================================================ */
 let offerItems = [];
 function renderOffers() {
@@ -488,10 +489,10 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "без клиент")} · ${STATUS[o.status]}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
-    </div>`).join("") : '<div class="empty">Нема понуди.<br>Направи со +</div>';
+    </div>`).join("") : '<div class="empty">No offers.<br>Create with +</div>';
 }
 function nextOfferNumber() {
   const y = new Date().getFullYear();
@@ -505,33 +506,33 @@ function openOfferSheet(id) {
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
   openSheet(`
-    <h2>${id ? "Понуда " + o.number : "Нова понуда " + o.number}</h2>
-    <label>Наслов на системот</label><input id="of-title" value="${esc(o.title)}" placeholder="пр. 2 Камери + Аларм Систем">
-    <label>Опис (Систем:)</label><input id="of-system" value="${esc(o.system || "")}" placeholder="пр. 2 IP камери + DVR + Централа">
+    <h2>${id ? "Offer " + o.number : "New offer " + o.number}</h2>
+    <label>System title</label><input id="of-title" value="${esc(o.title)}" placeholder="e.g. 2 Камери + Аларм Систем">
+    <label>Description (Систем:)</label><input id="of-system" value="${esc(o.system || "")}" placeholder="e.g. 2 IP камери + DVR + Централа">
     <div class="grid2">
-      <div><label>Клиент</label><select id="of-client">
-        <option value="">— избери —</option>
+      <div><label>Client</label><select id="of-client">
+        <option value="">— select —</option>
         ${state.clients.map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
       </select></div>
-      <div><label>Датум</label><input id="of-date" type="date" value="${o.offer_date}"></div>
+      <div><label>Date</label><input id="of-date" type="date" value="${o.offer_date}"></div>
     </div>
     <div class="grid2">
-      <div><label>Важност (дена)</label><input id="of-val" type="number" value="${o.validity}"></div>
-      <div><label>Статус</label><select id="of-status">${Object.keys(STATUS).map((s) =>
+      <div><label>Validity (days)</label><input id="of-val" type="number" value="${o.validity}"></div>
+      <div><label>Status</label><select id="of-status">${Object.keys(STATUS).map((s) =>
         `<option value="${s}" ${o.status === s ? "selected" : ""}>${STATUS[s]}</option>`).join("")}</select></div>
     </div>
-    <div class="sec">Ставки</div>
-    <input id="of-search" placeholder="Барај артикал за додавање…" oninput="renderPicker()">
+    <div class="sec">Items</div>
+    <input id="of-search" placeholder="Search article to add…" oninput="renderPicker()">
     <div id="of-picker"></div>
-    <div class="ohead" style="margin-top:10px"><span>Име</span><span>Кол.</span><span>Цена</span><span>Вкупно</span><span></span></div>
+    <div class="ohead" style="margin-top:10px"><span>Name</span><span>Qty</span><span>Price</span><span>Total</span><span></span></div>
     <div id="of-items"></div>
-    <button class="btn sm ghost" onclick="addFreeItem()">+ Рачна ставка (монтажа…)</button>
-    <div class="totalbar"><span>Вкупно</span><span class="mono" id="of-total">0 ден.</span></div>
-    <label>Белешка кон вкупно</label><input id="of-note" value="${esc(o.total_note || "")}" placeholder="автоматски">
-    <button class="btn" onclick="saveOffer('${id || ""}')">Зачувај понуда</button>
-    <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Зачувај + Генерирај .docx</button>
-    ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Одземи од лагер</button>` : ""}
-    ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Избриши</button>` : ""}
+    <button class="btn sm ghost" onclick="addFreeItem()">+ Manual item (installation…)</button>
+    <div class="totalbar"><span>Total</span><span class="mono" id="of-total">0 ден.</span></div>
+    <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" placeholder="automatic">
+    <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
+    <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
+    ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
+    ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Delete</button>` : ""}
   `);
   renderOfferItems();
 }
@@ -542,7 +543,7 @@ function renderPicker() {
   $("of-picker").innerHTML = list.map((a) => `
     <div class="card art" onclick="addOfferItem('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
-      <div class="a-name"><b>${esc(a.name)}</b><span>лагер: ${fmt(a.stock)} ${a.unit} · ${fmt(a.sell_price)} ден.</span></div>
+      <div class="a-name"><b>${esc(a.name)}</b><span>stock: ${fmt(a.stock)} ${unitLbl(a.unit)} · ${fmt(a.sell_price)} ден.</span></div>
     </div>`).join("");
 }
 function addOfferItem(articleId) {
@@ -601,14 +602,14 @@ async function saveOffer(id, generate) {
     items: offerItems, total_note: $("of-note").value.trim() || null,
     grand_total: updateTotal(),
   };
-  if (!row.title) return toast("Внеси наслов");
-  if (!offerItems.length) return toast("Додај ставки");
+  if (!row.title) return toast("Enter a title");
+  if (!offerItems.length) return toast("Add items");
   let saved;
   if (id) { await db.from("offers").update(row).eq("id", id); saved = { ...row, id }; }
   else { const { data } = await db.from("offers").insert(row).select().single(); saved = data; }
   await refreshAll();
   if (generate) await generateDocx(saved, meters);
-  closeSheet(); renderOffers(); toast("Понудата е зачувана");
+  closeSheet(); renderOffers(); toast("Offer saved");
 }
 async function generateDocx(o, meters) {
   try {
@@ -635,43 +636,43 @@ async function generateDocx(o, meters) {
     a.href = URL.createObjectURL(blob);
     a.download = `Ponuda_${o.number}.docx`;
     a.click(); URL.revokeObjectURL(a.href);
-  } catch (e) { console.error(e); toast("Грешка при генерирање — провери го шаблонот"); }
+  } catch (e) { console.error(e); toast("Generation error — check the template"); }
 }
 async function deductStock(id) {
   const o = state.offers.find((x) => x.id === id);
   const rows = o.items.filter((it) => it.article_id && it.unit !== "m")
-    .map((it) => ({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Понуда " + o.number }));
+    .map((it) => ({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number }));
   if (rows.length) await db.from("movements").insert(rows);
   await db.from("offers").update({ stock_deducted: true }).eq("id", id);
-  closeSheet(); await refreshAll(); renderOffers(); toast("Одземено од лагер");
+  closeSheet(); await refreshAll(); renderOffers(); toast("Deducted from stock");
 }
 async function delOffer(id) { await db.from("offers").delete().eq("id", id); closeSheet(); await refreshAll(); renderOffers(); }
 
 /* ============================================================
-   КЛИЕНТИ + PUSH
+   CLIENTS + PUSH
 ============================================================ */
 function renderClients() {
   $("cli-list").innerHTML = state.clients.map((c) => `
     <div class="card row" onclick="openClientSheet('${c.id}')">
       <div style="flex:1"><b>${esc(c.name)}</b><div class="muted">${esc(c.contact || "")}</div></div>
-    </div>`).join("") || '<p class="muted">Нема клиенти.</p>';
+    </div>`).join("") || '<p class="muted">No clients.</p>';
 }
 function openClientSheet(id) {
   const c = id ? state.clients.find((x) => x.id === id) : {};
   openSheet(`
-    <h2>${id ? "Уреди клиент" : "Нов клиент"}</h2>
-    <label>Име / фирма</label><input id="cl-name" value="${esc(c.name || "")}">
-    <label>Контакт</label><input id="cl-contact" value="${esc(c.contact || "")}" placeholder="телефон / е-пошта">
-    <label>Белешка</label><input id="cl-note" value="${esc(c.note || "")}">
-    <button class="btn" onclick="saveClient('${id || ""}')">Зачувај</button>
+    <h2>${id ? "Edit client" : "New client"}</h2>
+    <label>Name / company</label><input id="cl-name" value="${esc(c.name || "")}">
+    <label>Contact</label><input id="cl-contact" value="${esc(c.contact || "")}" placeholder="phone / email">
+    <label>Note</label><input id="cl-note" value="${esc(c.note || "")}">
+    <button class="btn" onclick="saveClient('${id || ""}')">Save</button>
   `);
 }
 async function saveClient(id) {
   const row = { name: $("cl-name").value.trim(), contact: $("cl-contact").value.trim() || null, note: $("cl-note").value.trim() || null };
-  if (!row.name) return toast("Внеси име");
+  if (!row.name) return toast("Enter a name");
   if (id) await db.from("clients").update(row).eq("id", id);
   else await db.from("clients").insert(row);
-  closeSheet(); await refreshAll(); renderClients(); toast("Зачувано");
+  closeSheet(); await refreshAll(); renderClients(); toast("Saved");
 }
 
 function urlB64(s) {
@@ -680,22 +681,22 @@ function urlB64(s) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 async function updatePushState() {
-  if (!("Notification" in window)) { $("push-state").textContent = "Не е поддржано"; return; }
-  $("push-state").textContent = Notification.permission === "granted" ? "Вклучени на овој уред" : "Исклучени";
+  if (!("Notification" in window)) { $("push-state").textContent = "Not supported"; return; }
+  $("push-state").textContent = Notification.permission === "granted" ? "Enabled on this device" : "Disabled";
 }
 async function enablePush() {
   try {
     const perm = await Notification.requestPermission();
-    if (perm !== "granted") return toast("Дозволата е одбиена");
+    if (perm !== "granted") return toast("Permission denied");
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(CONFIG.VAPID_PUBLIC_KEY) });
     await db.from("push_subscriptions").upsert({ endpoint: sub.endpoint, sub: sub.toJSON() }, { onConflict: "endpoint" });
-    updatePushState(); toast("Известувањата се вклучени");
-  } catch (e) { console.error(e); toast("Грешка при вклучување"); }
+    updatePushState(); toast("Notifications enabled");
+  } catch (e) { console.error(e); toast("Error enabling push"); }
 }
 async function saveDigestHour() {
   await db.from("app_settings").update({ value: JSON.stringify($("digest-hour").value) }).eq("key", "digest_hour");
-  toast("Зачувано");
+  toast("Saved");
 }
 
 boot();
