@@ -346,7 +346,7 @@ function renderToday() {
     const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds));
     if (!list.length) continue;
     week += `<div class="sec">${d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}</div>` +
-      list.map((t) => `<div class="card task"><span class="led ${t.context}"></span><span class="t-title">${esc(t.title)}</span>
+      list.map((t) => `<div class="card task" onclick="openTaskSheet('${t.id}')"><span class="led ${t.context}"></span><span class="t-title">${esc(t.title)}</span>
         ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
   }
   $("week-list").innerHTML = week || '<div class="empty">Nothing scheduled.</div>';
