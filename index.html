@@ -264,7 +264,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [] };
+  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [] };
 
 async function dbq(q, failMsg) {
   const { data, error } = await q;
@@ -321,7 +321,7 @@ async function startApp() {
 }
 
 async function refreshAll() {
-  const [t, s, c, o, ap, st, bl] = await Promise.all([
+  const [t, s, c, o, ap, st, bl, ca] = await Promise.all([
     db.from("tasks").select("*").order("due_time", { ascending: true, nullsFirst: false }),
     db.from("article_stock").select("*").eq("active", true).order("name"),
     db.from("clients").select("*").order("name"),
@@ -329,10 +329,11 @@ async function refreshAll() {
     db.from("apartments").select("*").eq("active", true).order("name"),
     db.from("stays").select("*, apartments(name)").order("check_in", { ascending: false }),
     db.from("bills").select("*"),
+    db.from("elaks_cash").select("*").order("created_at", { ascending: false }),
   ]);
   state.tasks = t.data ?? []; state.stock = s.data ?? [];
   state.clients = c.data ?? []; state.offers = o.data ?? [];
-  state.apartments = ap.data ?? []; state.stays = st.data ?? []; state.bills = bl.data ?? [];
+  state.apartments = ap.data ?? []; state.stays = st.data ?? []; state.bills = bl.data ?? []; state.cash = ca.data ?? [];
 }
 
 /* ---------------- NAV ---------------- */
@@ -555,6 +556,8 @@ function renderInv() {
     <div class="row" style="justify-content:space-between"><span class="muted">Stock value (purchase)</span><b class="mono">${fmt(pv)} ден.</b></div>
     <div class="row" style="justify-content:space-between"><span class="muted">Stock value (sell)</span><b class="mono">${fmt(sv)} ден.</b></div>
     <div class="row" style="justify-content:space-between"><span class="muted">${state.stock.length} articles</span><b style="color:${lowN ? "var(--danger)" : "inherit"}">${lowN} low</b></div>
+    <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openCashSheet()">
+      <span class="muted">Cash register</span><b class="mono">${fmt(cashBal())} ден. ›</b></div>
   </div>`;
   $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
     <div class="card art" onclick="openArticleDetail('${a.id}')">
@@ -586,6 +589,13 @@ function moveSheet(id, type) {
     <h2>${type === "in" ? "Stock in" : "Stock out"} — ${esc(a.name)}</h2>
     <label>Quantity (${unitLbl(a.unit)})</label><input id="mv-qty" type="number" inputmode="decimal" min="0" step="any">
     <label>Note (opt.)</label><input id="mv-note" placeholder="e.g. purchase · site Markovski">
+    <div class="row" style="margin-top:12px">
+      <button class="clbox" id="mv-cash" onclick="mvCashToggle(${type === "in" ? (a.purchase_price || 0) : (a.sell_price || 0)})"></button>
+      <span>${type === "in" ? "Paid in cash — withdraw from register" : "Cash sale — add to register"}</span>
+    </div>
+    <div id="mv-cash-amt" style="display:none">
+      <label>Cash amount (ден.)</label><input id="mv-amt" type="number" inputmode="decimal" min="0" step="any">
+    </div>
     <button class="btn ${type === "in" ? "" : "amber"}" onclick="saveMove('${id}','${type}')">Confirm</button>
   `);
   setTimeout(() => $("mv-qty").focus(), 250);
@@ -593,8 +603,60 @@ function moveSheet(id, type) {
 async function saveMove(id, type) {
   const qty = parseFloat($("mv-qty").value);
   if (!qty || qty <= 0) return toast("Enter a quantity");
-  try { await dbq(db.from("movements").insert({ article_id: id, type, qty, note: $("mv-note").value.trim() || null }), "Movement not saved"); } catch { return; }
+  const cashOn = $("mv-cash").classList.contains("on");
+  const cashAmt = parseFloat($("mv-amt").value) || 0;
+  if (cashOn && cashAmt <= 0) return toast("Enter the cash amount");
+  const a = state.stock.find((x) => x.id === id);
+  try {
+    const mov = await dbq(db.from("movements").insert({ article_id: id, type, qty, note: $("mv-note").value.trim() || null }).select().single(), "Movement not saved");
+    if (cashOn) {
+      await dbq(db.from("elaks_cash").insert({
+        amount: (type === "out" ? 1 : -1) * cashAmt,
+        note: (type === "out" ? "Sale: " : "Purchase: ") + a.name,
+        movement_id: mov.id,
+      }), "Cash entry not saved");
+    }
+  } catch { return; }
   closeSheet(); await refreshAll(); renderInv(); toast(type === "in" ? "Received" : "Issued");
+}
+function mvCashToggle(unitPrice) {
+  const box = $("mv-cash");
+  const on = box.classList.toggle("on");
+  box.textContent = on ? "✓" : "";
+  $("mv-cash-amt").style.display = on ? "" : "none";
+  if (on && !$("mv-amt").value) {
+    const q = parseFloat($("mv-qty").value) || 0;
+    if (q && unitPrice) $("mv-amt").value = q * unitPrice;
+  }
+}
+const cashBal = () => sumBy(state.cash, (e) => parseFloat(e.amount) || 0);
+function openCashSheet() {
+  openSheet(`
+    <h2>Elaks cash register</h2>
+    <div class="totalbar"><span>Balance</span><span class="mono">${fmt(cashBal())} ден.</span></div>
+    <div class="grid2" style="margin-top:12px">
+      <button class="btn sm" style="width:100%" onclick="cashAdjustSheet(1)">+ Add cash</button>
+      <button class="btn sm ghost" style="width:100%" onclick="cashAdjustSheet(-1)">− Withdraw</button>
+    </div>
+    <div class="sec">Last entries</div>
+    ${state.cash.slice(0, 15).map((e) => `<div class="mov"><span>${(parseFloat(e.amount) || 0) >= 0 ? "+" : "−"}${fmt(Math.abs(e.amount))} ${esc(e.note || "")}</span><span class="muted">${new Date(e.created_at).toLocaleDateString("en-GB")}</span></div>`).join("") || '<p class="muted">No entries yet — add your starting amount with "+ Add cash".</p>'}
+  `);
+}
+function cashAdjustSheet(dir) {
+  openSheet(`
+    <h2>${dir > 0 ? "Add cash" : "Withdraw cash"}</h2>
+    <label>Amount (ден.)</label><input id="ch-amt" type="number" inputmode="decimal" min="0" step="any">
+    <label>Note (opt.)</label><input id="ch-note" placeholder="${dir > 0 ? "e.g. starting amount" : "e.g. to bank · supplier payment"}">
+    <button class="btn" onclick="saveCashAdjust(${dir})">Confirm</button>
+  `);
+  setTimeout(() => $("ch-amt").focus(), 250);
+}
+async function saveCashAdjust(dir) {
+  const amt = parseFloat($("ch-amt").value);
+  if (!amt || amt <= 0) return toast("Enter an amount");
+  try { await dbq(db.from("elaks_cash").insert({ amount: dir * amt, note: $("ch-note").value.trim() || null }), "Not saved"); } catch { return; }
+  closeSheet(); await refreshAll(); render();
+  setTimeout(openCashSheet, 240);
 }
 function openArticleSheet(id) {
   const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
