@@ -1093,8 +1093,8 @@ async function saveDigestHour() {
 /* ============================================================
    APARTMENTS (rental business)
 ============================================================ */
-const BILL_TYPES = ["electricity", "water", "internet", "building"];
-const BILL_LBL = { electricity: "Electricity", water: "Water", internet: "Internet", building: "Building" };
+const BILL_TYPES = ["electricity", "water", "internet", "building", "heating", "booking"];
+const BILL_LBL = { electricity: "Electricity", water: "Water", internet: "Internet", building: "Building", heating: "Heating", booking: "Booking" };
 const sumBy = (arr, f) => arr.reduce((a, x) => a + (parseFloat(f(x)) || 0), 0);
 
 function renderApt() {
@@ -1202,7 +1202,7 @@ function renderBills() {
     grand += total;
     html += `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
-        <span style="font-weight:600;color:${paidN === 4 ? "var(--personal)" : "var(--amber)"}">${paidN === 4 ? "✓ PAID" : paidN + "/4 paid"}</span></div>
+        <span style="font-weight:600;color:${paidN === BILL_TYPES.length ? "var(--personal)" : "var(--amber)"}">${paidN === BILL_TYPES.length ? "✓ PAID" : paidN + "/" + BILL_TYPES.length + " paid"}</span></div>
       ${rows.map(({ tp, b }) => `
         <div class="row" style="margin-top:7px">
           <button class="clbox ${b && b.paid ? "on" : ""}" onclick="setBill('${a.id}','${tp}','paid',${!(b && b.paid)})">${b && b.paid ? "✓" : ""}</button>
