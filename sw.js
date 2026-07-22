@@ -1,5 +1,5 @@
-const CACHE = "centrala-v2";
-const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./icon-192.png", "./icon-512.png"];
+const CACHE = "centrala-v3";
+const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./icon-192.png?v=3", "./icon-512.png?v=3"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -34,8 +34,8 @@ self.addEventListener("push", (e) => {
     self.registration.showNotification(data.title, {
       body: data.body,
       tag: data.tag,
-      icon: "./icon-192.png",
-      badge: "./icon-192.png",
+      icon: "./icon-192.png?v=3",
+      badge: "./icon-192.png?v=3",
       vibrate: [100, 50, 100],
     })
   );
