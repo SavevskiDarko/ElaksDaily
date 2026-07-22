@@ -1,4 +1,4 @@
-const CACHE = "elaks-ops-v1";
+const CACHE = "centrala-v2";
 const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -28,7 +28,7 @@ self.addEventListener("fetch", (e) => {
 });
 
 self.addEventListener("push", (e) => {
-  let data = { title: "Elaks Ops", body: "", tag: "general" };
+  let data = { title: "Centrala", body: "", tag: "general" };
   try { data = e.data.json(); } catch (_) {}
   e.waitUntil(
     self.registration.showNotification(data.title, {
