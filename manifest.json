@@ -1,6 +1,6 @@
 {
-  "name": "Elaks Ops",
-  "short_name": "Elaks Ops",
+  "name": "Centrala",
+  "short_name": "Centrala",
   "description": "Daily tasks, stock and offers",
   "start_url": "./",
   "display": "standalone",
