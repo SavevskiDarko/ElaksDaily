@@ -270,8 +270,8 @@ async function startApp() {
     const { data: { user } } = await db.auth.getUser();
     state.uid = user ? user.id : null;
     if (user) {
-      const { data: r } = await db.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
-      if (r && r.role) state.role = r.role;
+      const { data: r, error: rerr } = await db.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
+      if (!rerr) state.role = (r && r.role) || "employee";  // no role row = employee, same as the database assumes
     }
   } catch (e) { console.warn("role lookup", e); }
   await refreshAll();
