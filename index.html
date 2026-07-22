@@ -184,9 +184,11 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
         <div><b>Push notifications</b><div class="muted" id="push-state">—</div></div>
         <button class="btn sm amber" onclick="enablePush()">Enable</button>
       </div>
-      <label>Daily digest at</label>
-      <div class="row"><input id="digest-hour" type="time" value="07:30" style="flex:1">
-        <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
+      <div id="digest-block">
+        <label>Daily digest at</label>
+        <div class="row"><input id="digest-hour" type="time" value="07:30" style="flex:1">
+          <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
+      </div>
     </div>
     <div class="sec">Clients</div>
     <div id="cli-list"></div>
@@ -239,7 +241,7 @@ const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString("mk-MK");
 const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", tasks: [], stock: [], clients: [], offers: [] };
+let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, tasks: [], stock: [], clients: [], offers: [] };
 
 async function dbq(q, failMsg) {
   const { data, error } = await q;
@@ -263,11 +265,21 @@ async function logout() { await db.auth.signOut(); location.reload(); }
 async function startApp() {
   $("app").style.display = "block";
   $("bar-date").textContent = new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  try {
+    const { data: { user } } = await db.auth.getUser();
+    state.uid = user ? user.id : null;
+    if (user) {
+      const { data: r } = await db.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
+      if (r && r.role) state.role = r.role;
+    }
+  } catch (e) { console.warn("role lookup", e); }
   await refreshAll();
   tab("today");
   updatePushState();
-  const { data } = await db.from("app_settings").select("value").eq("key", "digest_hour").single();
-  if (data) $("digest-hour").value = String(data.value).replace(/"/g, "");
+  if (state.role === "owner") {
+    const { data } = await db.from("app_settings").select("value").eq("key", "digest_hour").maybeSingle();
+    if (data) $("digest-hour").value = String(data.value).replace(/"/g, "");
+  } else if ($("digest-block")) $("digest-block").style.display = "none";
 }
 
 async function refreshAll() {
@@ -321,7 +333,7 @@ function isDoneOn(t, dateStr) { return t.recurrence ? t.last_done === dateStr : 
 
 function renderToday() {
   const today = todayStr();
-  $("ctx-filter").innerHTML = ["all", "work", "elaks", "personal"].map((c) =>
+  $("ctx-filter").innerHTML = (state.role === "owner" ? ["all", "work", "elaks", "personal"] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("");
   const vis = (t) => state.ctxFilter === "all" || t.context === state.ctxFilter;
 
@@ -370,12 +382,12 @@ async function toggleTask(id) {
   Object.assign(t, upd); renderToday(); updateBadges();
 }
 function openTaskSheet(id) {
-  const t = id ? state.tasks.find((x) => x.id === id) : { context: "work", due_date: todayStr() };
+  const t = id ? state.tasks.find((x) => x.id === id) : { context: state.role === "employee" ? "elaks" : "work", due_date: todayStr() };
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
     <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras">
     <label>Context</label>
-    <div class="chips" id="tk-ctx">${Object.keys(CTX).map((c) =>
+    <div class="chips" id="tk-ctx">${(state.role === "owner" ? Object.keys(CTX) : ["elaks"]).map((c) =>
       `<button class="chip ${t.context === c ? "on" : ""}" data-c="${c}"
         onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${CTX[c]}</button>`).join("")}</div>
     <div class="grid2">
@@ -857,7 +869,7 @@ async function enablePush() {
     if (perm !== "granted") return toast("Permission denied");
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(CONFIG.VAPID_PUBLIC_KEY) });
-    await db.from("push_subscriptions").upsert({ endpoint: sub.endpoint, sub: sub.toJSON() }, { onConflict: "endpoint" });
+    await db.from("push_subscriptions").upsert({ endpoint: sub.endpoint, sub: sub.toJSON(), user_id: state.uid }, { onConflict: "endpoint" });
     updatePushState(); toast("Notifications enabled");
   } catch (e) { console.error(e); toast("Error enabling push"); }
 }
@@ -886,6 +898,7 @@ async function qcKey(ev) {
     else if (/^\d{1,2}:\d{2}$/.test(lw)) t.due_time = lw.padStart(5, "0");
     else t.title.push(w);
   }
+  if (state.role === "employee") t.context = "elaks";
   const row = { title: t.title.join(" "), context: t.context, due_date: t.due_date, due_time: t.due_time, remind: !!t.due_time };
   if (!row.title) return toast("Enter a title");
   try { await dbq(db.from("tasks").insert(row), "Task not saved"); } catch { return; }
