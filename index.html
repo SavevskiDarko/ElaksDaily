@@ -96,6 +96,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .task .t-title{flex:1;font-weight:500}
 .task .t-time{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
 .task .rec{font-size:11px;color:var(--muted)}
+.clbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center}
+.clbox.on{background:var(--personal);border-color:var(--personal)}
 
 /* ---- inventory ---- */
 .art{display:flex;align-items:center;gap:11px}
@@ -378,7 +380,7 @@ const taskRow = (today) => (t) => {
     <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
     <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
-      ${t.recurrence ? '<span class="rec"> ↻</span>' : ""}</span>
+      ${t.recurrence ? '<span class="rec"> ↻</span>' : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
     ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}
   </div>`;
 };
@@ -390,8 +392,10 @@ async function toggleTask(id) {
   try { await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated"); } catch { return; }
   Object.assign(t, upd); renderToday(); updateBadges();
 }
+let tkChecklist = [];
 function openTaskSheet(id) {
   const t = id ? state.tasks.find((x) => x.id === id) : { context: state.role === "owner" ? "work" : myCtx()[0], due_date: todayStr() };
+  tkChecklist = JSON.parse(JSON.stringify((t && t.checklist) || []));
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
     <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras">
@@ -414,10 +418,40 @@ function openTaskSheet(id) {
       <div><label>Reminder</label>
         <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
     </div>
+    <label>Checklist (opt.)</label>
+    <div id="tk-cl"></div>
+    <button class="btn sm ghost" onclick="clAdd('${id || ""}')">+ Add item</button>
     <label>Notes (opt.)</label><textarea id="tk-notes" rows="2">${esc(t.notes || "")}</textarea>
     <button class="btn" onclick="saveTask('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delTask('${id}')">Delete</button>` : ""}
   `);
+  renderCl(id || "");
+}
+function renderCl(id) {
+  $("tk-cl").innerHTML = tkChecklist.map((it, i) => `
+    <div class="row" style="margin-bottom:6px">
+      <button class="clbox ${it.done ? "on" : ""}" onclick="clToggle(${i}, '${id}')">${it.done ? "✓" : ""}</button>
+      <input value="${esc(it.text)}" placeholder="item…" oninput="tkChecklist[${i}].text = this.value"
+        style="flex:1;${it.done ? "text-decoration:line-through;color:var(--muted)" : ""}">
+      <button style="color:var(--danger);font-size:16px;padding:4px" onclick="tkChecklist.splice(${i}, 1); renderCl('${id}')">✕</button>
+    </div>`).join("");
+}
+async function clToggle(i, id) {
+  tkChecklist[i].done = !tkChecklist[i].done;
+  renderCl(id);
+  if (id) {  // existing task: persist the tick immediately
+    try {
+      await dbq(db.from("tasks").update({ checklist: tkChecklist }).eq("id", id), "Not saved");
+      const t = state.tasks.find((x) => x.id === id);
+      if (t) t.checklist = JSON.parse(JSON.stringify(tkChecklist));
+    } catch { tkChecklist[i].done = !tkChecklist[i].done; renderCl(id); }
+  }
+}
+function clAdd(id) {
+  tkChecklist.push({ text: "", done: false });
+  renderCl(id);
+  const inputs = $("tk-cl").querySelectorAll("input");
+  if (inputs.length) inputs[inputs.length - 1].focus();
 }
 async function saveTask(id) {
   const d = new Date($("tk-date").value + "T12:00");
@@ -432,6 +466,7 @@ async function saveTask(id) {
     recur_dom: rec === "monthly" ? d.getDate() : null,
     remind: $("tk-rem").value === "1",
     notes: $("tk-notes").value.trim() || null,
+    checklist: tkChecklist.filter((it) => it.text.trim()).length ? tkChecklist.filter((it) => it.text.trim()) : null,
   };
   if (!row.title) return toast("Enter a title");
   try { await dbq(id ? db.from("tasks").update(row).eq("id", id) : db.from("tasks").insert(row), "Task not saved"); } catch { return; }
