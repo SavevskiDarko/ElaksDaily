@@ -213,6 +213,11 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     </div>
     <button class="btn ghost" onclick="exportCsv('offers')">Offers</button>
     </div>
+    <div id="team-settings" style="display:none">
+      <div class="sec">Team</div>
+      <div id="team-list"></div>
+      <p class="muted" style="font-size:12.5px">Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.</p>
+    </div>
     <div class="sec">Account</div>
     <button class="btn ghost" onclick="logout()">Sign out</button>
     <p class="muted" style="margin-top:14px">Centrala · version 1.2</p>
@@ -248,8 +253,7 @@ const CONFIG = {
 const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const CTX = { work: "Work", elaks: "Elaks", personal: "Personal" };
-const ROLE_CTX = { owner: ["work", "elaks", "personal"], employee: ["elaks"], assistant: ["personal"] };
-const myCtx = () => ROLE_CTX[state.role] || ["elaks"];
+const myCtx = () => state.perm.owner ? ["work", "elaks", "personal"] : (state.perm.ctx || []);
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
 const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
 const unitLbl = (u) => u === "m" ? "m" : "pcs";
@@ -257,7 +261,8 @@ const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString("mk-MK");
 const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null,
+let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
+  perm: { owner: true, ctx: ["work", "elaks", "personal"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [] };
 
@@ -287,15 +292,25 @@ async function startApp() {
     const { data: { user } } = await db.auth.getUser();
     state.uid = user ? user.id : null;
     if (user) {
-      const { data: r, error: rerr } = await db.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
-      if (!rerr) state.role = (r && r.role) || "employee";  // no role row = employee, same as the database assumes
+      let { data: r, error: rerr } = await db.from("user_roles").select("*").eq("user_id", user.id).maybeSingle();
+      if (!rerr && !r) {  // first sign-in: register with zero access; owner grants from Team
+        await db.from("user_roles").insert({ user_id: user.id, role: "employee" });
+        r = { role: "employee", task_contexts: [], see_elaks: false, see_apts: false };
+      }
+      if (!rerr && r) {
+        state.role = r.role;
+        state.perm = r.role === "owner"
+          ? { owner: true, ctx: ["work", "elaks", "personal"], elaks: true, apts: true }
+          : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts };
+      }
     }
-    if (state.role !== "owner") { const ab = document.querySelector('[data-tab="apt"]'); if (ab) ab.style.display = "none"; }
-    if (state.role === "assistant") {
-      const eb = document.querySelector('[data-tab="elaks"]'); if (eb) eb.style.display = "none";
+    if (!state.perm.elaks) {
+      const b = document.querySelector('[data-tab="elaks"]'); if (b) b.style.display = "none";
       const bs = $("biz-settings"); if (bs) bs.style.display = "none";
     }
-  } catch (e) { console.warn("role lookup", e); }
+    if (!state.perm.apts) { const b = document.querySelector('[data-tab="apt"]'); if (b) b.style.display = "none"; }
+    if (state.perm.owner) loadTeam();
+  } catch (e) { console.warn("permission lookup", e); }
   await refreshAll();
   tab("today");
   updatePushState();
@@ -359,7 +374,7 @@ function isDoneOn(t, dateStr) { return t.recurrence ? t.last_done === dateStr : 
 
 function renderToday() {
   const today = todayStr();
-  $("ctx-filter").innerHTML = (state.role === "owner" ? ["all", "work", "elaks", "personal"] : []).map((c) =>
+  $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("");
   const vis = (t) => state.ctxFilter === "all" || t.context === state.ctxFilter;
 
@@ -409,13 +424,14 @@ async function toggleTask(id) {
 }
 let tkChecklist = [];
 function openTaskSheet(id) {
-  const t = id ? state.tasks.find((x) => x.id === id) : { context: state.role === "owner" ? "work" : myCtx()[0], due_date: todayStr() };
+  if (!id && !myCtx().length) return toast("No task access yet");
+  const t = id ? state.tasks.find((x) => x.id === id) : { context: myCtx()[0], due_date: todayStr() };
   tkChecklist = JSON.parse(JSON.stringify((t && t.checklist) || []));
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
     <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras">
     <label>Context</label>
-    <div class="chips" id="tk-ctx">${(state.role === "owner" ? Object.keys(CTX) : myCtx()).map((c) =>
+    <div class="chips" id="tk-ctx">${myCtx().map((c) =>
       `<button class="chip ${t.context === c ? "on" : ""}" data-c="${c}"
         onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${CTX[c]}</button>`).join("")}</div>
     <div class="grid2">
@@ -923,6 +939,71 @@ async function saveClient(id) {
   closeSheet(); await refreshAll(); renderClients(); toast("Saved");
 }
 
+async function loadTeam() {
+  const { data } = await db.from("user_roles").select("*").order("role");
+  state.team = data ?? [];
+  const ts = $("team-settings"); if (ts) ts.style.display = "";
+  renderTeam();
+}
+function permSummary(r) {
+  if (r.role === "owner") return "Owner · everything";
+  const parts = [];
+  if ((r.task_contexts || []).length) parts.push("Tasks: " + r.task_contexts.map((c) => CTX[c]).join(", "));
+  if (r.see_elaks) parts.push("Elaks");
+  if (r.see_apts) parts.push("Apts");
+  return parts.join(" · ") || "No access yet";
+}
+function renderTeam() {
+  $("team-list").innerHTML = state.team.map((r) => `
+    <div class="card row" ${r.role === "owner" ? "" : `onclick="openPermSheet('${r.user_id}')"`}>
+      <div style="flex:1"><b>${esc(r.display_name || "Unnamed")}</b>
+        <div class="muted">${permSummary(r)}</div></div>
+    </div>`).join("") || '<p class="muted">Only you so far.</p>';
+}
+let permDraft = null;
+function openPermSheet(uid) {
+  const r = state.team.find((x) => x.user_id === uid);
+  permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts };
+  openSheet(`
+    <h2>${esc(r.display_name || "Team member")}</h2>
+    <label>Display name</label><input id="pm-name" value="${esc(r.display_name || "")}">
+    <label>Task contexts they can see & create</label>
+    <div id="pm-ctx"></div>
+    <label>Businesses they can manage</label>
+    <div id="pm-biz"></div>
+    <button class="btn" onclick="savePerm('${uid}')">Save permissions</button>
+    <button class="btn danger" onclick="removePerm('${uid}')">Remove all access</button>
+  `);
+  renderPermBoxes();
+}
+function renderPermBoxes() {
+  $("pm-ctx").innerHTML = Object.keys(CTX).map((c) => `
+    <div class="row" style="margin-bottom:6px">
+      <button class="clbox ${permDraft.ctx.includes(c) ? "on" : ""}" onclick="permToggleCtx('${c}')">${permDraft.ctx.includes(c) ? "✓" : ""}</button>
+      <span>${CTX[c]} tasks</span></div>`).join("");
+  $("pm-biz").innerHTML = [["elaks", "Elaks (stock, offers, clients)"], ["apts", "Apartments (stays, bills)"]].map(([k, l]) => `
+    <div class="row" style="margin-bottom:6px">
+      <button class="clbox ${permDraft[k] ? "on" : ""}" onclick="permToggleBiz('${k}')">${permDraft[k] ? "✓" : ""}</button>
+      <span>${l}</span></div>`).join("");
+}
+function permToggleCtx(c) {
+  const i = permDraft.ctx.indexOf(c);
+  if (i >= 0) permDraft.ctx.splice(i, 1); else permDraft.ctx.push(c);
+  renderPermBoxes();
+}
+function permToggleBiz(k) { permDraft[k] = !permDraft[k]; renderPermBoxes(); }
+async function savePerm(uid) {
+  const row = { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
+    see_elaks: permDraft.elaks, see_apts: permDraft.apts };
+  try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), "Not saved"); } catch { return; }
+  closeSheet(); await loadTeam(); toast("Permissions saved");
+}
+async function removePerm(uid) {
+  if (!confirm("Remove all access for this person? Their login stays but they will see nothing.")) return;
+  try { await dbq(db.from("user_roles").update({ task_contexts: [], see_elaks: false, see_apts: false }).eq("user_id", uid), "Not saved"); } catch { return; }
+  closeSheet(); await loadTeam();
+}
+
 function urlB64(s) {
   const pad = "=".repeat((4 - (s.length % 4)) % 4);
   const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
@@ -1139,7 +1220,8 @@ async function qcKey(ev) {
     else if (/^\d{1,2}:\d{2}$/.test(lw)) t.due_time = lw.padStart(5, "0");
     else t.title.push(w);
   }
-  if (state.role !== "owner") t.context = myCtx()[0];
+  if (!myCtx().length) return toast("No task access yet");
+  if (!myCtx().includes(t.context)) t.context = myCtx()[0];
   const row = { title: t.title.join(" "), context: t.context, due_date: t.due_date, due_time: t.due_time, remind: !!t.due_time };
   if (!row.title) return toast("Enter a title");
   try { await dbq(db.from("tasks").insert(row), "Task not saved"); } catch { return; }
