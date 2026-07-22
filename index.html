@@ -165,18 +165,23 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <button class="btn ghost" onclick="openHistory()">Completed tasks →</button>
   </div>
 
-  <!-- STOCK -->
-  <div class="view" id="v-inv">
-    <input class="search" id="inv-search" placeholder="Search article…" oninput="renderInv()">
-    <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
-    <div id="inv-list"></div>
-  </div>
-
-  <!-- OFFERS -->
-  <div class="view" id="v-off">
-    <input class="search" id="off-search" placeholder="Search offers…" oninput="renderOffers()">
-    <div class="chips" id="off-filter" style="margin-bottom:12px"></div>
-    <div id="off-list"></div>
+  <!-- ELAKS BUSINESS -->
+  <div class="view" id="v-elaks">
+    <div class="chips" id="elaks-tabs" style="margin-bottom:12px"></div>
+    <div id="el-body-inv">
+      <input class="search" id="inv-search" placeholder="Search article…" oninput="renderInv()">
+      <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
+      <div id="inv-list"></div>
+    </div>
+    <div id="el-body-off" style="display:none">
+      <input class="search" id="off-search" placeholder="Search offers…" oninput="renderOffers()">
+      <div class="chips" id="off-filter" style="margin-bottom:12px"></div>
+      <div id="off-list"></div>
+    </div>
+    <div id="el-body-cli" style="display:none">
+      <div id="cli-list"></div>
+      <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
+    </div>
   </div>
 
   <!-- APARTMENTS -->
@@ -201,9 +206,6 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       </div>
     </div>
     <div id="biz-settings">
-    <div class="sec">Clients</div>
-    <div id="cli-list"></div>
-    <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
     <div class="sec">Export (CSV)</div>
     <div class="grid2">
       <button class="btn sm ghost" style="width:100%" onclick="exportCsv('articles')">Articles</button>
@@ -219,9 +221,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   <button class="fab" id="fab" onclick="fabClick()">+</button>
 
   <div class="tabbar">
-    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Today<span class="bdg" id="bdg-today"></span></button>
-    <button data-tab="inv" onclick="tab('inv')"><span class="led"></span>Stock<span class="bdg" id="bdg-inv"></span></button>
-    <button data-tab="off" onclick="tab('off')"><span class="led"></span>Offers</button>
+    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Tasks<span class="bdg" id="bdg-today"></span></button>
+    <button data-tab="elaks" onclick="tab('elaks')"><span class="led"></span>Elaks<span class="bdg" id="bdg-elaks"></span></button>
     <button data-tab="apt" onclick="tab('apt')"><span class="led"></span>Apts</button>
     <button data-tab="set" onclick="tab('set')"><span class="led"></span>Settings</button>
   </div>
@@ -257,7 +258,7 @@ const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD loc
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null,
-  aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
+  elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [] };
 
 async function dbq(q, failMsg) {
@@ -291,7 +292,7 @@ async function startApp() {
     }
     if (state.role !== "owner") { const ab = document.querySelector('[data-tab="apt"]'); if (ab) ab.style.display = "none"; }
     if (state.role === "assistant") {
-      ["inv", "off"].forEach((n) => { const b = document.querySelector(`[data-tab="${n}"]`); if (b) b.style.display = "none"; });
+      const eb = document.querySelector('[data-tab="elaks"]'); if (eb) eb.style.display = "none";
       const bs = $("biz-settings"); if (bs) bs.style.display = "none";
     }
   } catch (e) { console.warn("role lookup", e); }
@@ -323,25 +324,22 @@ async function refreshAll() {
 function tab(name) {
   state.tab = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
-  $("v-" + { today: "today", inv: "inv", off: "off", apt: "apt", set: "set" }[name]).classList.add("on");
+  $("v-" + { today: "today", elaks: "elaks", apt: "apt", set: "set" }[name]).classList.add("on");
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-  $("bar-title").textContent = { today: "Today", inv: "Stock", off: "Offers", apt: "Apartments", set: "Settings" }[name];
-  $("fab").classList.toggle("on", ["today", "inv", "off", "apt"].includes(name));
+  $("bar-title").textContent = { today: "Tasks", elaks: "Elaks", apt: "Apartments", set: "Settings" }[name];
+  $("fab").classList.toggle("on", ["today", "elaks", "apt"].includes(name));
   render();
 }
 function fabClick() {
   if (state.tab === "today") openTaskSheet();
-  else if (state.tab === "inv") openArticleSheet();
-  else if (state.tab === "off") openOfferSheet();
+  else if (state.tab === "elaks") (state.elaksView === "off" ? openOfferSheet() : state.elaksView === "cli" ? openClientSheet() : openArticleSheet());
   else if (state.tab === "apt") (state.aptView === "apartments" ? openAptSheet() : openStaySheet());
 }
 function render() {
   updateBadges();
   if (state.tab === "today") renderToday();
-  if (state.tab === "inv") renderInv();
-  if (state.tab === "off") renderOffers();
+  if (state.tab === "elaks") renderElaks();
   if (state.tab === "apt") renderApt();
-  if (state.tab === "set") renderClients();
 }
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2200); }
 function openSheet(html) { $("sheet").innerHTML = '<div class="grab"></div>' + html; $("overlay").classList.add("on"); requestAnimationFrame(() => $("sheet").classList.add("on")); $("sheet").style.display = "block"; }
@@ -630,6 +628,16 @@ async function delArticle(id) {
    OFFERS
 ============================================================ */
 let offerItems = [];
+function renderElaks() {
+  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["cli", "Clients"]].map(([v, l]) =>
+    `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
+  $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
+  $("el-body-off").style.display = state.elaksView === "off" ? "" : "none";
+  $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
+  if (state.elaksView === "inv") renderInv();
+  else if (state.elaksView === "off") renderOffers();
+  else renderClients();
+}
 function renderOffers() {
   $("off-filter").innerHTML = ["all", ...Object.keys(STATUS)].map((s) =>
     `<button class="chip ${state.offStatus === s ? "on" : ""}" onclick="state.offStatus='${s}';renderOffers()">${s === "all" ? "All" : STATUS[s]}</button>`).join("");
@@ -1145,7 +1153,7 @@ function updateBadges() {
     (!t.recurrence && t.due_date && t.due_date < today && !t.done)).length;
   const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
   const set = (name, v) => { const e = $("bdg-" + name); if (e) { e.textContent = v; e.classList.toggle("on", v > 0); } };
-  set("today", n); set("inv", low);
+  set("today", n); set("elaks", low);
 }
 
 async function exportCsv(kind) {
