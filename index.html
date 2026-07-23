@@ -951,7 +951,7 @@ async function generateDocx(o) {
         const b64 = (r.data || "").split(",")[1];
         if (!b64) continue;
         const d = await imgDims(r.data);
-        const MAXW = 95, MAXH = 78;
+        const MAXW = 120, MAXH = 95;
         let w = MAXW, h = Math.round(MAXW * d.h / d.w);
         if (h > MAXH) { h = MAXH; w = Math.round(MAXH * d.w / d.h); }
         b64Of[r.article_id] = b64;
@@ -962,7 +962,7 @@ async function generateDocx(o) {
     if (sizes.size) mods.push(new window.ImageModule({
       centered: false,
       getImage: (tag) => { const bin = atob(tag); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; },
-      getSize: (img, tag) => sizes.get(tag) || [95, 70],
+      getSize: (img, tag) => sizes.get(tag) || [120, 90],
     }));
     const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true, modules: mods });
     const client = state.clients.find((c) => c.id === o.client_id);
@@ -970,6 +970,10 @@ async function generateDocx(o) {
       title: o.title, system: o.system || "",
       offer_number: o.number, date: new Date(o.offer_date).toLocaleDateString("mk-MK"),
       client: client ? client.name : "", validity: o.validity,
+      client_contact: client ? (client.contact || "") : "",
+      client_phone: client ? (client.phone || "") : "",
+      client_address: client ? (client.address || "") : "",
+      client_email: client ? (client.email || "") : "",
       items: o.items.map((it, i) => ({
         num: i + 1, name: it.name, specs: it.specs || "",
         qty: it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0)),
@@ -1079,7 +1083,12 @@ function openClientSheet(id) {
   openSheet(`
     <h2>${id ? "Edit client" : "New client"}</h2>
     <label>Name / company</label><input id="cl-name" value="${esc(c.name || "")}">
-    <label>Contact</label><input id="cl-contact" value="${esc(c.contact || "")}" placeholder="phone / email">
+    <label>Contact person</label><input id="cl-contact" value="${esc(c.contact || "")}">
+    <div class="grid2">
+      <div><label>Phone</label><input id="cl-phone" value="${esc(c.phone || "")}"></div>
+      <div><label>E-mail</label><input id="cl-email" value="${esc(c.email || "")}"></div>
+    </div>
+    <label>Address</label><input id="cl-address" value="${esc(c.address || "")}">
     <label>Note</label><input id="cl-note" value="${esc(c.note || "")}">
     <button class="btn" onclick="saveClient('${id || ""}')">Save</button>
     ${id ? '<div class="sec">Offers</div>' + (state.offers.filter((o) => o.client_id === id).map((o) =>
@@ -1087,7 +1096,9 @@ function openClientSheet(id) {
   `);
 }
 async function saveClient(id) {
-  const row = { name: $("cl-name").value.trim(), contact: $("cl-contact").value.trim() || null, note: $("cl-note").value.trim() || null };
+  const row = { name: $("cl-name").value.trim(), contact: $("cl-contact").value.trim() || null,
+    phone: $("cl-phone").value.trim() || null, email: $("cl-email").value.trim() || null,
+    address: $("cl-address").value.trim() || null, note: $("cl-note").value.trim() || null };
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("clients").update(row).eq("id", id) : db.from("clients").insert(row), "Client not saved"); } catch { return; }
   closeSheet(); await refreshAll(); renderClients(); toast("Saved");
