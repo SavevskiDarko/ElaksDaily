@@ -131,6 +131,22 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.on{opacity:1}
 .search{margin-bottom:10px}
+#loadbar{background:#FBE9EC;color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
+  align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+#loadbar button{font-weight:700;text-decoration:underline;flex:none}
+.hcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.hcard h3{font-family:var(--cond);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
+.hrow{display:flex;justify-content:space-between;align-items:center;padding:3px 0}
+.hrow b{font-family:var(--mono)}
+.hbig{font-size:26px;font-weight:700;font-family:var(--cond)}
+.hflag{color:var(--danger);font-weight:600}
+.hok{color:var(--personal);font-weight:600}
+.cal-apt{font-weight:600;margin:12px 0 5px}
+.cal-row{display:flex;gap:3px;overflow-x:auto;padding-bottom:4px}
+.cal-d{width:26px;height:32px;flex:none;border-radius:7px;background:var(--line);color:var(--muted);
+  font-size:10.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1}
+.cal-d.bk{background:var(--personal);color:#fff}
+.cal-d.we{outline:1px solid var(--line)}
 
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
@@ -189,11 +205,16 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
 <!-- ================= APP ================= -->
 <div id="app" style="display:none">
-  <div class="topbar"><h1 id="bar-title">Today</h1><span class="date" id="bar-date"></span></div>
+  <div class="topbar"><h1 id="bar-title">Home</h1><span class="date" id="bar-date"></span></div>
+  <div id="loadbar" style="display:none"><span id="loadmsg">Could not load data.</span><button onclick="retryLoad()">Retry</button></div>
+
+  <!-- HOME -->
+  <div class="view on" id="v-home"><div id="home-body"></div></div>
 
   <!-- TODAY -->
   <div class="view" id="v-today">
     <input class="search" id="qc" placeholder="Quick add: Order cameras tomorrow 14:00 #elaks" onkeydown="qcKey(event)">
+    <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
     <div class="sec">Next 7 days</div>
@@ -249,6 +270,19 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     </div>
     <button class="btn ghost" onclick="exportCsv('offers')">Offers</button>
     </div>
+    <div id="apts-settings" style="display:none">
+      <div class="sec">Apartment bills</div>
+      <div class="card">
+        <label>Remind me about unpaid bills from day</label>
+        <div class="row"><input id="bills-day" type="number" min="1" max="28" value="5" style="flex:1">
+          <button class="btn sm" onclick="saveBillsDay()">Save</button></div>
+      </div>
+    </div>
+    <div id="data-settings" style="display:none">
+      <div class="sec">Backup</div>
+      <button class="btn ghost" onclick="backupJson()">Download full backup (JSON)</button>
+      <p class="muted" style="font-size:12.5px">Download once a month and keep it somewhere safe — it contains every task, article, offer, guest and bill.</p>
+    </div>
     <div id="team-settings" style="display:none">
       <div class="sec">Team</div>
       <div id="team-list"></div>
@@ -262,7 +296,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   <button class="fab" id="fab" onclick="fabClick()">+</button>
 
   <div class="tabbar">
-    <button data-tab="today" class="on" onclick="tab('today')"><span class="led"></span>Tasks<span class="bdg" id="bdg-today"></span></button>
+    <button data-tab="home" class="on" onclick="tab('home')"><span class="led"></span>Home</button>
+    <button data-tab="today" onclick="tab('today')"><span class="led"></span>Tasks<span class="bdg" id="bdg-today"></span></button>
     <button data-tab="elaks" onclick="tab('elaks')"><span class="led"></span>Elaks<span class="bdg" id="bdg-elaks"></span></button>
     <button data-tab="apt" onclick="tab('apt')"><span class="led"></span>Apts</button>
     <button data-tab="set" onclick="tab('set')"><span class="led"></span>Settings</button>
@@ -348,13 +383,20 @@ async function startApp() {
     }
     if (!state.perm.apts) { const b = document.querySelector('[data-tab="apt"]'); if (b) b.style.display = "none"; }
     if (state.perm.owner) loadTeam();
+    if (state.perm.owner && $("apts-settings")) $("apts-settings").style.display = "";
+    if (state.perm.owner && $("data-settings")) $("data-settings").style.display = "";
   } catch (e) { console.warn("permission lookup", e); }
   await refreshAll();
-  tab("today");
+  tab("home");
   updatePushState();
   if (state.role === "owner") {
-    const { data } = await db.from("app_settings").select("value").eq("key", "digest_hour").maybeSingle();
-    if (data) $("digest-hour").value = String(data.value).replace(/"/g, "");
+    try {
+      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day"]);
+      for (const r of data || []) {
+        if (r.key === "digest_hour") $("digest-hour").value = String(r.value).replace(/"/g, "");
+        if (r.key === "bills_day" && $("bills-day")) $("bills-day").value = String(r.value).replace(/"/g, "");
+      }
+    } catch (e) { console.warn("settings", e); }
   } else if ($("digest-block")) $("digest-block").style.display = "none";
 }
 
@@ -369,18 +411,28 @@ async function refreshAll() {
     db.from("bills").select("*"),
     db.from("elaks_cash").select("*").order("created_at", { ascending: false }),
   ]);
-  state.tasks = t.data ?? []; state.stock = s.data ?? [];
-  state.clients = c.data ?? []; state.offers = o.data ?? [];
-  state.apartments = ap.data ?? []; state.stays = st.data ?? []; state.bills = bl.data ?? []; state.cash = ca.data ?? [];
+  const results = { tasks: t, stock: s, clients: c, offers: o, apartments: ap, stays: st, bills: bl, cash: ca };
+  const failed = Object.entries(results).filter(([, r]) => r.error).map(([k]) => k);
+  if (failed.length) {
+    console.error("load errors", results);
+    $("loadmsg").textContent = "Could not load: " + failed.join(", ") + ". Data shown may be incomplete.";
+    $("loadbar").style.display = "flex";
+  } else $("loadbar").style.display = "none";
+  const keep = (res, cur) => res.error ? cur : (res.data ?? []);
+  state.tasks = keep(t, state.tasks); state.stock = keep(s, state.stock);
+  state.clients = keep(c, state.clients); state.offers = keep(o, state.offers);
+  state.apartments = keep(ap, state.apartments); state.stays = keep(st, state.stays);
+  state.bills = keep(bl, state.bills); state.cash = keep(ca, state.cash);
 }
 
 /* ---------------- NAV ---------------- */
+async function retryLoad() { await refreshAll(); render(); }
 function tab(name) {
   state.tab = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
-  $("v-" + { today: "today", elaks: "elaks", apt: "apt", set: "set" }[name]).classList.add("on");
+  $("v-" + { home: "home", today: "today", elaks: "elaks", apt: "apt", set: "set" }[name]).classList.add("on");
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-  $("bar-title").textContent = { today: "Tasks", elaks: "Elaks", apt: "Apartments", set: "Settings" }[name];
+  $("bar-title").textContent = { home: "Home", today: "Tasks", elaks: "Elaks", apt: "Apartments", set: "Settings" }[name];
   $("fab").classList.toggle("on", ["today", "elaks", "apt"].includes(name));
   render();
 }
@@ -391,6 +443,7 @@ function fabClick() {
 }
 function render() {
   updateBadges();
+  if (state.tab === "home") renderHome();
   if (state.tab === "today") renderToday();
   if (state.tab === "elaks") renderElaks();
   if (state.tab === "apt") renderApt();
@@ -413,6 +466,18 @@ function isDoneOn(t, dateStr) { return t.recurrence ? t.last_done === dateStr : 
 
 function renderToday() {
   const today = todayStr();
+  const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
+  if (q) {
+    const hits = state.tasks.filter((t) =>
+      (t.title || "").toLowerCase().includes(q) || (t.notes || "").toLowerCase().includes(q) ||
+      (t.checklist || []).some((c) => (c.text || "").toLowerCase().includes(q)));
+    $("ctx-filter").innerHTML = "";
+    $("today-list").innerHTML = hits.length
+      ? `<div class="sec">${hits.length} result${hits.length > 1 ? "s" : ""}</div>` + hits.map(taskRow(today)).join("")
+      : '<div class="empty">Nothing found.</div>';
+    $("week-list").innerHTML = "";
+    return;
+  }
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("");
   const vis = (t) => state.ctxFilter === "all" || t.context === state.ctxFilter;
@@ -607,10 +672,15 @@ function renderInv() {
 }
 async function openArticleDetail(id) {
   const a = state.stock.find((x) => x.id === id);
-  const [{ data: movs }, { data: imgRow }] = await Promise.all([
-    db.from("movements").select("*").eq("article_id", id).order("created_at", { ascending: false }).limit(10),
-    db.from("article_images").select("data").eq("article_id", id).maybeSingle(),
-  ]);
+  let movs = [], imgRow = null;
+  try {
+    const [mv, ir] = await Promise.all([
+      db.from("movements").select("*").eq("article_id", id).order("created_at", { ascending: false }).limit(10),
+      db.from("article_images").select("data").eq("article_id", id).maybeSingle(),
+    ]);
+    if (mv.error || ir.error) toast("Some details could not be loaded");
+    movs = mv.data || []; imgRow = ir.data || null;
+  } catch (e) { console.error(e); toast("Could not load article details"); }
   openSheet(`
     <h2>${esc(a.name)}</h2>
     <p class="muted">${esc(a.category)} · ${esc(a.code || "no code")} · sell price ${fmt(a.sell_price)} ден.</p>
@@ -822,7 +892,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
     </div>`).join("") : '<div class="empty">No offers.<br>Create with +</div>';
@@ -1200,7 +1270,8 @@ async function saveClient(id) {
 }
 
 async function loadTeam() {
-  const { data } = await db.from("user_roles").select("*").order("role");
+  const { data, error } = await db.from("user_roles").select("*").order("role");
+  if (error) { console.error(error); toast("Could not load the team list"); return; }
   state.team = data ?? [];
   const ts = $("team-settings"); if (ts) ts.style.display = "";
   renderTeam();
@@ -1283,6 +1354,32 @@ async function enablePush() {
     updatePushState(); toast("Notifications enabled");
   } catch (e) { console.error(e); toast("Error enabling push"); }
 }
+async function saveBillsDay() {
+  const d = Math.min(28, Math.max(1, parseInt($("bills-day").value) || 5));
+  try { await dbq(db.from("app_settings").upsert({ key: "bills_day", value: String(d) }, { onConflict: "key" }), "Not saved"); } catch { return; }
+  toast("Saved");
+}
+async function backupJson() {
+  toast("Preparing backup…");
+  const tables = ["tasks", "articles", "article_images", "movements", "clients", "offers",
+                  "apartments", "stays", "bills", "elaks_cash", "user_roles", "app_settings"];
+  const out = { app: "Centrala", version: 1, exported_at: new Date().toISOString(), data: {} };
+  const missed = [];
+  for (const t of tables) {
+    try {
+      const { data, error } = await db.from(t).select("*");
+      if (error) { missed.push(t); continue; }
+      out.data[t] = data || [];
+    } catch { missed.push(t); }
+  }
+  const blob = new Blob([JSON.stringify(out)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "centrala-backup-" + todayStr() + ".json";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  toast(missed.length ? "Backup saved (skipped: " + missed.join(", ") + ")" : "Backup downloaded");
+}
 async function saveDigestHour() {
   try { await dbq(db.from("app_settings").update({ value: $("digest-hour").value }).eq("key", "digest_hour"), "Not saved"); } catch { return; }
   toast("Saved");
@@ -1316,13 +1413,42 @@ function renderApt() {
     <div class="row" style="justify-content:space-between"><span class="muted">All-time cash (incl. starting amounts)</span>
       <span class="mono"><b>${fmt(incAll)}</b> ден.</span></div>
   </div>`;
-  $("apt-tabs").innerHTML = [["stays", "Stays"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
+  $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
   if (state.aptView === "stays") renderStays();
+  else if (state.aptView === "calendar") renderCalendar();
   else if (state.aptView === "bills") renderBills();
   else renderAptList();
 }
 
+function renderCalendar() {
+  if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
+  const [y, m] = state.aptMonth.split("-").map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const today = todayStr();
+  let html = `<div class="row" style="justify-content:center;gap:18px;margin-bottom:6px">
+    <button class="chip" onclick="shiftAptMonth(-1)">‹</button><b>${label}</b>
+    <button class="chip" onclick="shiftAptMonth(1)">›</button></div>
+    <p class="muted" style="margin-bottom:4px">Tap a free day to book it, a booked day to open the stay.</p>`;
+  for (const a of state.apartments) {
+    const mine = state.stays.filter((s) => s.apartment_id === a.id);
+    let cells = "";
+    for (let d = 1; d <= days; d++) {
+      const ds = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const st = mine.find((s) => s.check_in <= ds && s.check_out > ds);
+      const dow = new Date(ds + "T12:00").getDay();
+      const cls = "cal-d" + (st ? " bk" : "") + (dow === 0 || dow === 6 ? " we" : "");
+      const act = st ? `openStaySheet('${st.id}')` : `openStaySheet(null, { apartment_id: '${a.id}', check_in: '${ds}' })`;
+      const mark = ds === today ? "•" : (st ? esc((st.guest_name || "?").trim().charAt(0).toUpperCase()) : "");
+      cells += `<button class="${cls}" onclick="${act}" title="${st ? esc(st.guest_name) : "free"}">${d}<span>${mark}</span></button>`;
+    }
+    const booked = mine.filter((s) => (s.check_in || "").slice(0, 7) <= state.aptMonth && (s.check_out || "") > state.aptMonth + "-01").length;
+    html += `<div class="cal-apt">${esc(a.name)} <span class="muted" style="font-weight:400">· ${booked} stay(s)</span></div>
+      <div class="cal-row">${cells}</div>`;
+  }
+  $("apt-body").innerHTML = html;
+}
 function stayRow(s) {
   return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
@@ -1342,8 +1468,9 @@ function renderStays() {
   html += '<div class="sec">Past</div>' + (past.slice(0, 30).map(stayRow).join("") || '<p class="muted">No past stays.</p>');
   $("apt-body").innerHTML = html || '<div class="empty">No guests yet.<br>Add with +</div>';
 }
-function openStaySheet(id) {
-  const s = id ? state.stays.find((x) => x.id === id) : { check_in: todayStr(), check_out: "", amount: "" };
+function openStaySheet(id, pre) {
+  const s = id ? state.stays.find((x) => x.id === id)
+              : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "", apartment_id: pre && pre.apartment_id };
   openSheet(`
     <h2>${id ? "Edit stay" : "New guest"}</h2>
     <label>Apartment</label><select id="st-apt">${state.apartments.map((a) =>
@@ -1368,7 +1495,14 @@ async function saveStay(id) {
   if (!row.apartment_id) return toast("Add an apartment first");
   if (!row.guest_name) return toast("Enter guest name");
   if (!row.check_in || !row.check_out || row.check_out <= row.check_in) return toast("Check-out must be after check-in");
-  try { await dbq(id ? db.from("stays").update(row).eq("id", id) : db.from("stays").insert(row), "Stay not saved"); } catch { return; }
+  const clash = state.stays.find((x) => x.id !== id && x.apartment_id === row.apartment_id
+    && x.check_in < row.check_out && row.check_in < x.check_out);
+  if (clash) return alert(`Those dates overlap an existing booking:\n\n${clash.guest_name} · ${clash.check_in} → ${clash.check_out}`);
+  try { await dbq(id ? db.from("stays").update(row).eq("id", id) : db.from("stays").insert(row), "Stay not saved"); }
+  catch (e) {
+    if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) alert("Those dates are already booked for this apartment.");
+    return;
+  }
   closeSheet(); await refreshAll(); renderApt(); toast("Saved");
 }
 async function delStay(id) {
@@ -1460,6 +1594,61 @@ async function delApt(id) {
   if (!confirm("Deactivate this apartment?")) return;
   try { await dbq(db.from("apartments").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
   closeSheet(); await refreshAll(); renderApt();
+}
+
+function renderHome() {
+  const today = todayStr();
+  const openTasks = state.tasks.filter((t) => occursOn(t, today) && !isDoneOn(t, today));
+  const overdue = state.tasks.filter((t) => !t.recurrence && t.due_date && t.due_date < today && !t.done);
+  const byCtx = (c) => openTasks.filter((t) => t.context === c).length;
+  let html = `<div class="hcard" onclick="tab('today')">
+    <h3>Today</h3>
+    <div class="row" style="justify-content:space-between;align-items:flex-end">
+      <span class="hbig">${openTasks.length}</span>
+      <span class="muted">${overdue.length ? `<span class="hflag">${overdue.length} overdue</span> · ` : ""}${myCtx().map((c) => `${CTX[c]} ${byCtx(c)}`).join(" · ")}</span>
+    </div>
+    ${openTasks.slice(0, 3).map((t) => `<div class="hrow"><span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
+      <span class="muted mono">${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
+  </div>`;
+
+  if (state.perm.elaks) {
+    const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock);
+    const sent = state.offers.filter((o) => o.status === "sent");
+    const expired = sent.filter(offerExpired);
+    html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
+      <h3>Elaks</h3>
+      <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
+      <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
+      <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}${expired.length ? ` <span class="hflag">(${expired.length} expired)</span>` : ""}</b></div>
+    </div>`;
+  }
+
+  if (state.perm.apts) {
+    const occ = new Set(state.stays.filter((s) => s.check_in <= today && s.check_out > today).map((s) => s.apartment_id)).size;
+    const curM = today.slice(0, 7);
+    const paidN = state.bills.filter((b) => (b.month || "").slice(0, 7) === curM && b.paid).length;
+    const need = state.apartments.length * BILL_TYPES.length;
+    const unpaid = Math.max(0, need - paidN);
+    const inc = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 7) === curM), (s) => s.amount);
+    const bil = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 7) === curM), (b) => b.amount);
+    const out = state.stays.filter((s) => s.check_out === today).length;
+    const inn = state.stays.filter((s) => s.check_in === today).length;
+    html += `<div class="hcard" onclick="state.aptView='stays';tab('apt')">
+      <h3>Apartments</h3>
+      <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
+      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " check-in" : ""}${inn && out ? " · " : ""}${out ? out + " check-out" : ""}</b></div>` : ""}
+      <div class="hrow"><span>Bills this month</span><b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " unpaid" : "all paid"}</b></div>
+      <div class="hrow"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
+    </div>`;
+  }
+  $("home-body").innerHTML = html;
+}
+
+function offerExpired(o) {
+  if (o.status !== "sent" || !o.offer_date) return false;
+  const d = new Date(o.offer_date + "T12:00");
+  d.setDate(d.getDate() + (o.validity || 7));
+  return d < new Date(todayStr() + "T12:00");
 }
 
 async function qcKey(ev) {
