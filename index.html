@@ -106,6 +106,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .art .a-name span{font-size:12px;color:var(--muted)}
 .art .a-qty{font-family:var(--mono);font-weight:600;font-size:16px;text-align:right}
 .art .a-qty small{display:block;font-size:10.5px;color:var(--muted);font-weight:500}
+.thumb{width:40px;height:40px;border-radius:9px;object-fit:cover;flex:none;background:var(--line)}
+.thumb-lg{width:100%;max-height:210px;object-fit:contain;border-radius:11px;background:var(--line);margin-top:10px}
 .mov{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid var(--line)}
 .mov:last-child{border:0}
 
@@ -240,6 +242,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.2.0/dist/pizzip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.69.0/build/docxtemplater.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docxtemplater-image-module-free@1.1.1/build/imagemodule.js"></script>
 <script>
 /* ============================================================
    CONFIG — fill in these 3 values (see SETUP.md)
@@ -562,16 +565,21 @@ function renderInv() {
   $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
     <div class="card art" onclick="openArticleDetail('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
+      ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
       <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
       <div class="a-qty">${fmt(a.stock)}<small>${unitLbl(a.unit)}</small></div>
     </div>`).join("") : '<div class="empty">No articles.<br>Add with +</div>');
 }
 async function openArticleDetail(id) {
   const a = state.stock.find((x) => x.id === id);
-  const { data: movs } = await db.from("movements").select("*").eq("article_id", id).order("created_at", { ascending: false }).limit(10);
+  const [{ data: movs }, { data: imgRow }] = await Promise.all([
+    db.from("movements").select("*").eq("article_id", id).order("created_at", { ascending: false }).limit(10),
+    db.from("article_images").select("data").eq("article_id", id).maybeSingle(),
+  ]);
   openSheet(`
     <h2>${esc(a.name)}</h2>
     <p class="muted">${esc(a.category)} · ${esc(a.code || "no code")} · sell price ${fmt(a.sell_price)} ден.</p>
+    ${imgRow && imgRow.data ? `<img class="thumb-lg" src="${imgRow.data}" alt="">` : ""}
     <div class="totalbar"><span>In stock</span><span class="mono">${fmt(a.stock)} ${unitLbl(a.unit)}</span></div>
     <div class="grid2" style="margin-top:12px">
       <button class="btn sm" style="width:100%" onclick="moveSheet('${id}','in')">+ Stock in</button>
@@ -658,8 +666,10 @@ async function saveCashAdjust(dir) {
   closeSheet(); await refreshAll(); render();
   setTimeout(openCashSheet, 240);
 }
+let arImg = { mode: "keep", thumb: null, full: null };
 function openArticleSheet(id) {
   const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
+  arImg = { mode: "keep", thumb: a.image_thumb || null, full: null };
   openSheet(`
     <h2>${id ? "Edit article" : "New article"}</h2>
     <label>Name</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="e.g. 5MP Hikvision DS-2CE17K0T-LFS">
@@ -676,11 +686,52 @@ function openArticleSheet(id) {
       <div><label>Sell price</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
     </div>
     <label>Supplier</label><input id="ar-sup" value="${esc(a.supplier || "")}">
+    <label>Photo (appears in offers)</label>
+    <div class="row" style="align-items:flex-start">
+      <div id="ar-img-prev"></div>
+      <div style="flex:1">
+        <input type="file" accept="image/*" id="ar-img-file" onchange="pickArticleImage(this)">
+        <button class="btn sm ghost" style="margin-top:6px" onclick="removeArticleImage()">Remove photo</button>
+      </div>
+    </div>
     <label>Specs for offers (each line starts with --)</label>
     <textarea id="ar-specs" rows="5" placeholder="-- 40m White Light&#10;-- 2.8 mm објектив">${esc(a.specs || "")}</textarea>
     <button class="btn" onclick="saveArticle('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delArticle('${id}')">Deactivate</button>` : ""}
   `);
+  renderArImg();
+}
+function renderArImg() {
+  $("ar-img-prev").innerHTML = arImg.thumb ? `<img class="thumb" style="width:64px;height:64px" src="${arImg.thumb}" alt="">` : "";
+}
+function imgResize(im, max, q) {
+  const scale = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(im.naturalWidth * scale));
+  c.height = Math.max(1, Math.round(im.naturalHeight * scale));
+  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", q);
+}
+function pickArticleImage(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (f.size > 12 * 1024 * 1024) return toast("Photo too large");
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      arImg = { mode: "new", thumb: imgResize(im, 72, 0.6), full: imgResize(im, 700, 0.75) };
+      renderArImg();
+    };
+    im.onerror = () => toast("Could not read that image");
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+function removeArticleImage() {
+  arImg = { mode: "remove", thumb: null, full: null };
+  const f = $("ar-img-file"); if (f) f.value = "";
+  renderArImg();
 }
 async function saveArticle(id) {
   const row = {
@@ -693,7 +744,15 @@ async function saveArticle(id) {
     specs: $("ar-specs").value.trim() || null,
   };
   if (!row.name) return toast("Enter a name");
-  try { await dbq(id ? db.from("articles").update(row).eq("id", id) : db.from("articles").insert(row), "Article not saved"); } catch { return; }
+  if (arImg.mode === "new") row.image_thumb = arImg.thumb;
+  if (arImg.mode === "remove") row.image_thumb = null;
+  try {
+    let artId = id;
+    if (id) await dbq(db.from("articles").update(row).eq("id", id), "Article not saved");
+    else artId = (await dbq(db.from("articles").insert(row).select().single(), "Article not saved")).id;
+    if (arImg.mode === "new") await dbq(db.from("article_images").upsert({ article_id: artId, data: arImg.full }, { onConflict: "article_id" }), "Photo not saved");
+    if (arImg.mode === "remove") await dbq(db.from("article_images").delete().eq("article_id", artId), "Photo not removed");
+  } catch { return; }
   closeSheet(); await refreshAll(); renderInv(); toast("Saved");
 }
 async function delArticle(id) {
@@ -784,6 +843,7 @@ function renderPicker() {
   $("of-picker").innerHTML = list.map((a) => `
     <div class="card art" onclick="addOfferItem('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
+      ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
       <div class="a-name"><b>${esc(a.name)}</b><span>stock: ${fmt(a.stock)} ${unitLbl(a.unit)} · ${fmt(a.sell_price)} ден.</span></div>
     </div>`).join("");
 }
@@ -865,6 +925,14 @@ async function saveOffer(id, generate) {
   closeSheet(); renderOffers();
   toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
 }
+function imgDims(src) {
+  return new Promise((res) => {
+    const im = new Image();
+    im.onload = () => res({ w: im.naturalWidth || 4, h: im.naturalHeight || 3 });
+    im.onerror = () => res({ w: 4, h: 3 });
+    im.src = src;
+  });
+}
 async function generateDocx(o) {
   const metersOpen = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !x.it.consumed);
   try {
@@ -874,7 +942,29 @@ async function generateDocx(o) {
     const buf = await res.arrayBuffer();
     const head = new Uint8Array(buf.slice(0, 2));
     if (head[0] !== 0x50 || head[1] !== 0x4B) throw new Error("Template file on server is not a valid .docx");
-    const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true });
+    // product photos: fetch, measure, and prepare the image module
+    const ids = [...new Set((o.items || []).filter((it) => it.article_id).map((it) => it.article_id))];
+    const b64Of = {}, sizes = new Map();
+    if (ids.length && window.ImageModule) {
+      const { data: imgs } = await db.from("article_images").select("article_id, data").in("article_id", ids);
+      for (const r of imgs || []) {
+        const b64 = (r.data || "").split(",")[1];
+        if (!b64) continue;
+        const d = await imgDims(r.data);
+        const MAXW = 95, MAXH = 78;
+        let w = MAXW, h = Math.round(MAXW * d.h / d.w);
+        if (h > MAXH) { h = MAXH; w = Math.round(MAXH * d.w / d.h); }
+        b64Of[r.article_id] = b64;
+        sizes.set(b64, [w, h]);
+      }
+    }
+    const mods = [];
+    if (sizes.size) mods.push(new window.ImageModule({
+      centered: false,
+      getImage: (tag) => { const bin = atob(tag); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; },
+      getSize: (img, tag) => sizes.get(tag) || [95, 70],
+    }));
+    const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true, modules: mods });
     const client = state.clients.find((c) => c.id === o.client_id);
     doc.render({
       title: o.title, system: o.system || "",
@@ -885,6 +975,8 @@ async function generateDocx(o) {
         qty: it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0)),
         price: it.free ? "" : fmt(it.price || 0),
         total: itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0),
+        has_img: !!b64Of[it.article_id],
+        img: b64Of[it.article_id] || "",
       })),
       total_note: o.total_note || "", grand_total: fmt(o.grand_total),
       footnote: metersOpen.length
