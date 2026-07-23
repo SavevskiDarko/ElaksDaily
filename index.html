@@ -131,6 +131,40 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.on{opacity:1}
 .search{margin-bottom:10px}
+
+/* ---- printable offer (PDF) ---- */
+#printroot{display:none}
+@media print{
+  body{background:#fff;padding:0}
+  body > *:not(#printroot){display:none !important}
+  #printroot{display:block !important}
+  @page{size:A4;margin:12mm 10mm}
+}
+.pv{font-family:Arial,Helvetica,sans-serif;color:#232323;font-size:9.5pt;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pv-top{width:100%;border-collapse:collapse;margin-bottom:6mm}
+.pv-top td{vertical-align:top}
+.pv-top td.r{text-align:right;width:42mm}
+.pv-num{font-size:13pt;font-weight:700;padding-top:4mm}
+.pv-num u{color:#1F3864;text-decoration:underline;margin-left:4mm}
+.pv-logo{width:39mm;height:auto}
+.pv-banner{width:125mm;height:auto;display:block}
+.pv-client{font-size:12pt;font-weight:700;color:#1F3864;margin:3mm 0 3mm 5mm}
+.pv-fields{border-collapse:collapse;margin:0 0 8mm 5mm;font-size:9.5pt}
+.pv-fields td{padding:1.1mm 0;vertical-align:top}
+.pv-fields td:first-child{width:32mm;color:#232323}
+.pv-items{width:100%;border-collapse:separate;border-spacing:1.2mm 1.2mm;table-layout:fixed}
+.pv-items th{font-weight:400;color:#252525;font-size:10pt;padding:1mm 0;text-align:center}
+.pv-items td{background:#ECECEC;padding:2.4mm 2mm;vertical-align:middle;font-size:9pt}
+.pv-items td.c{text-align:center}
+.pv-items td.b{font-weight:700}
+.pv-items td img{max-width:100%;max-height:26mm;display:block;margin:0 auto}
+.pv-items .sp{margin-top:1.5mm;line-height:1.35}
+.pv-total{background:#2462AC !important;color:#fff;font-weight:700;font-size:11pt;padding:3mm 4mm !important;text-align:left}
+.pv-note{color:#C00000;font-weight:700;text-align:center;margin:6mm 0 2mm}
+.pv-valid{color:#C00000;font-weight:700;text-align:center;margin-bottom:8mm}
+.pv-footer{display:block;margin:10mm auto 0;width:57mm;height:auto}
+.pv-items tr{page-break-inside:avoid}
 @media (prefers-color-scheme: dark){
   :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5}
   .chip{background:var(--card);color:var(--ink)}
@@ -238,6 +272,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 <div class="overlay" id="overlay" onclick="closeSheet()"></div>
 <div class="sheet" id="sheet"></div>
 <div class="toast" id="toast"></div>
+<div id="printroot"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.2.0/dist/pizzip.min.js"></script>
@@ -829,6 +864,7 @@ function openOfferSheet(id) {
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
+    <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
     ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
@@ -894,7 +930,7 @@ function updateTotal() {
   }
   return sum;
 }
-async function saveOffer(id, generate) {
+async function saveOffer(id, generate, pdf) {
   const meters = offerItems.map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m");
   const row = {
     number: id ? state.offers.find((x) => x.id === id).number : nextOfferNumber(),
@@ -923,7 +959,66 @@ async function saveOffer(id, generate) {
   let genOk = null;
   if (generate) genOk = await generateDocx(saved);
   closeSheet(); renderOffers();
+  if (pdf) { await printOffer(saved); return; }
   toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
+}
+async function printOffer(o) {
+  try {
+    const client = state.clients.find((c) => c.id === o.client_id);
+    const ids = [...new Set((o.items || []).filter((it) => it.article_id).map((it) => it.article_id))];
+    const imgOf = {};
+    if (ids.length) {
+      const { data } = await db.from("article_images").select("article_id, data").in("article_id", ids);
+      for (const r of data || []) imgOf[r.article_id] = r.data;
+    }
+    const meters = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !x.it.consumed);
+    const foot = meters.length
+      ? `* Ставките ${meters.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
+      : "";
+    const rows = (o.items || []).map((it, i) => `<tr>
+      <td class="c">${i + 1}</td>
+      <td class="c">${imgOf[it.article_id] ? `<img src="${imgOf[it.article_id]}" alt="">` : ""}</td>
+      <td><b>${esc(it.name)}</b>${it.specs ? `<div class="sp">${esc(it.specs).replace(/\n/g, "<br>")}</div>` : ""}</td>
+      <td class="c">${it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0))}</td>
+      <td class="c">${it.free ? "" : fmt(it.price || 0)}</td>
+      <td class="c b">${itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0)}</td>
+    </tr>`).join("");
+    const fld = (l, v) => v ? `<tr><td>${l}</td><td>${esc(v)}</td></tr>` : "";
+    $("printroot").innerHTML = `<div class="pv">
+      <table class="pv-top"><tr>
+        <td class="pv-num">Понуда бр. <u>${esc(o.number)}</u></td>
+        <td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td>
+      </tr></table>
+      <img class="pv-banner" src="brand-banner.png" alt="Клиент">
+      ${client ? `<div class="pv-client">${esc(client.name)}</div>` : ""}
+      <table class="pv-fields">
+        ${fld("Контакт лице:", client && client.contact)}
+        ${fld("Контакт тел:", client && client.phone)}
+        ${fld("Адреса:", client && client.address)}
+        ${fld("e-mail:", client && client.email)}
+        <tr><td>Датум:</td><td>${new Date(o.offer_date).toLocaleDateString("mk-MK")}</td></tr>
+      </table>
+      <table class="pv-items">
+        <colgroup><col style="width:3.4%"><col style="width:21.4%"><col style="width:51.8%">
+          <col style="width:4.9%"><col style="width:8.9%"><col style="width:9.6%"></colgroup>
+        <thead><tr><th>Бр</th><th>Слика</th><th>Спецификација</th><th>Ком</th><th>Цена</th><th>Вк. Цена</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td class="pv-total" colspan="6">Вкупно : ${fmt(o.grand_total)} ден.&nbsp;&nbsp; ${esc(o.total_note || "")}</td></tr></tfoot>
+      </table>
+      ${foot ? `<div class="pv-note">${esc(foot)}</div>` : ""}
+      <div class="pv-valid">Понудата важи ${o.validity} дена.</div>
+      <img class="pv-footer" src="brand-footer.png" alt="ELAKS">
+    </div>`;
+    const imgs = [...$("printroot").querySelectorAll("img")];
+    await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
+    await new Promise((r) => setTimeout(r, 120));
+    window.print();
+    setTimeout(() => { $("printroot").innerHTML = ""; }, 1500);
+    toast("Choose \"Save as PDF\" in the print dialog");
+  } catch (e) {
+    console.error(e);
+    alert("Could not build the PDF view: " + e.message);
+  }
 }
 function imgDims(src) {
   return new Promise((res) => {
