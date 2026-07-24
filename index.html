@@ -451,7 +451,9 @@ function netStatus() {
 }
 window.addEventListener("online", netStatus);
 window.addEventListener("offline", netStatus);
-function tab(name) {
+function tab(name, fromBack) {
+  if (name !== "home" && !tabPushed) { tabPushed = true; history.pushState({ centrala: "tab" }, ""); }
+  else if (name === "home" && tabPushed && !fromBack) { tabPushed = false; goBackSilently(); }
   state.tab = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
   $("v-" + { home: "home", today: "today", elaks: "elaks", apt: "apt", set: "set" }[name]).classList.add("on");
@@ -473,8 +475,33 @@ function render() {
   if (state.tab === "apt") renderApt();
 }
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2200); }
-function openSheet(html) { $("sheet").innerHTML = '<div class="grab"></div>' + html; $("overlay").classList.add("on"); requestAnimationFrame(() => $("sheet").classList.add("on")); $("sheet").style.display = "block"; }
-function closeSheet() { $("sheet").classList.remove("on"); $("overlay").classList.remove("on"); setTimeout(() => { $("sheet").style.display = "none"; }, 220); }
+let sheetOpen = false, tabPushed = false, ignorePop = false;
+function goBackSilently() { ignorePop = true; history.back(); }
+
+function openSheet(html) {
+  $("sheet").innerHTML = '<div class="grab"></div>' + html;
+  $("overlay").classList.add("on");
+  requestAnimationFrame(() => $("sheet").classList.add("on"));
+  $("sheet").style.display = "block";
+  if (!sheetOpen) { sheetOpen = true; history.pushState({ centrala: "sheet" }, ""); }
+}
+function closeSheet(fromBack) {
+  $("sheet").classList.remove("on");
+  $("overlay").classList.remove("on");
+  setTimeout(() => { $("sheet").style.display = "none"; }, 220);
+  if (sheetOpen) {
+    sheetOpen = false;
+    if (!fromBack) goBackSilently();   // keep history in step with the UI
+  }
+}
+
+// Phone back button: close the open sheet first, then return to Home,
+// and only leave the app from Home with nothing open.
+window.addEventListener("popstate", () => {
+  if (ignorePop) { ignorePop = false; return; }
+  if (sheetOpen) { closeSheet(true); return; }
+  if (tabPushed) { tabPushed = false; tab("home", true); return; }
+});
 
 /* ============================================================
    TASKS
