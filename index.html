@@ -108,8 +108,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .art .a-name span{font-size:12px;color:var(--muted)}
 .art .a-qty{font-family:var(--mono);font-weight:600;font-size:16px;text-align:right}
 .art .a-qty small{display:block;font-size:10.5px;color:var(--muted);font-weight:500}
-.thumb{width:40px;height:40px;border-radius:9px;object-fit:cover;flex:none;background:var(--line)}
-.thumb-lg{width:100%;max-height:210px;object-fit:contain;border-radius:11px;background:var(--line);margin-top:10px}
+.thumb{width:40px;height:40px;border-radius:9px;object-fit:cover;flex:none;background:#fff}
+.thumb-lg{width:100%;max-height:210px;object-fit:contain;border-radius:11px;background:#fff;border:1px solid var(--line);margin-top:10px}
 .mov{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid var(--line)}
 .mov:last-child{border:0}
 
@@ -911,7 +911,10 @@ function imgResize(im, max, q) {
   const c = document.createElement("canvas");
   c.width = Math.max(1, Math.round(im.naturalWidth * scale));
   c.height = Math.max(1, Math.round(im.naturalHeight * scale));
-  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";               // transparent PNGs would turn black in JPEG
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(im, 0, 0, c.width, c.height);
   return c.toDataURL("image/jpeg", q);
 }
 function pickArticleImage(input) {
