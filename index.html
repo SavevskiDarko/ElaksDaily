@@ -96,6 +96,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .task .t-title{flex:1;font-weight:500}
 .task .t-time{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
 .task .rec{font-size:11px;color:var(--muted)}
+.who{background:var(--line);color:var(--muted);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700;flex:none}
 .clbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center}
 .clbox.on{background:var(--personal);border-color:var(--personal)}
 
@@ -337,9 +338,12 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [] };
+  mineOnly: false, people: [], team: [],
+  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [], cashTotal: 0 };
 
+function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
 async function dbq(q, failMsg) {
+  if (offlineNow()) { toast("You are offline — not saved"); throw new Error("offline"); }
   const { data, error } = await q;
   if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + error.message); throw error; }
   return data;
@@ -400,33 +404,53 @@ async function startApp() {
   } else if ($("digest-block")) $("digest-block").style.display = "none";
 }
 
-async function refreshAll() {
-  const [t, s, c, o, ap, st, bl, ca] = await Promise.all([
-    db.from("tasks").select("*").order("due_time", { ascending: true, nullsFirst: false }),
-    db.from("article_stock").select("*").eq("active", true).order("name"),
-    db.from("clients").select("*").order("name"),
-    db.from("offers").select("*, clients(name)").order("created_at", { ascending: false }),
-    db.from("apartments").select("*").eq("active", true).order("name"),
-    db.from("stays").select("*, apartments(name)").order("check_in", { ascending: false }),
-    db.from("bills").select("*"),
-    db.from("elaks_cash").select("*").order("created_at", { ascending: false }),
-  ]);
-  const results = { tasks: t, stock: s, clients: c, offers: o, apartments: ap, stays: st, bills: bl, cash: ca };
-  const failed = Object.entries(results).filter(([, r]) => r.error).map(([k]) => k);
+const backDays = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString("sv-SE"); };
+const backMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n, 1); return d.toLocaleDateString("sv-SE"); };
+
+// Bounded queries: recent + open records only, so the app stays fast as data grows.
+const LOADERS = {
+  people:     { need: () => true,               q: () => db.from("team_members").select("*") },
+  tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
+  stock:      { need: () => state.perm.elaks,   q: () => db.from("article_stock").select("*").eq("active", true).order("name") },
+  clients:    { need: () => state.perm.elaks,   q: () => db.from("clients").select("*").order("name") },
+  offers:     { need: () => state.perm.elaks,   q: () => db.from("offers").select("*, clients(name)").order("created_at", { ascending: false }).limit(150) },
+  cash:       { need: () => state.perm.elaks,   q: () => db.from("elaks_cash").select("*").order("created_at", { ascending: false }).limit(30) },
+  cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
+  apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
+  stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
+  bills:      { need: () => state.perm.apts,    q: () => db.from("bills").select("*").gte("month", backMonths(24)) },
+};
+
+async function refreshAll(only) {
+  const keys = (only || Object.keys(LOADERS)).filter((k) => LOADERS[k] && LOADERS[k].need());
+  const res = await Promise.all(keys.map((k) => LOADERS[k].q()));
+  const failed = [];
+  keys.forEach((k, i) => {
+    const r = res[i];
+    if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
+    if (LOADERS[k].scalar) state.cashTotal = (r.data && r.data.balance) || 0;
+    else state[k] = r.data ?? [];
+  });
   if (failed.length) {
-    console.error("load errors", results);
     $("loadmsg").textContent = "Could not load: " + failed.join(", ") + ". Data shown may be incomplete.";
     $("loadbar").style.display = "flex";
-  } else $("loadbar").style.display = "none";
-  const keep = (res, cur) => res.error ? cur : (res.data ?? []);
-  state.tasks = keep(t, state.tasks); state.stock = keep(s, state.stock);
-  state.clients = keep(c, state.clients); state.offers = keep(o, state.offers);
-  state.apartments = keep(ap, state.apartments); state.stays = keep(st, state.stays);
-  state.bills = keep(bl, state.bills); state.cash = keep(ca, state.cash);
+  } else if (!only) $("loadbar").style.display = "none";
 }
 
 /* ---------------- NAV ---------------- */
 async function retryLoad() { await refreshAll(); render(); }
+function netStatus() {
+  const bar = $("loadbar");
+  if (offlineNow()) {
+    $("loadmsg").textContent = "You are offline — you can read, but changes cannot be saved.";
+    bar.style.display = "flex";
+  } else if ($("loadmsg").textContent.startsWith("You are offline")) {
+    bar.style.display = "none";
+    refreshAll().then(render);
+  }
+}
+window.addEventListener("online", netStatus);
+window.addEventListener("offline", netStatus);
 function tab(name) {
   state.tab = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
@@ -479,8 +503,10 @@ function renderToday() {
     return;
   }
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
-    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("");
-  const vis = (t) => state.ctxFilter === "all" || t.context === state.ctxFilter;
+    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("")
+    + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`;
+  const vis = (t) => (state.ctxFilter === "all" || t.context === state.ctxFilter)
+    && (!state.mineOnly || t.assigned_to === state.uid);
 
   const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done);
   const todays = state.tasks.filter((t) => vis(t) && occursOn(t, today));
@@ -515,6 +541,7 @@ const taskRow = (today) => (t) => {
     <span class="led ${t.context}"></span>
     <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
       ${t.recurrence ? '<span class="rec"> ↻</span>' : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
+    ${t.assigned_to ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
     ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}
   </div>`;
 };
@@ -553,6 +580,11 @@ function openTaskSheet(id) {
       <div><label>Reminder</label>
         <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
     </div>
+    <label>Assigned to</label>
+    <select id="tk-who">
+      <option value="">Anyone</option>
+      ${state.people.map((p) => `<option value="${p.user_id}" ${t.assigned_to === p.user_id ? "selected" : ""}>${esc(p.display_name || "Unnamed")}</option>`).join("")}
+    </select>
     <label>Checklist (opt.)</label>
     <div id="tk-cl"></div>
     <button class="btn sm ghost" onclick="clAdd('${id || ""}')">+ Add item</button>
@@ -600,17 +632,18 @@ async function saveTask(id) {
     recur_dow: rec === "weekly" ? d.getDay() : null,
     recur_dom: rec === "monthly" ? d.getDate() : null,
     remind: $("tk-rem").value === "1",
+    assigned_to: $("tk-who").value || null,
     notes: $("tk-notes").value.trim() || null,
     checklist: tkChecklist.filter((it) => it.text.trim()).length ? tkChecklist.filter((it) => it.text.trim()) : null,
   };
   if (!row.title) return toast("Enter a title");
   try { await dbq(id ? db.from("tasks").update(row).eq("id", id) : db.from("tasks").insert(row), "Task not saved"); } catch { return; }
-  closeSheet(); await refreshAll(); renderToday(); toast("Saved");
+  closeSheet(); await refreshAll(["tasks"]); renderToday(); toast("Saved");
 }
 async function delTask(id) {
   if (!confirm("Delete this task?")) return;
   try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(); renderToday();
+  closeSheet(); await refreshAll(["tasks"]); renderToday();
 }
 function openHistory() {
   const done = state.tasks.filter((t) => !t.recurrence && t.done)
@@ -633,12 +666,12 @@ function openHistory() {
 }
 async function restoreTask(id) {
   try { await dbq(db.from("tasks").update({ done: false, last_done: null, due_date: todayStr() }).eq("id", id), "Not restored"); } catch { return; }
-  await refreshAll(); openHistory(); renderToday(); updateBadges(); toast("Restored to today");
+  await refreshAll(["tasks"]); openHistory(); renderToday(); updateBadges(); toast("Restored to today");
 }
 async function histDelTask(id) {
   if (!confirm("Delete this task permanently?")) return;
   try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
-  await refreshAll(); openHistory(); renderToday();
+  await refreshAll(["tasks"]); openHistory(); renderToday();
 }
 
 /* ============================================================
@@ -730,7 +763,7 @@ async function saveMove(id, type) {
       }), "Cash entry not saved");
     }
   } catch { return; }
-  closeSheet(); await refreshAll(); renderInv(); toast(type === "in" ? "Received" : "Issued");
+  closeSheet(); await refreshAll(["stock", "cash", "cashTotal"]); renderInv(); toast(type === "in" ? "Received" : "Issued");
 }
 function mvCashToggle(unitPrice) {
   const box = $("mv-cash");
@@ -742,7 +775,12 @@ function mvCashToggle(unitPrice) {
     if (q && unitPrice) $("mv-amt").value = q * unitPrice;
   }
 }
-const cashBal = () => sumBy(state.cash, (e) => parseFloat(e.amount) || 0);
+const cashBal = () => parseFloat(state.cashTotal) || 0;
+const personName = (uid) => {
+  const p = state.people.find((x) => x.user_id === uid);
+  return p ? (p.display_name || "Unnamed") : "";
+};
+const initials = (s) => (s || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 function openCashSheet() {
   openSheet(`
     <h2>Elaks cash register</h2>
@@ -768,7 +806,7 @@ async function saveCashAdjust(dir) {
   const amt = parseFloat($("ch-amt").value);
   if (!amt || amt <= 0) return toast("Enter an amount");
   try { await dbq(db.from("elaks_cash").insert({ amount: dir * amt, note: $("ch-note").value.trim() || null }), "Not saved"); } catch { return; }
-  closeSheet(); await refreshAll(); render();
+  closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
   setTimeout(openCashSheet, 240);
 }
 let arImg = { mode: "keep", thumb: null, full: null };
@@ -858,12 +896,12 @@ async function saveArticle(id) {
     if (arImg.mode === "new") await dbq(db.from("article_images").upsert({ article_id: artId, data: arImg.full }, { onConflict: "article_id" }), "Photo not saved");
     if (arImg.mode === "remove") await dbq(db.from("article_images").delete().eq("article_id", artId), "Photo not removed");
   } catch { return; }
-  closeSheet(); await refreshAll(); renderInv(); toast("Saved");
+  closeSheet(); await refreshAll(["stock"]); renderInv(); toast("Saved");
 }
 async function delArticle(id) {
   if (!confirm("Deactivate this article?")) return;
   try { await dbq(db.from("articles").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
-  closeSheet(); await refreshAll(); renderInv();
+  closeSheet(); await refreshAll(["stock"]); renderInv();
 }
 
 /* ============================================================
@@ -897,14 +935,21 @@ function renderOffers() {
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
     </div>`).join("") : '<div class="empty">No offers.<br>Create with +</div>';
 }
-function nextOfferNumber() {
+async function nextOfferNumber() {
   const y = new Date().getFullYear();
-  const nums = state.offers.map((o) => o.number).filter((n) => n.startsWith(y + "-")).map((n) => parseInt(n.split("-")[1]) || 0);
-  return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
+  try {
+    const { data } = await db.from("offers").select("number").like("number", y + "-%")
+      .order("number", { ascending: false }).limit(1);
+    const last = (data && data[0]) ? (parseInt(String(data[0].number).split("-")[1]) || 0) : 0;
+    return `${y}-${String(last + 1).padStart(3, "0")}`;
+  } catch {
+    const nums = state.offers.map((o) => o.number || "").filter((n) => n.startsWith(y + "-")).map((n) => parseInt(n.split("-")[1]) || 0);
+    return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
+  }
 }
-function openOfferSheet(id) {
+async function openOfferSheet(id) {
   const o = id ? state.offers.find((x) => x.id === id) : {
-    number: nextOfferNumber(), title: "", system: "", validity: 7, status: "draft",
+    number: await nextOfferNumber(), title: "", system: "", validity: 7, status: "draft",
     offer_date: todayStr(), items: [], total_note: "", client_id: "",
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
@@ -935,6 +980,7 @@ function openOfferSheet(id) {
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
     <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
+    ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
     ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
@@ -1003,7 +1049,7 @@ function updateTotal() {
 async function saveOffer(id, generate, pdf) {
   const meters = offerItems.map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m");
   const row = {
-    number: id ? state.offers.find((x) => x.id === id).number : nextOfferNumber(),
+    number: id ? state.offers.find((x) => x.id === id).number : await nextOfferNumber(),
     title: $("of-title").value.trim(), system: $("of-system").value.trim() || null,
     client_id: $("of-client").value || null, offer_date: $("of-date").value,
     validity: parseInt($("of-val").value) || 7, status: $("of-status").value,
@@ -1017,15 +1063,15 @@ async function saveOffer(id, generate, pdf) {
     if (id) { await dbq(db.from("offers").update(row).eq("id", id), "Offer not saved"); saved = { ...row, id }; }
     else {
       let ins = await db.from("offers").insert(row).select().single();
-      if (ins.error && ins.error.code === "23505") {   // number collision → refresh, renumber, retry once
-        await refreshAll(); row.number = nextOfferNumber();
+      if (ins.error && ins.error.code === "23505") {   // number collision → renumber and retry once
+        row.number = await nextOfferNumber();
         ins = await db.from("offers").insert(row).select().single();
       }
       if (ins.error) { toast("Offer not saved — " + ins.error.message); return; }
       saved = ins.data;
     }
   } catch { return; }
-  await refreshAll();
+  await refreshAll(["offers", "stock"]);
   let genOk = null;
   if (generate) genOk = await generateDocx(saved);
   closeSheet(); renderOffers();
@@ -1178,12 +1224,28 @@ async function deductStock(id) {
     if (rows.length) await dbq(db.from("movements").insert(rows), "Stock not updated");
     await dbq(db.from("offers").update({ stock_deducted: true }).eq("id", id), "Offer not updated");
   } catch { return; }
-  closeSheet(); await refreshAll(); renderOffers(); toast("Deducted from stock");
+  closeSheet(); await refreshAll(["offers", "stock"]); renderOffers(); toast("Deducted from stock");
 }
 async function delOffer(id) {
   if (!confirm("Delete this offer?")) return;
   try { await dbq(db.from("offers").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(); renderOffers();
+  closeSheet(); await refreshAll(["offers"]); renderOffers();
+}
+async function createJobTask(id) {
+  const o = state.offers.find((x) => x.id === id);
+  const client = state.clients.find((c) => c.id === o.client_id);
+  const checklist = (o.items || []).map((it) => ({
+    text: it.unit === "m" ? `${it.name} (по должина)` : (it.qty ? `${it.name} × ${fmt(it.qty)}` : it.name),
+    done: false,
+  }));
+  const row = {
+    title: `Монтажа: ${client ? client.name : o.title} · ${o.number}`,
+    context: "elaks", due_date: todayStr(), remind: false,
+    checklist: checklist.length ? checklist : null,
+    notes: `Offer ${o.number}${o.system ? " · " + o.system : ""}`,
+  };
+  try { await dbq(db.from("tasks").insert(row), "Task not created"); } catch { return; }
+  closeSheet(); await refreshAll(["tasks"]); tab("today"); toast("Installation task created");
 }
 function duplicateOffer(id) {
   const src = state.offers.find((x) => x.id === id);
@@ -1231,7 +1293,7 @@ async function closeJob(id) {
     if (movRows.length) await dbq(db.from("movements").insert(movRows), "Stock not updated");
     await dbq(db.from("offers").update({ items, grand_total: total, total_note: null, stock_deducted: true }).eq("id", id), "Offer not updated");
   } catch { return; }
-  closeSheet(); await refreshAll(); renderOffers(); toast("Job closed — total and stock updated");
+  closeSheet(); await refreshAll(["offers", "stock"]); renderOffers(); toast("Job closed — total and stock updated");
 }
 
 /* ============================================================
@@ -1266,7 +1328,7 @@ async function saveClient(id) {
     address: $("cl-address").value.trim() || null, note: $("cl-note").value.trim() || null };
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("clients").update(row).eq("id", id) : db.from("clients").insert(row), "Client not saved"); } catch { return; }
-  closeSheet(); await refreshAll(); renderClients(); toast("Saved");
+  closeSheet(); await refreshAll(["clients"]); renderClients(); toast("Saved");
 }
 
 async function loadTeam() {
@@ -1452,7 +1514,7 @@ function renderCalendar() {
 function stayRow(s) {
   return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-      <div class="o-num">${esc(s.apartments?.name || "?")} · ${s.check_in.slice(5)} → ${s.check_out.slice(5)}</div></div>
+      <div class="o-num">${esc(s.apartments?.name || "?")} · ${s.check_in.slice(5)} → ${s.check_out.slice(5)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}</div></div>
     <span class="o-total mono">${fmt(s.amount)} ден.</span>
   </div>`;
 }
@@ -1473,24 +1535,45 @@ function openStaySheet(id, pre) {
               : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "", apartment_id: pre && pre.apartment_id };
   openSheet(`
     <h2>${id ? "Edit stay" : "New guest"}</h2>
-    <label>Apartment</label><select id="st-apt">${state.apartments.map((a) =>
+    <label>Apartment</label><select id="st-apt" onchange="stayCalc()">${state.apartments.map((a) =>
       `<option value="${a.id}" ${s.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select>
     <label>Guest name</label><input id="st-guest" value="${esc(s.guest_name || "")}">
     <div class="grid2">
-      <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}"></div>
-      <div><label>Check-out</label><input id="st-out" type="date" value="${s.check_out || ""}"></div>
+      <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}" onchange="stayCalc()"></div>
+      <div><label>Check-out</label><input id="st-out" type="date" value="${s.check_out || ""}" onchange="stayCalc()"></div>
     </div>
-    <label>Amount paid (ден.)</label><input id="st-amt" type="number" inputmode="decimal" value="${s.amount ?? ""}">
+    <div class="grid2">
+      <div><label>Booked via</label><select id="st-src">
+        ${["Direct", "Booking.com", "Airbnb", "Other"].map((x) => `<option ${((s.source || "Direct") === x) ? "selected" : ""}>${x}</option>`).join("")}
+      </select></div>
+      <div><label>Amount paid (ден.)</label><input id="st-amt" type="number" inputmode="decimal" value="${s.amount ?? ""}" oninput="this.dataset.touched=1"></div>
+    </div>
+    <div class="muted" id="st-nights" style="margin-top:4px"></div>
     <label>Notes (opt.)</label><input id="st-notes" value="${esc(s.notes || "")}">
     <button class="btn" onclick="saveStay('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delStay('${id}')">Delete</button>` : ""}
   `);
+  stayCalc();
+}
+function nightsBetween(ci, co) {
+  if (!ci || !co) return 0;
+  return Math.round((Date.parse(co) - Date.parse(ci)) / 86400000);
+}
+function stayCalc() {
+  const n = nightsBetween($("st-in").value, $("st-out").value);
+  const a = state.apartments.find((x) => x.id === $("st-apt").value);
+  const amt = $("st-amt");
+  if (n > 0 && a && a.nightly_rate && !amt.dataset.touched && !amt.value) amt.value = n * a.nightly_rate;
+  $("st-nights").textContent = n > 0
+    ? `${n} night${n > 1 ? "s" : ""}${a && a.nightly_rate ? ` · rate ${fmt(a.nightly_rate)} ден./night` : ""}`
+    : "";
 }
 async function saveStay(id) {
   const row = {
     apartment_id: $("st-apt").value, guest_name: $("st-guest").value.trim(),
     check_in: $("st-in").value, check_out: $("st-out").value,
-    amount: parseFloat($("st-amt").value) || 0, notes: $("st-notes").value.trim() || null,
+    amount: parseFloat($("st-amt").value) || 0, source: $("st-src").value,
+    notes: $("st-notes").value.trim() || null,
   };
   if (!row.apartment_id) return toast("Add an apartment first");
   if (!row.guest_name) return toast("Enter guest name");
@@ -1503,12 +1586,12 @@ async function saveStay(id) {
     if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) alert("Those dates are already booked for this apartment.");
     return;
   }
-  closeSheet(); await refreshAll(); renderApt(); toast("Saved");
+  closeSheet(); await refreshAll(["stays"]); renderApt(); toast("Saved");
 }
 async function delStay(id) {
   if (!confirm("Delete this stay?")) return;
   try { await dbq(db.from("stays").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(); renderApt();
+  closeSheet(); await refreshAll(["stays"]); renderApt();
 }
 
 function shiftAptMonth(dir) {
@@ -1559,15 +1642,56 @@ async function setBill(aptId, type, field, value) {
   row[field] = value;
   if (field === "paid") row.paid_on = value ? todayStr() : null;
   try { await dbq(db.from("bills").upsert(row, { onConflict: "apartment_id,month,type" }), "Bill not saved"); } catch { return; }
-  await refreshAll(); renderApt();
+  await refreshAll(["bills"]); renderApt();
 }
 
 function renderAptList() {
   $("apt-body").innerHTML = state.apartments.length ? state.apartments.map((a) => `
-    <div class="card row" onclick="openAptSheet('${a.id}')">
+    <div class="card row" onclick="openAptStatement('${a.id}')">
       <div style="flex:1"><b>${esc(a.name)}</b>
-        <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}</div></div>
+        <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}${a.nightly_rate ? " · " + fmt(a.nightly_rate) + " ден./night" : ""}</div></div>
     </div>`).join("") : '<div class="empty">No apartments.<br>Add with +</div>';
+}
+function openAptStatement(id, year) {
+  const a = state.apartments.find((x) => x.id === id);
+  const y = year || new Date().getFullYear();
+  const mine = state.stays.filter((s) => s.apartment_id === id);
+  const mybills = state.bills.filter((b) => b.apartment_id === id);
+  let ti = 0, tb = 0, tn = 0, rows = "";
+  for (let m = 1; m <= 12; m++) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    const inc = sumBy(mine.filter((s) => (s.check_in || "").slice(0, 7) === key), (s) => s.amount);
+    const bil = sumBy(mybills.filter((b) => (b.month || "").slice(0, 7) === key), (b) => b.amount);
+    const nights = mine.filter((s) => (s.check_in || "").slice(0, 7) === key)
+      .reduce((n, s) => n + nightsBetween(s.check_in, s.check_out), 0);
+    ti += inc; tb += bil; tn += nights;
+    if (!inc && !bil) continue;
+    rows += `<div class="mov"><span>${new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
+      <span class="muted">${nights ? nights + "n" : ""}</span></span>
+      <span class="mono">+${fmt(inc)} −${fmt(bil)} = <b>${fmt(inc - bil)}</b></span></div>`;
+  }
+  const bySource = {};
+  for (const s of mine.filter((s) => (s.check_in || "").slice(0, 4) === String(y)))
+    bySource[s.source || "Direct"] = (bySource[s.source || "Direct"] || 0) + (parseFloat(s.amount) || 0);
+  openSheet(`
+    <h2>${esc(a.name)}</h2>
+    <div class="row" style="justify-content:center;gap:18px;margin:6px 0 10px">
+      <button class="chip" onclick="openAptStatement('${id}', ${y - 1})">‹</button><b>${y}</b>
+      <button class="chip" onclick="openAptStatement('${id}', ${y + 1})">›</button>
+    </div>
+    <div class="totalbar"><span>Net ${y}</span><span class="mono">${fmt(ti - tb)} ден.</span></div>
+    <div class="hrow" style="margin-top:8px"><span class="muted">Income</span><b class="mono">${fmt(ti)} ден.</b></div>
+    <div class="hrow"><span class="muted">Bills</span><b class="mono">${fmt(tb)} ден.</b></div>
+    <div class="hrow"><span class="muted">Nights booked</span><b class="mono">${tn}</b></div>
+    ${a.opening_balance ? `<div class="hrow"><span class="muted">Starting amount</span><b class="mono">${fmt(a.opening_balance)} ден.</b></div>` : ""}
+    <div class="sec">By month</div>
+    ${rows || '<p class="muted">Nothing recorded this year.</p>'}
+    <div class="sec">Income by source</div>
+    ${Object.keys(bySource).length
+      ? Object.entries(bySource).map(([k, v]) => `<div class="mov"><span>${esc(k)}</span><span class="mono">${fmt(v)} ден.</span></div>`).join("")
+      : '<p class="muted">No stays this year.</p>'}
+    <button class="btn ghost" onclick="openAptSheet('${id}')">Edit apartment</button>
+  `);
 }
 function openAptSheet(id) {
   const a = id ? state.apartments.find((x) => x.id === id) : {};
@@ -1575,7 +1699,10 @@ function openAptSheet(id) {
     <h2>${id ? "Edit apartment" : "New apartment"}</h2>
     <label>Name</label><input id="ap-name" value="${esc(a.name || "")}" placeholder="e.g. Apartment Center 1">
     <label>Address</label><input id="ap-addr" value="${esc(a.address || "")}">
-    <label>Size (m²)</label><input id="ap-size" type="number" inputmode="decimal" value="${a.size_m2 ?? ""}">
+    <div class="grid2">
+      <div><label>Size (m²)</label><input id="ap-size" type="number" inputmode="decimal" value="${a.size_m2 ?? ""}"></div>
+      <div><label>Nightly rate (ден.)</label><input id="ap-rate" type="number" inputmode="decimal" value="${a.nightly_rate ?? ""}"></div>
+    </div>
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
     <label>Notes (opt.)</label><input id="ap-notes" value="${esc(a.notes || "")}">
     <button class="btn" onclick="saveApt('${id || ""}')">Save</button>
@@ -1584,16 +1711,17 @@ function openAptSheet(id) {
 }
 async function saveApt(id) {
   const row = { name: $("ap-name").value.trim(), address: $("ap-addr").value.trim() || null,
-    size_m2: parseFloat($("ap-size").value) || null, opening_balance: parseFloat($("ap-open").value) || 0,
+    size_m2: parseFloat($("ap-size").value) || null, nightly_rate: parseFloat($("ap-rate").value) || null,
+    opening_balance: parseFloat($("ap-open").value) || 0,
     notes: $("ap-notes").value.trim() || null };
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
-  closeSheet(); await refreshAll(); renderApt(); toast("Saved");
+  closeSheet(); await refreshAll(["apartments"]); renderApt(); toast("Saved");
 }
 async function delApt(id) {
   if (!confirm("Deactivate this apartment?")) return;
   try { await dbq(db.from("apartments").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
-  closeSheet(); await refreshAll(); renderApt();
+  closeSheet(); await refreshAll(["apartments"]); renderApt();
 }
 
 function renderHome() {
@@ -1677,7 +1805,7 @@ async function qcKey(ev) {
   const row = { title: t.title.join(" "), context: t.context, due_date: t.due_date, due_time: t.due_time, remind: !!t.due_time };
   if (!row.title) return toast("Enter a title");
   try { await dbq(db.from("tasks").insert(row), "Task not saved"); } catch { return; }
-  ev.target.value = ""; await refreshAll(); renderToday(); updateBadges(); toast(row.due_time ? "Added · reminder at " + row.due_time : "Added");
+  ev.target.value = ""; await refreshAll(["tasks"]); renderToday(); updateBadges(); toast(row.due_time ? "Added · reminder at " + row.due_time : "Added");
 }
 
 function updateBadges() {
