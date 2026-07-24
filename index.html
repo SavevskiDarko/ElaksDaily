@@ -479,10 +479,12 @@ function closeSheet() { $("sheet").classList.remove("on"); $("overlay").classLis
 /* ============================================================
    TASKS
 ============================================================ */
+const recurDays = (t) => (t.recur_days && t.recur_days.length) ? t.recur_days
+  : (t.recur_dow !== null && t.recur_dow !== undefined ? [t.recur_dow] : []);
 function occursOn(t, dateStr) {
   const d = new Date(dateStr + "T12:00");
   if (t.recurrence === "daily") return true;
-  if (t.recurrence === "weekly") return t.recur_dow === d.getDay();
+  if (t.recurrence === "weekly") return recurDays(t).includes(d.getDay());
   if (t.recurrence === "monthly") return t.recur_dom === d.getDate();
   return t.due_date === dateStr;
 }
@@ -517,8 +519,12 @@ function renderToday() {
     html += '<div class="sec" style="color:var(--danger)">Overdue</div>' + overdue.map(taskRow(today)).join("");
   }
   if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
-  html += todays.length ? todays.map(taskRow(today)).join("")
-    : ((overdue.length || inbox.length) ? "" : '<div class="empty">No tasks for today.<br>Add with +</div>');
+  if (todays.length) {
+    html += (overdue.length || inbox.length) ? '<div class="sec">Today</div>' : "";
+    html += todays.map(taskRow(today)).join("");
+  } else if (!overdue.length && !inbox.length) {
+    html += '<div class="empty">No tasks for today.<br>Add with +</div>';
+  }
   $("today-list").innerHTML = html;
 
   // week
@@ -540,7 +546,8 @@ const taskRow = (today) => (t) => {
     <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
     <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
-      ${t.recurrence ? '<span class="rec"> ↻</span>' : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
+      ${t.recurrence ? `<span class="rec"> ↻${t.recurrence === "weekly" && recurDays(t).length > 1
+        ? " " + recurDays(t).map((i) => ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][i]).join("") : ""}</span>` : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
     ${t.assigned_to ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
     ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}
   </div>`;
@@ -571,14 +578,20 @@ function openTaskSheet(id) {
     </div>
     <div class="grid2">
       <div><label>Repeat</label>
-        <select id="tk-rec">
+        <select id="tk-rec" onchange="tkRecChanged()">
           <option value="">Never</option>
           <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Every day</option>
-          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Weekly (that day)</option>
+          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Weekly — pick days</option>
           <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Monthly (that date)</option>
         </select></div>
       <div><label>Reminder</label>
         <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
+    </div>
+    <div id="tk-days" style="display:none">
+      <label>Repeat on</label>
+      <div class="chips" id="tk-dow">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) =>
+        `<button class="chip ${recurDays(t).includes(i) ? "on" : ""}" data-d="${i}"
+          onclick="this.classList.toggle('on')">${d}</button>`).join("")}</div>
     </div>
     <label>Assigned to</label>
     <select id="tk-who">
@@ -593,6 +606,18 @@ function openTaskSheet(id) {
     ${id ? `<button class="btn danger" onclick="delTask('${id}')">Delete</button>` : ""}
   `);
   renderCl(id || "");
+  tkRecChanged();
+}
+function tkRecChanged() {
+  const box = $("tk-days");
+  if (!box) return;
+  const weekly = $("tk-rec").value === "weekly";
+  box.style.display = weekly ? "" : "none";
+  if (weekly && !box.querySelector(".chip.on")) {
+    const d = new Date(($("tk-date").value || todayStr()) + "T12:00").getDay();
+    const btn = box.querySelector(`[data-d="${d}"]`);
+    if (btn) btn.classList.add("on");
+  }
 }
 function renderCl(id) {
   $("tk-cl").innerHTML = tkChecklist.map((it, i) => `
@@ -621,15 +646,22 @@ function clAdd(id) {
   if (inputs.length) inputs[inputs.length - 1].focus();
 }
 async function saveTask(id) {
-  const d = new Date($("tk-date").value + "T12:00");
+  const d = new Date(($("tk-date").value || todayStr()) + "T12:00");
   const rec = $("tk-rec").value || null;
+  let days = [];
+  if (rec === "weekly") {
+    days = [...$("tk-dow").querySelectorAll(".chip.on")].map((b) => parseInt(b.dataset.d));
+    if (!days.length) days = [d.getDay()];
+    days.sort((a, b) => a - b);
+  }
   const row = {
     title: $("tk-title").value.trim(),
     context: $("tk-ctx").querySelector(".chip.on").dataset.c,
     due_date: $("tk-date").value || null,
     due_time: $("tk-time").value || null,
     recurrence: rec,
-    recur_dow: rec === "weekly" ? d.getDay() : null,
+    recur_dow: rec === "weekly" ? days[0] : null,
+    recur_days: rec === "weekly" ? days : null,
     recur_dom: rec === "monthly" ? d.getDate() : null,
     remind: $("tk-rem").value === "1",
     assigned_to: $("tk-who").value || null,
