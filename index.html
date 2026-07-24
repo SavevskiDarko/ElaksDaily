@@ -214,7 +214,6 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
   <!-- TODAY -->
   <div class="view" id="v-today">
-    <input class="search" id="qc" placeholder="Quick add: Order cameras tomorrow 14:00 #elaks" onkeydown="qcKey(event)">
     <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
@@ -1809,35 +1808,6 @@ function offerExpired(o) {
   const d = new Date(o.offer_date + "T12:00");
   d.setDate(d.getDate() + (o.validity || 7));
   return d < new Date(todayStr() + "T12:00");
-}
-
-async function qcKey(ev) {
-  if (ev.key !== "Enter") return;
-  const raw = ev.target.value.trim(); if (!raw) return;
-  const t = { title: [], context: "work", due_date: todayStr(), due_time: null };
-  for (const w of raw.split(/\s+/)) {
-    const lw = w.toLowerCase();
-    if (lw === "#work" || lw === "#w") t.context = "work";
-    else if (lw === "#elaks" || lw === "#e") t.context = "elaks";
-    else if (lw === "#personal" || lw === "#p") t.context = "personal";
-    else if (lw === "#apts" || lw === "#a") t.context = "apts";
-    else if (lw === "today") t.due_date = todayStr();
-    else if (lw === "tomorrow") { const d = new Date(); d.setDate(d.getDate() + 1); t.due_date = d.toLocaleDateString("sv-SE"); }
-    else if (/^\d{1,2}\.\d{1,2}\.?$/.test(lw)) {
-      const p = lw.replace(/\.$/, "").split(".");
-      const d = new Date(); d.setMonth(parseInt(p[1]) - 1, parseInt(p[0]));
-      if (d < new Date(new Date().toDateString())) d.setFullYear(d.getFullYear() + 1);
-      t.due_date = d.toLocaleDateString("sv-SE");
-    }
-    else if (/^\d{1,2}:\d{2}$/.test(lw)) t.due_time = lw.padStart(5, "0");
-    else t.title.push(w);
-  }
-  if (!myCtx().length) return toast("No task access yet");
-  if (!myCtx().includes(t.context)) t.context = myCtx()[0];
-  const row = { title: t.title.join(" "), context: t.context, due_date: t.due_date, due_time: t.due_time, remind: !!t.due_time };
-  if (!row.title) return toast("Enter a title");
-  try { await dbq(db.from("tasks").insert(row), "Task not saved"); } catch { return; }
-  ev.target.value = ""; await refreshAll(["tasks"]); renderToday(); updateBadges(); toast(row.due_time ? "Added · reminder at " + row.due_time : "Added");
 }
 
 function updateBadges() {
