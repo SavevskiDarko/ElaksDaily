@@ -313,7 +313,6 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.2.0/dist/pizzip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.69.0/build/docxtemplater.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docxtemplater-image-module-free@1.1.1/build/imagemodule.js"></script>
 <script>
 /* ============================================================
    CONFIG — fill in these 3 values (see SETUP.md)
@@ -1223,6 +1222,51 @@ async function printOffer(o) {
     alert("Could not build the PDF view: " + e.message);
   }
 }
+// Puts real pictures where the template left «IMG:n» markers.
+// Done by hand so the document pipeline owns no third-party image library.
+function dataUrlToBytes(dataUrl) {
+  const bin = atob(dataUrl.split(",")[1] || "");
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function drawingXml(rid, wPx, hPx, id) {
+  const cx = Math.round(wPx * 9525), cy = Math.round(hPx * 9525);   // px -> EMU
+  const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    `<wp:docPr id="${5000 + id}" name="Photo ${id}"/>` +
+    `<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${A}" noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+    `<a:graphic xmlns:a="${A}"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:nvPicPr><pic:cNvPr id="${id}" name="Photo ${id}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+}
+function insertPictures(zip, photos) {
+  let xml = zip.file("word/document.xml").asText();
+  if (xml.indexOf("«IMG:") === -1) return;
+  const relsPath = "word/_rels/document.xml.rels";
+  let rels = zip.file(relsPath).asText();
+  let n = 0;
+  xml = xml.replace(/<w:r(?:>| [^>]*>)(?:(?!<\/w:r>).)*?«IMG:(\d+)»(?:(?!<\/w:r>).)*?<\/w:r>/g, (run, idxStr) => {
+    const p = photos[parseInt(idxStr)];
+    if (!p) return "";
+    n++;
+    const isPng = p.dataUrl.startsWith("data:image/png");
+    const name = `photo${n}.${isPng ? "png" : "jpeg"}`;
+    const rid = `rIdPhoto${n}`;
+    zip.file("word/media/" + name, dataUrlToBytes(p.dataUrl), { binary: true });
+    rels = rels.replace("</Relationships>",
+      `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${name}"/></Relationships>`);
+    return drawingXml(rid, p.w, p.h, n);
+  });
+  xml = xml.replace(/«IMG:\d+»/g, "");   // safety net
+  zip.file("word/document.xml", xml);
+  zip.file(relsPath, rels);
+}
 function imgDims(src) {
   return new Promise((res) => {
     const im = new Image();
@@ -1240,29 +1284,21 @@ async function generateDocx(o) {
     const buf = await res.arrayBuffer();
     const head = new Uint8Array(buf.slice(0, 2));
     if (head[0] !== 0x50 || head[1] !== 0x4B) throw new Error("Template file on server is not a valid .docx");
-    // product photos: fetch, measure, and prepare the image module
+    // product photos: fetch and measure (inserted into the document after rendering)
     const ids = [...new Set((o.items || []).filter((it) => it.article_id).map((it) => it.article_id))];
-    const b64Of = {}, sizes = new Map();
-    if (ids.length && window.ImageModule) {
+    const photo = {};   // article_id -> { dataUrl, w, h }
+    if (ids.length) {
       const { data: imgs } = await db.from("article_images").select("article_id, data").in("article_id", ids);
       for (const r of imgs || []) {
-        const b64 = (r.data || "").split(",")[1];
-        if (!b64) continue;
+        if (!r.data) continue;
         const d = await imgDims(r.data);
         const MAXW = 120, MAXH = 95;
         let w = MAXW, h = Math.round(MAXW * d.h / d.w);
         if (h > MAXH) { h = MAXH; w = Math.round(MAXH * d.w / d.h); }
-        b64Of[r.article_id] = b64;
-        sizes.set(b64, [w, h]);
+        photo[r.article_id] = { dataUrl: r.data, w, h };
       }
     }
-    const mods = [];
-    if (sizes.size) mods.push(new window.ImageModule({
-      centered: false,
-      getImage: (tag) => { const bin = atob(tag); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; },
-      getSize: (img, tag) => sizes.get(tag) || [120, 90],
-    }));
-    const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true, modules: mods });
+    const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true });
     const client = state.clients.find((c) => c.id === o.client_id);
     doc.render({
       title: o.title, system: o.system || "",
@@ -1277,14 +1313,14 @@ async function generateDocx(o) {
         qty: it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0)),
         price: it.free ? "" : fmt(it.price || 0),
         total: itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0),
-        has_img: !!b64Of[it.article_id],
-        img: b64Of[it.article_id] || "",
+        img_mark: photo[it.article_id] ? `«IMG:${i}»` : "",
       })),
       total_note: o.total_note || "", grand_total: fmt(o.grand_total),
       footnote: metersOpen.length
         ? `* Ставките ${metersOpen.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
         : "",
     });
+    insertPictures(doc.getZip(), (o.items || []).map((it) => photo[it.article_id] || null));
     const blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
