@@ -867,7 +867,7 @@ function openCashSheet() {
       const v = parseFloat(e.amount) || 0;
       return `<div class="mov tapp" onclick="openCashEntry('${e.id}')">
         <span><b class="mono" style="color:${v >= 0 ? "var(--personal)" : "var(--danger)"}">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v))}</b>
-          ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}</span>
+          ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}${e.offer_id ? ' <span class="muted">· offer</span>' : ""}</span>
         <span class="muted">${new Date(e.created_at).toLocaleDateString("en-GB")} ›</span></div>`;
     }).join("") || '<p class="muted">No entries yet — add your starting amount with "+ Add cash".</p>'}
   `);
@@ -1078,7 +1078,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${o.paid_at ? ' · <span style="color:var(--personal)">paid</span>' : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
     </div>`).join("") : '<div class="empty">No offers.<br>Create with +</div>';
@@ -1124,11 +1124,22 @@ async function openOfferSheet(id) {
     <div id="of-items"></div>
     <button class="btn sm ghost" onclick="addFreeItem()">+ Manual item (installation…)</button>
     <div class="totalbar"><span>Total</span><span class="mono" id="of-total">0 ден.</span></div>
+    <div class="row" style="justify-content:space-between;margin-top:6px">
+      <span class="muted nw">Profit (sell − purchase + manual items)</span>
+      <span class="mono" id="of-profit">0 ден.</span></div>
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
     <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
     ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
+    ${id && o.paid_at
+      ? `<div class="card" style="border-color:var(--personal)">
+           <div class="row" style="justify-content:space-between"><b style="color:var(--personal)">Paid</b>
+             <span class="mono">${fmt(o.paid_amount)} ден.</span></div>
+           <div class="muted">${new Date(o.paid_at + "T12:00").toLocaleDateString("en-GB")} · ${o.paid_method === "cash" ? "cash — added to the register" : "bank"}</div>
+           <button class="btn sm ghost" style="margin-top:8px" onclick="undoPayment('${id}')">Undo payment</button>
+         </div>`
+      : (id ? `<button class="btn ghost" onclick="payOfferSheet('${id}')">Mark as paid</button>` : "")}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
     ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
@@ -1149,12 +1160,36 @@ function renderPicker() {
 }
 function addOfferItem(articleId) {
   const a = state.stock.find((x) => x.id === articleId);
-  offerItems.push({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit, qty: a.unit === "m" ? null : 1, price: a.sell_price });
+  offerItems.push({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit,
+    qty: a.unit === "m" ? null : 1, price: a.sell_price, cost: a.purchase_price || 0 });
   $("of-search").value = ""; $("of-picker").innerHTML = ""; renderOfferItems();
 }
 function addFreeItem() {
   offerItems.push({ free: true, name: "Монтажа, подесување и обука", specs: "", unit: "ком", qty: null, price: 0 });
   renderOfferItems();
+}
+// Cost is snapshotted on the item when it is added, so changing a supplier
+// price later never rewrites the profit on offers already made.
+function itemCost(it) {
+  if (it.free) return 0;
+  if (it.cost !== undefined && it.cost !== null) return parseFloat(it.cost) || 0;
+  const a = state.stock.find((x) => x.id === it.article_id);
+  return a ? (parseFloat(a.purchase_price) || 0) : 0;
+}
+function itemProfit(it) {
+  const t = itemTotal(it);
+  if (t === null) return null;                       // meters not measured yet
+  const q = it.free ? 0 : (it.unit === "m" ? (it.consumed || 0) : (it.qty || 0));
+  return t - itemCost(it) * q;
+}
+// { value, pending } — pending marks per-meter rows still waiting on Close job
+function profitOf(items) {
+  let value = 0, pending = false;
+  for (const it of items || []) {
+    const p = itemProfit(it);
+    if (p === null) pending = true; else value += p;
+  }
+  return { value, pending };
 }
 function itemTotal(it) {
   if (it.unit === "m") return it.consumed ? it.consumed * (it.price || 0) : null; // measured after install
@@ -1187,6 +1222,12 @@ function updateTotal() {
     if (t !== null) sum += t;
   });
   $("of-total").textContent = fmt(sum) + " ден.";
+  const pr = profitOf(offerItems);
+  const pEl = $("of-profit");
+  if (pEl) {
+    pEl.textContent = fmt(pr.value) + " ден." + (pr.pending ? " + meters" : "");
+    pEl.style.color = pr.value < 0 ? "var(--danger)" : "var(--personal)";
+  }
   const metersOpen = offerItems.filter((it) => it.unit === "m" && !it.consumed);
   const noteEl = $("of-note");
   if (noteEl && !noteEl.dataset.manual) {
@@ -1431,6 +1472,60 @@ async function createJobTask(id) {
   };
   try { await dbq(db.from("tasks").insert(row), "Task not created"); } catch { return; }
   closeSheet(); await refreshAll(["tasks"]); tab("today"); toast("Installation task created");
+}
+let payMethod = "cash";
+function payOfferSheet(id) {
+  const o = state.offers.find((x) => x.id === id);
+  const client = state.clients.find((c) => c.id === o.client_id);
+  payMethod = "cash";
+  const pr = profitOf(o.items);
+  openSheet(`
+    <h2>Mark offer as paid</h2>
+    <p class="muted">${o.number}${client ? " · " + esc(client.name) : ""}</p>
+    <label>Paid by</label>
+    <div class="chips" id="pay-m">
+      <button class="chip on" onclick="setPayMethod('cash')">Cash</button>
+      <button class="chip" onclick="setPayMethod('bank')">Bank</button>
+    </div>
+    <label>Amount received (ден.)</label>
+    <input id="pay-amt" type="number" inputmode="decimal" min="0" step="any" value="${o.grand_total ?? 0}">
+    <label>Date</label><input id="pay-date" type="date" value="${todayStr()}">
+    <p class="muted" id="pay-hint">The full amount goes into the cash register. Profit on this offer: ${fmt(pr.value)} ден.${pr.pending ? " + meters" : ""}</p>
+    <button class="btn" onclick="savePayment('${id}')">Confirm payment</button>
+  `);
+}
+function setPayMethod(m) {
+  payMethod = m;
+  [...$("pay-m").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", (i === 0) === (m === "cash")));
+  $("pay-hint").textContent = m === "cash"
+    ? "The full amount goes into the cash register."
+    : "Recorded as paid to the bank — the cash register is not touched.";
+}
+async function savePayment(id) {
+  const o = state.offers.find((x) => x.id === id);
+  const client = state.clients.find((c) => c.id === o.client_id);
+  const amt = parseFloat($("pay-amt").value);
+  if (!amt || amt <= 0) return toast("Enter the amount received");
+  const date = $("pay-date").value || todayStr();
+  try {
+    await dbq(db.from("offers").update({ paid_at: date, paid_method: payMethod, paid_amount: amt }).eq("id", id), "Not saved");
+    if (payMethod === "cash") {
+      await dbq(db.from("elaks_cash").insert({
+        amount: amt, offer_id: id,
+        note: `Offer ${o.number}${client ? " · " + client.name : ""}`,
+      }), "Cash entry not saved");
+    }
+  } catch { return; }
+  closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render();
+  toast(payMethod === "cash" ? "Paid — added to the cash register" : "Marked as paid");
+}
+async function undoPayment(id) {
+  if (!confirm("Undo this payment? Any cash register entry for it will be removed too.")) return;
+  try {
+    await dbq(db.from("elaks_cash").delete().eq("offer_id", id), "Cash entry not removed");
+    await dbq(db.from("offers").update({ paid_at: null, paid_method: null, paid_amount: null }).eq("id", id), "Not saved");
+  } catch { return; }
+  closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render(); toast("Payment undone");
 }
 function duplicateOffer(id) {
   const src = state.offers.find((x) => x.id === id);
@@ -1944,11 +2039,18 @@ function renderHome() {
     const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock);
     const sent = state.offers.filter((o) => o.status === "sent");
     const expired = sent.filter(offerExpired);
+    const curMonth = today.slice(0, 7);
+    const monthProfit = state.offers.filter((o) => (o.paid_at || "").slice(0, 7) === curMonth)
+      .reduce((s, o) => s + profitOf(o.items).value, 0);
+    const owed = state.offers.filter((o) => o.status === "accepted" && !o.paid_at);
+    const owedSum = sumBy(owed, (o) => o.grand_total);
     html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
       <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
       <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}${expired.length ? ` <span class="hflag">(${expired.length} expired)</span>` : ""}</b></div>
+      <div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>
+      ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${owed.length} · ${fmt(owedSum)} ден.</b></div>` : ""}
     </div>`;
   }
 
