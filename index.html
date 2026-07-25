@@ -142,6 +142,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hrow b{font-family:var(--mono)}
 .hbig{font-size:26px;font-weight:700;font-family:var(--cond)}
 .hflag{color:var(--danger);font-weight:600}
+.mov.tapp{cursor:pointer}
+.mov.tapp:active{opacity:.6}
 .bankrow{justify-content:space-between;align-items:baseline;margin-top:7px}
 .nw{white-space:nowrap}
 .calc{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
@@ -860,8 +862,14 @@ function openCashSheet() {
       <button class="btn sm" style="width:100%" onclick="cashAdjustSheet(1)">+ Add cash</button>
       <button class="btn sm ghost" style="width:100%" onclick="cashAdjustSheet(-1)">− Withdraw</button>
     </div>
-    <div class="sec">Last entries</div>
-    ${state.cash.slice(0, 15).map((e) => `<div class="mov"><span>${(parseFloat(e.amount) || 0) >= 0 ? "+" : "−"}${fmt(Math.abs(e.amount))} ${esc(e.note || "")}</span><span class="muted">${new Date(e.created_at).toLocaleDateString("en-GB")}</span></div>`).join("") || '<p class="muted">No entries yet — add your starting amount with "+ Add cash".</p>'}
+    <div class="sec">Last entries <span class="muted" style="font-weight:400">· tap to edit</span></div>
+    ${state.cash.map((e) => {
+      const v = parseFloat(e.amount) || 0;
+      return `<div class="mov tapp" onclick="openCashEntry('${e.id}')">
+        <span><b class="mono" style="color:${v >= 0 ? "var(--personal)" : "var(--danger)"}">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v))}</b>
+          ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}</span>
+        <span class="muted">${new Date(e.created_at).toLocaleDateString("en-GB")} ›</span></div>`;
+    }).join("") || '<p class="muted">No entries yet — add your starting amount with "+ Add cash".</p>'}
   `);
 }
 function cashAdjustSheet(dir) {
@@ -879,6 +887,47 @@ async function saveCashAdjust(dir) {
   try { await dbq(db.from("elaks_cash").insert({ amount: dir * amt, note: $("ch-note").value.trim() || null }), "Not saved"); } catch { return; }
   closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
   setTimeout(openCashSheet, 240);
+}
+let cashDir = 1;
+function openCashEntry(id) {
+  const e = state.cash.find((x) => x.id === id);
+  if (!e) return toast("Entry not found");
+  const v = parseFloat(e.amount) || 0;
+  cashDir = v >= 0 ? 1 : -1;
+  openSheet(`
+    <h2>Edit cash entry</h2>
+    <p class="muted">${new Date(e.created_at).toLocaleString("en-GB")}</p>
+    <label>Type</label>
+    <div class="chips" id="ce-dir">
+      <button class="chip ${cashDir > 0 ? "on" : ""}" onclick="setCashDir(1)">+ Money in</button>
+      <button class="chip ${cashDir < 0 ? "on" : ""}" onclick="setCashDir(-1)">− Money out</button>
+    </div>
+    <label>Amount (ден.)</label>
+    <input id="ce-amt" type="number" inputmode="decimal" min="0" step="any" value="${Math.abs(v)}">
+    <label>Note</label><input id="ce-note" value="${esc(e.note || "")}">
+    ${e.movement_id ? '<p class="muted">This entry came from a stock movement. Changing it here only corrects the money — the stock stays as it was.</p>' : ""}
+    <button class="btn" onclick="saveCashEntry('${id}')">Save</button>
+    <button class="btn danger" onclick="delCashEntry('${id}', ${e.movement_id ? "true" : "false"})">Delete entry</button>
+  `);
+}
+function setCashDir(d) {
+  cashDir = d;
+  [...$("ce-dir").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", (i === 0) === (d > 0)));
+}
+async function saveCashEntry(id) {
+  const amt = parseFloat($("ce-amt").value);
+  if (!amt || amt <= 0) return toast("Enter an amount");
+  const row = { amount: cashDir * Math.abs(amt), note: $("ce-note").value.trim() || null };
+  try { await dbq(db.from("elaks_cash").update(row).eq("id", id), "Not saved"); } catch { return; }
+  closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
+  setTimeout(openCashSheet, 240); toast("Entry updated");
+}
+async function delCashEntry(id, linked) {
+  const extra = linked ? "\n\nThe stock movement it came from will stay — remove that separately if it was also wrong." : "";
+  if (!confirm("Delete this cash entry?" + extra)) return;
+  try { await dbq(db.from("elaks_cash").delete().eq("id", id), "Not deleted"); } catch { return; }
+  closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
+  setTimeout(openCashSheet, 240); toast("Entry deleted");
 }
 let arImg = { mode: "keep", thumb: null, full: null };
 function openArticleSheet(id) {
