@@ -142,13 +142,22 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hrow b{font-family:var(--mono)}
 .hbig{font-size:26px;font-weight:700;font-family:var(--cond)}
 .hflag{color:var(--danger);font-weight:600}
+.bankrow{justify-content:space-between;align-items:baseline;margin-top:7px}
+.nw{white-space:nowrap}
+.calc{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 .hok{color:var(--personal);font-weight:600}
-.cal-apt{font-weight:600;margin:12px 0 5px}
-.cal-row{display:flex;gap:3px;overflow-x:auto;padding-bottom:4px}
-.cal-d{width:26px;height:32px;flex:none;border-radius:7px;background:var(--line);color:var(--muted);
-  font-size:10.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1}
+.cal-apt{font-weight:600;margin:14px 0 6px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px}
+.cal-head span{text-align:center;font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.cal-head span.we{color:var(--ink)}
+.cal-d{aspect-ratio:1/1;border-radius:9px;background:var(--line);color:var(--muted);
+  font-size:13px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  line-height:1.1;padding:0;min-height:38px}
 .cal-d.bk{background:var(--personal);color:#fff}
-.cal-d.we{outline:1px solid var(--line)}
+.cal-d.pad{background:transparent;pointer-events:none}
+.cal-d.now{box-shadow:inset 0 0 0 2px var(--amber)}
+.cal-d small{font-size:9.5px;font-weight:700;opacity:.95}
 
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
@@ -1581,6 +1590,12 @@ const BILL_TYPES = ["electricity", "water", "internet", "building", "heating", "
 const BILL_LBL = { electricity: "Electricity", water: "Water", internet: "Internet", building: "Building", heating: "Heating", booking: "Booking" };
 const sumBy = (arr, f) => arr.reduce((a, x) => a + (parseFloat(f(x)) || 0), 0);
 
+// one row of the apartments bank: net on the right, the arithmetic beneath it
+function bankRow(label, inc, bil) {
+  return `<div class="row bankrow"><span class="muted nw">${label}</span>
+    <span class="mono" style="text-align:right"><b>${fmt(inc - bil)}</b> ден.
+      <small class="calc">${fmt(inc)} − ${fmt(bil)}</small></span></div>`;
+}
 function renderApt() {
   const curM = new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0");
   const yr = String(new Date().getFullYear());
@@ -1600,13 +1615,11 @@ function renderApt() {
   $("apt-bank").innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between"><b>Apartments bank</b>
       <span class="muted">${occ}/${state.apartments.length} occupied tonight</span></div>
-    <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">This month</span>
-      <span class="mono">${fmt(incM)} − ${fmt(bilM)} = <b>${fmt(incM - bilM)}</b> ден.</span></div>
-    <div class="row" style="justify-content:space-between"><span class="muted">This year</span>
-      <span class="mono">${fmt(incY)} − ${fmt(bilY)} = <b>${fmt(incY - bilY)}</b> ден.</span></div>
-    <div class="row" style="justify-content:space-between"><span class="muted">Cash in hand</span>
+    ${bankRow("This month", incM, bilM)}
+    ${bankRow("This year", incY, bilY)}
+    <div class="row bankrow"><span class="muted nw">Cash in hand</span>
       <span class="mono"><b>${fmt(cashAll)}</b> ден.</span></div>
-    ${soon ? `<div class="row" style="justify-content:space-between"><span class="muted">Upcoming bookings</span>
+    ${soon ? `<div class="row bankrow"><span class="muted nw">Upcoming bookings</span>
       <span class="mono">${fmt(soon)} ден.</span></div>` : ""}
   </div>`;
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
@@ -1627,21 +1640,26 @@ function renderCalendar() {
     <button class="chip" onclick="shiftAptMonth(-1)">‹</button><b>${label}</b>
     <button class="chip" onclick="shiftAptMonth(1)">›</button></div>
     <p class="muted" style="margin-bottom:4px">Tap a free day to book it, a booked day to open the stay.</p>`;
+  // Monday-first month grid: the whole month is visible without scrolling sideways
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const headRow = `<div class="cal-head">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    .map((d, i) => `<span class="${i > 4 ? "we" : ""}">${d}</span>`).join("")}</div>`;
   for (const a of state.apartments) {
     const mine = state.stays.filter((s) => s.apartment_id === a.id);
-    let cells = "";
+    let cells = '<button class="cal-d pad"></button>'.repeat(lead);
+    let nights = 0;
     for (let d = 1; d <= days; d++) {
       const ds = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const st = mine.find((s) => s.check_in <= ds && s.check_out > ds);
-      const dow = new Date(ds + "T12:00").getDay();
-      const cls = "cal-d" + (st ? " bk" : "") + (dow === 0 || dow === 6 ? " we" : "");
+      if (st) nights++;
+      const cls = "cal-d" + (st ? " bk" : "") + (ds === today ? " now" : "");
       const act = st ? `openStaySheet('${st.id}')` : `openStaySheet(null, { apartment_id: '${a.id}', check_in: '${ds}' })`;
-      const mark = ds === today ? "•" : (st ? esc((st.guest_name || "?").trim().charAt(0).toUpperCase()) : "");
-      cells += `<button class="${cls}" onclick="${act}" title="${st ? esc(st.guest_name) : "free"}">${d}<span>${mark}</span></button>`;
+      const who = st ? `<small>${esc(initials(st.guest_name))}</small>` : "";
+      cells += `<button class="${cls}" onclick="${act}" title="${st ? esc(st.guest_name) : "free"}">${d}${who}</button>`;
     }
-    const booked = mine.filter((s) => (s.check_in || "").slice(0, 7) <= state.aptMonth && (s.check_out || "") > state.aptMonth + "-01").length;
-    html += `<div class="cal-apt">${esc(a.name)} <span class="muted" style="font-weight:400">· ${booked} stay(s)</span></div>
-      <div class="cal-row">${cells}</div>`;
+    html += `<div class="cal-apt"><span>${esc(a.name)}</span>
+      <span class="muted" style="font-weight:400;white-space:nowrap">${nights}/${days} nights</span></div>
+      ${headRow}<div class="cal-grid">${cells}</div>`;
   }
   $("apt-body").innerHTML = html;
 }
