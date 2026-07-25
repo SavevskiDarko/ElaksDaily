@@ -337,8 +337,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  mineOnly: false, people: [], team: [],
-  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [], cashTotal: 0 };
+  mineOnly: false, people: [],
+  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [],
+  cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
 async function dbq(q, failMsg) {
@@ -416,6 +417,7 @@ const LOADERS = {
   cash:       { need: () => state.perm.elaks,   q: () => db.from("elaks_cash").select("*").order("created_at", { ascending: false }).limit(30) },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
+  aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
   stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
   bills:      { need: () => state.perm.apts,    q: () => db.from("bills").select("*").gte("month", backMonths(24)) },
 };
@@ -427,7 +429,7 @@ async function refreshAll(only) {
   keys.forEach((k, i) => {
     const r = res[i];
     if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
-    if (LOADERS[k].scalar) state.cashTotal = (r.data && r.data.balance) || 0;
+    if (LOADERS[k].scalar) state[k] = (r.data && r.data.balance != null) ? parseFloat(r.data.balance) : 0;
     else state[k] = r.data ?? [];
   });
   if (failed.length) {
@@ -834,6 +836,8 @@ function mvCashToggle(unitPrice) {
   }
 }
 const cashBal = () => parseFloat(state.cashTotal) || 0;
+// Guests pay on arrival, so a booking is only money in hand once it has begun.
+const stayStarted = (s) => !!s.check_in && s.check_in <= todayStr();
 const personName = (uid) => {
   const p = state.people.find((x) => x.user_id === uid);
   return p ? (p.display_name || "Unnamed") : "";
@@ -1583,7 +1587,12 @@ function renderApt() {
   const inM = (d, m) => (d || "").slice(0, 7) === m;
   const incM = sumBy(state.stays.filter((s) => inM(s.check_in, curM)), (s) => s.amount);
   const incY = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 4) === yr), (s) => s.amount);
-  const incAll = sumBy(state.stays, (s) => s.amount) + sumBy(state.apartments, (a) => a.opening_balance);
+  const recAll = sumBy(state.stays.filter(stayStarted), (s) => s.amount);
+  const openAll = sumBy(state.apartments, (a) => a.opening_balance);
+  const bilAll = sumBy(state.bills, (b) => b.amount);
+  // the view sums the full history; the local figure is the fallback if it is missing
+  const cashAll = state.aptCash === null ? (recAll + openAll - bilAll) : state.aptCash;
+  const soon = sumBy(state.stays.filter((s) => !stayStarted(s)), (s) => s.amount);
   const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
   const bilY = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
   const t = todayStr();
@@ -1592,11 +1601,13 @@ function renderApt() {
     <div class="row" style="justify-content:space-between"><b>Apartments bank</b>
       <span class="muted">${occ}/${state.apartments.length} occupied tonight</span></div>
     <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">This month</span>
-      <span class="mono">+${fmt(incM)} −${fmt(bilM)} = <b>${fmt(incM - bilM)}</b> ден.</span></div>
+      <span class="mono">${fmt(incM)} − ${fmt(bilM)} = <b>${fmt(incM - bilM)}</b> ден.</span></div>
     <div class="row" style="justify-content:space-between"><span class="muted">This year</span>
-      <span class="mono">+${fmt(incY)} −${fmt(bilY)} = <b>${fmt(incY - bilY)}</b> ден.</span></div>
-    <div class="row" style="justify-content:space-between"><span class="muted">All-time cash (incl. starting amounts)</span>
-      <span class="mono"><b>${fmt(incAll)}</b> ден.</span></div>
+      <span class="mono">${fmt(incY)} − ${fmt(bilY)} = <b>${fmt(incY - bilY)}</b> ден.</span></div>
+    <div class="row" style="justify-content:space-between"><span class="muted">Cash in hand</span>
+      <span class="mono"><b>${fmt(cashAll)}</b> ден.</span></div>
+    ${soon ? `<div class="row" style="justify-content:space-between"><span class="muted">Upcoming bookings</span>
+      <span class="mono">${fmt(soon)} ден.</span></div>` : ""}
   </div>`;
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
@@ -1709,12 +1720,12 @@ async function saveStay(id) {
     if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) alert("Those dates are already booked for this apartment.");
     return;
   }
-  closeSheet(); await refreshAll(["stays"]); renderApt(); toast("Saved");
+  closeSheet(); await refreshAll(["stays", "aptCash"]); renderApt(); toast("Saved");
 }
 async function delStay(id) {
   if (!confirm("Delete this stay?")) return;
   try { await dbq(db.from("stays").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(["stays"]); renderApt();
+  closeSheet(); await refreshAll(["stays", "aptCash"]); renderApt();
 }
 
 function shiftAptMonth(dir) {
@@ -1765,7 +1776,7 @@ async function setBill(aptId, type, field, value) {
   row[field] = value;
   if (field === "paid") row.paid_on = value ? todayStr() : null;
   try { await dbq(db.from("bills").upsert(row, { onConflict: "apartment_id,month,type" }), "Bill not saved"); } catch { return; }
-  await refreshAll(["bills"]); renderApt();
+  await refreshAll(["bills", "aptCash"]); renderApt();
 }
 
 function renderAptList() {
@@ -1791,7 +1802,7 @@ function openAptStatement(id, year) {
     if (!inc && !bil) continue;
     rows += `<div class="mov"><span>${new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
       <span class="muted">${nights ? nights + "n" : ""}</span></span>
-      <span class="mono">+${fmt(inc)} −${fmt(bil)} = <b>${fmt(inc - bil)}</b></span></div>`;
+      <span class="mono">${fmt(inc)} − ${fmt(bil)} = <b>${fmt(inc - bil)}</b></span></div>`;
   }
   const bySource = {};
   for (const s of mine.filter((s) => (s.check_in || "").slice(0, 4) === String(y)))
@@ -1839,12 +1850,12 @@ async function saveApt(id) {
     notes: $("ap-notes").value.trim() || null };
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
-  closeSheet(); await refreshAll(["apartments"]); renderApt(); toast("Saved");
+  closeSheet(); await refreshAll(["apartments", "aptCash"]); renderApt(); toast("Saved");
 }
 async function delApt(id) {
   if (!confirm("Deactivate this apartment?")) return;
   try { await dbq(db.from("apartments").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
-  closeSheet(); await refreshAll(["apartments"]); renderApt();
+  closeSheet(); await refreshAll(["apartments", "aptCash"]); renderApt();
 }
 
 function renderHome() {
