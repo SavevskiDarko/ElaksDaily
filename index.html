@@ -200,6 +200,14 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .pv-valid{color:#C00000;font-weight:700;text-align:center;margin-bottom:8mm}
 .pv-footer{display:block;margin:10mm auto 0;width:57mm;height:auto}
 .pv-items tr{page-break-inside:avoid}
+.rp-h1{font-size:13pt;font-weight:700;margin:0 0 1mm}
+.rp-sub{color:#555;font-size:9.5pt;margin-bottom:6mm}
+.rp-tbl{width:100%;border-collapse:collapse;font-size:9.5pt;margin-bottom:6mm}
+.rp-tbl th{text-align:left;border-bottom:1px solid #8a8a8a;padding:1.8mm 1mm;font-weight:700}
+.rp-tbl td{border-bottom:1px solid #dcdcdc;padding:1.8mm 1mm}
+.rp-tbl th.r,.rp-tbl td.r{text-align:right}
+.rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
+  display:flex;justify-content:space-between;margin-bottom:6mm}
 @media (prefers-color-scheme: dark){
   :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5}
   .chip{background:var(--card);color:var(--ink)}
@@ -354,8 +362,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  loading: true, mineOnly: false, people: [], cashMonth: null,
-  tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [],
+  loading: true, mineOnly: false, people: [], cashMonth: null, repMonth: null,
+  tasks: [], stock: [], clients: [], offers: [], payments: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -439,6 +447,7 @@ const LOADERS = {
   clients:    { need: () => state.perm.elaks,   q: () => db.from("clients").select("*").order("name") },
   offers:     { need: () => state.perm.elaks,   q: () => db.from("offers").select("*, clients(name)").order("created_at", { ascending: false }).limit(150) },
   cash:       { need: () => state.perm.elaks,   q: () => db.from("elaks_cash").select("*").order("created_at", { ascending: false }).limit(30) },
+  payments:   { need: () => state.perm.elaks,   q: () => db.from("offer_payments").select("*").order("paid_on", { ascending: false }).limit(400) },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
@@ -778,6 +787,10 @@ function renderInv() {
     <div class="row" style="justify-content:space-between"><span class="muted">${state.stock.length} articles</span><b style="color:${lowN ? "var(--danger)" : "inherit"}">${lowN} low</b></div>
     <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openCashSheet()">
       <span class="muted">Cash register</span><b class="mono">${fmt(cashBal())} ден. ›</b></div>
+    <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openReportSheet()">
+      <span class="muted">Monthly report</span><b>›</b></div>
+    <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openOrderSheet()">
+      <span class="muted">Order list${lowN ? ` (${lowN})` : ""}</span><b>›</b></div>
   </div>`;
   $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
     <div class="card art" onclick="openArticleDetail('${a.id}')">
@@ -1125,7 +1138,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${o.paid_at ? ' · <span style="color:var(--personal)">paid</span>' : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
     </div>`).join("") : (state.loading ? SKEL(3) : '<div class="empty">No offers.<br>Create with +</div>');
@@ -1179,18 +1192,7 @@ async function openOfferSheet(id) {
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
     <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
     ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
-    ${id && o.paid_at
-      ? `<div class="card" style="border-color:var(--personal)">
-           <div class="row" style="justify-content:space-between">
-             <b style="color:var(--personal)">${(parseFloat(o.paid_amount) || 0) + 0.005 < (parseFloat(o.grand_total) || 0) ? "Part paid" : "Paid"}</b>
-             <span class="mono">${fmt(o.paid_amount)} ден.</span></div>
-           ${(parseFloat(o.paid_amount) || 0) + 0.005 < (parseFloat(o.grand_total) || 0)
-             ? `<div class="row" style="justify-content:space-between"><span class="muted nw">Still owed</span>
-                  <span class="mono" style="color:var(--amber)">${fmt((o.grand_total || 0) - (o.paid_amount || 0))} ден.</span></div>` : ""}
-           <div class="muted">${new Date(o.paid_at + "T12:00").toLocaleDateString("en-GB")} · ${o.paid_method === "cash" ? "cash — added to the register" : "bank"}</div>
-           <button class="btn sm ghost" style="margin-top:8px" onclick="undoPayment('${id}')">Undo payment</button>
-         </div>`
-      : (id ? `<button class="btn ghost" onclick="payOfferSheet('${id}')">Mark as paid</button>` : "")}
+    ${id ? paymentsBlock(o) : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
     ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
@@ -1421,6 +1423,174 @@ function insertPictures(zip, photos) {
   zip.file("word/document.xml", xml);
   zip.file(relsPath, rels);
 }
+/* ---------- monthly report ---------- */
+let lastReport = null;
+async function openReportSheet(month) {
+  const mo = month || state.repMonth || todayStr().slice(0, 7);
+  state.repMonth = mo;
+  const [y, m] = mo.split("-").map(Number);
+  const from = `${mo}-01`, to = new Date(y, m, 1).toLocaleDateString("sv-SE");
+  let pays = [], cash = [], movs = [], failed = false;
+  try {
+    const [p, c, v] = await Promise.all([
+      db.from("offer_payments").select("*").gte("paid_on", from).lt("paid_on", to),
+      db.from("elaks_cash").select("amount").gte("created_at", from).lt("created_at", to),
+      db.from("movements").select("article_id, qty").eq("type", "out").gte("created_at", from).lt("created_at", to),
+    ]);
+    if (p.error || c.error || v.error) failed = true;
+    pays = p.data || []; cash = c.data || []; movs = v.data || [];
+  } catch (e) { failed = true; console.error(e); }
+
+  const received = sumBy(pays, (r) => r.amount);
+  const inCash = sumBy(pays.filter((r) => r.method === "cash"), (r) => r.amount);
+  const cashIn = cash.reduce((s, e) => s + Math.max(0, parseFloat(e.amount) || 0), 0);
+  const cashOut = cash.reduce((s, e) => s + Math.min(0, parseFloat(e.amount) || 0), 0);
+  const settled = state.offers.filter((o) => offerSettled(o) && (o.paid_at || "").slice(0, 7) === mo);
+  const profit = settled.reduce((s, o) => s + profitOf(o.items).value, 0);
+  const agg = {};
+  for (const mv of movs) agg[mv.article_id] = (agg[mv.article_id] || 0) + (parseFloat(mv.qty) || 0);
+  const top = Object.entries(agg).map(([aid, q]) => {
+    const a = state.stock.find((x) => x.id === aid);
+    return { name: a ? a.name : "(removed article)", qty: q, unit: a ? unitLbl(a.unit) : "" };
+  }).sort((a, b) => b.qty - a.qty).slice(0, 8);
+  const owed = state.offers.filter((o) => o.status === "accepted" && offerBalance(o) > 0.005);
+  const label = new Date(mo + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  lastReport = { mo, label, received, inCash, cashIn, cashOut, profit, settled, top, owed };
+
+  const row = (l, v, colour) => `<div class="row bankrow"><span class="muted nw">${l}</span>
+    <span class="mono"${colour ? ` style="color:${colour}"` : ""}>${v}</span></div>`;
+  openSheet(`
+    <h2>Elaks — monthly report</h2>
+    <div class="row" style="justify-content:center;gap:18px;margin:6px 0 10px">
+      <button class="chip" onclick="openReportSheet(shiftMonth('${mo}', -1))">‹</button><b>${label}</b>
+      <button class="chip" onclick="openReportSheet(shiftMonth('${mo}', 1))">›</button>
+    </div>
+    ${failed ? '<p class="muted">Some figures could not be loaded — check your connection.</p>' : ""}
+    <div class="totalbar"><span>Profit on jobs settled</span><span class="mono">${fmt(profit)} ден.</span></div>
+    <div class="sec">Money received</div>
+    ${row("Total received", fmt(received) + " ден.", "var(--personal)")}
+    ${row("of that in cash", fmt(inCash) + " ден.")}
+    ${row("Jobs fully settled", settled.length)}
+    <div class="sec">Cash register</div>
+    ${row("In", "+" + fmt(cashIn) + " ден.", "var(--personal)")}
+    ${row("Out", "−" + fmt(Math.abs(cashOut)) + " ден.", "var(--danger)")}
+    ${row("Month result", fmt(cashIn + cashOut) + " ден.")}
+    <div class="sec">Most used articles</div>
+    ${top.length ? top.map((t) => `<div class="mov"><span>${esc(t.name)}</span>
+        <span class="mono">${fmt(t.qty)} ${t.unit}</span></div>`).join("") : '<p class="muted">Nothing left stock this month.</p>'}
+    <div class="sec">Outstanding (all time)</div>
+    ${owed.length ? owed.map((o) => `<div class="mov tapp" onclick="openOfferSheet('${o.id}')">
+        <span>${o.number} · ${esc((state.clients.find((c) => c.id === o.client_id) || {}).name || "no client")}</span>
+        <span class="mono" style="color:var(--amber)">${fmt(offerBalance(o))} ден. ›</span></div>`).join("")
+      : '<p class="muted">Everything accepted has been paid.</p>'}
+    <button class="btn ghost" onclick="printReport()">Save as PDF</button>
+  `);
+}
+function shiftMonth(mo, dir) {
+  const [y, m] = mo.split("-").map(Number);
+  return new Date(y, m - 1 + dir, 1).toLocaleDateString("sv-SE").slice(0, 7);
+}
+async function printReport() {
+  const r = lastReport;
+  if (!r) return;
+  await printDoc(`
+    <div class="rp-h1">Извештај — ${r.label}</div>
+    <div class="rp-sub">ЕЛАКС · генериран ${new Date().toLocaleDateString("mk-MK")}</div>
+    <div class="rp-bar"><span>Профит од завршени работи</span><span>${fmt(r.profit)} ден.</span></div>
+    <table class="rp-tbl">
+      <tr><th>Примено вкупно</th><td class="r">${fmt(r.received)} ден.</td></tr>
+      <tr><th>Од тоа во кеш</th><td class="r">${fmt(r.inCash)} ден.</td></tr>
+      <tr><th>Завршени и платени понуди</th><td class="r">${r.settled.length}</td></tr>
+      <tr><th>Каса — влез</th><td class="r">${fmt(r.cashIn)} ден.</td></tr>
+      <tr><th>Каса — излез</th><td class="r">${fmt(Math.abs(r.cashOut))} ден.</td></tr>
+      <tr><th>Каса — резултат</th><td class="r">${fmt(r.cashIn + r.cashOut)} ден.</td></tr>
+    </table>
+    ${r.top.length ? `<div class="rp-h1">Најкористени артикли</div>
+      <table class="rp-tbl"><tr><th>Артикл</th><th class="r">Количина</th></tr>
+      ${r.top.map((t) => `<tr><td>${esc(t.name)}</td><td class="r">${fmt(t.qty)} ${t.unit}</td></tr>`).join("")}
+      </table>` : ""}
+    ${r.owed.length ? `<div class="rp-h1">Неплатено</div>
+      <table class="rp-tbl"><tr><th>Понуда</th><th>Клиент</th><th class="r">Останува</th></tr>
+      ${r.owed.map((o) => `<tr><td>${o.number}</td>
+        <td>${esc((state.clients.find((c) => c.id === o.client_id) || {}).name || "")}</td>
+        <td class="r">${fmt(offerBalance(o))} ден.</td></tr>`).join("")}
+      </table>` : ""}
+  `);
+}
+
+/* ---------- order list by supplier ---------- */
+let orderQty = {}, orderGroups = [];
+function openOrderSheet() {
+  const low = state.stock.filter((a) => (a.min_stock || 0) > 0 && a.stock <= a.min_stock);
+  if (!low.length) return openSheet('<h2>Order list</h2><p class="muted">Nothing is at or below its minimum right now.</p>');
+  const map = {};
+  for (const a of low) {
+    if (orderQty[a.id] === undefined) orderQty[a.id] = Math.max(1, Math.ceil((a.min_stock || 0) * 2 - (a.stock || 0)));
+    const s = a.supplier || "No supplier";
+    (map[s] = map[s] || []).push(a);
+  }
+  orderGroups = Object.entries(map).map(([supplier, items]) => ({ supplier, items }));
+  openSheet(`
+    <h2>Order list</h2>
+    <p class="muted">${low.length} article(s) at or below minimum. Adjust the quantities, then copy the list or make a PDF for each supplier.</p>
+    ${orderGroups.map((g, gi) => `
+      <div class="sec">${esc(g.supplier)}</div>
+      ${g.items.map((a) => `<div class="row" style="gap:10px;align-items:center;margin-bottom:8px">
+        <div style="flex:1;min-width:0"><b>${esc(a.name)}</b>
+          <div class="muted">${esc(a.code || "")}${a.code ? " · " : ""}stock ${fmt(a.stock)} / min ${fmt(a.min_stock)} ${unitLbl(a.unit)}</div></div>
+        <input class="mono" type="number" inputmode="decimal" min="0" step="any" style="width:78px;text-align:right"
+          value="${orderQty[a.id]}" oninput="orderQty['${a.id}']=parseFloat(this.value)||0">
+      </div>`).join("")}
+      <div class="grid2" style="margin-bottom:6px">
+        <button class="btn sm ghost" style="width:100%" onclick="copyOrder(${gi})">Copy text</button>
+        <button class="btn sm" style="width:100%" onclick="printOrder(${gi})">PDF</button>
+      </div>`).join("")}
+  `);
+}
+function orderLines(gi) {
+  const g = orderGroups[gi];
+  return g.items.filter((a) => (orderQty[a.id] || 0) > 0)
+    .map((a) => ({ a, qty: orderQty[a.id] }));
+}
+async function copyOrder(gi) {
+  const g = orderGroups[gi], lines = orderLines(gi);
+  if (!lines.length) return toast("All quantities are zero");
+  const text = `Побарување за нарачка — ЕЛАКС\n${g.supplier}\n${new Date().toLocaleDateString("mk-MK")}\n\n`
+    + lines.map((l, i) => `${i + 1}. ${l.a.name}${l.a.code ? " (" + l.a.code + ")" : ""} — ${fmt(l.qty)} ${unitLbl(l.a.unit)}`).join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Order copied — paste it into Viber or e-mail");
+  } catch { alert(text); }
+}
+async function printOrder(gi) {
+  const g = orderGroups[gi], lines = orderLines(gi);
+  if (!lines.length) return toast("All quantities are zero");
+  await printDoc(`
+    <div class="rp-h1">Побарување за нарачка</div>
+    <div class="rp-sub">${esc(g.supplier)} · ${new Date().toLocaleDateString("mk-MK")}</div>
+    <table class="rp-tbl">
+      <tr><th>Бр</th><th>Артикл</th><th>Код</th><th class="r">Количина</th></tr>
+      ${lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.a.name)}</td>
+        <td>${esc(l.a.code || "")}</td><td class="r">${fmt(l.qty)} ${unitLbl(l.a.unit)}</td></tr>`).join("")}
+    </table>`);
+}
+
+/* ---------- one branded print wrapper for both ---------- */
+async function printDoc(inner) {
+  try {
+    $("printroot").innerHTML = `<div class="pv">
+      <table class="pv-top"><tr><td></td><td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td></tr></table>
+      ${inner}
+      <img class="pv-footer" src="brand-footer.png" alt="ELAKS">
+    </div>`;
+    const imgs = [...$("printroot").querySelectorAll("img")];
+    await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
+    await new Promise((r) => setTimeout(r, 120));
+    window.print();
+    setTimeout(() => { $("printroot").innerHTML = ""; }, 1500);
+    toast('Choose "Save as PDF" in the print dialog');
+  } catch (e) { console.error(e); alert("Could not build the document: " + e.message); }
+}
 function imgDims(src) {
   return new Promise((res) => {
     const im = new Image();
@@ -1525,58 +1695,96 @@ async function createJobTask(id) {
   closeSheet(); await refreshAll(["tasks"]); tab("today"); toast("Installation task created");
 }
 let payMethod = "cash";
+function paymentsBlock(o) {
+  const rows = paymentsOf(o.id).slice().sort((a, b) => (a.paid_on < b.paid_on ? 1 : -1));
+  const paid = offerPaid(o), bal = offerBalance(o);
+  const label = bal > 0.005 ? "Still owed" : (bal < -0.005 ? "Overpaid" : "Settled");
+  const colour = bal > 0.005 ? "var(--amber)" : (bal < -0.005 ? "var(--danger)" : "var(--personal)");
+  return `<div class="sec">Payments</div>
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">Offer total</span>
+        <span class="mono">${fmt(o.grand_total)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">Received</span>
+        <span class="mono" style="color:var(--personal)">${fmt(paid)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${label}</span>
+        <span class="mono"><b style="color:${colour}">${fmt(Math.abs(bal))}</b> ден.</span></div>
+      ${rows.length ? `<div class="sec" style="margin-top:10px">Entries <span class="muted" style="font-weight:400">· tap to remove</span></div>` : ""}
+      ${rows.map((p) => `<div class="mov tapp" onclick="delPayment('${p.id}')">
+        <span><b class="mono" style="color:${(parseFloat(p.amount) || 0) < 0 ? "var(--danger)" : "var(--personal)"}">${fmt(p.amount)}</b>
+          ${p.method === "cash" ? "cash" : (p.method === "bank" ? "bank" : esc(p.method))}${p.note ? " · " + esc(p.note) : ""}</span>
+        <span class="muted">${new Date(p.paid_on + "T12:00").toLocaleDateString("en-GB")} ›</span></div>`).join("")}
+      <button class="btn sm ghost" style="margin-top:10px" onclick="payOfferSheet('${o.id}')">
+        ${rows.length ? "+ Add another payment" : "+ Record a payment / deposit"}</button>
+    </div>`;
+}
 function payOfferSheet(id) {
   const o = state.offers.find((x) => x.id === id);
   const client = state.clients.find((c) => c.id === o.client_id);
   payMethod = "cash";
   const pr = profitOf(o.items);
+  const bal = offerBalance(o);
   openSheet(`
-    <h2>Mark offer as paid</h2>
-    <p class="muted">${o.number}${client ? " · " + esc(client.name) : ""}</p>
+    <h2>Record a payment</h2>
+    <p class="muted">${o.number}${client ? " · " + esc(client.name) : ""} · total ${fmt(o.grand_total)} ден.</p>
     <label>Paid by</label>
     <div class="chips" id="pay-m">
       <button class="chip on" onclick="setPayMethod('cash')">Cash</button>
       <button class="chip" onclick="setPayMethod('bank')">Bank</button>
     </div>
     <label>Amount received (ден.)</label>
-    <input id="pay-amt" type="number" inputmode="decimal" min="0" step="any" value="${o.grand_total ?? 0}">
+    <input id="pay-amt" type="number" inputmode="decimal" step="any" value="${Math.max(0, Math.round(bal * 100) / 100)}">
+    <div class="chips" style="margin-top:8px">
+      <button class="chip" onclick="$('pay-amt').value=${Math.max(0, Math.round(bal * 50) / 100)}">Half (аванс)</button>
+      <button class="chip" onclick="$('pay-amt').value=${Math.max(0, Math.round(bal * 100) / 100)}">Full balance</button>
+    </div>
     <label>Date</label><input id="pay-date" type="date" value="${todayStr()}">
-    <p class="muted" id="pay-hint">The full amount goes into the cash register. Profit on this offer: ${fmt(pr.value)} ден.${pr.pending ? " + meters" : ""}</p>
-    <button class="btn" onclick="savePayment('${id}')">Confirm payment</button>
+    <label>Note (opt.)</label><input id="pay-note" placeholder="e.g. аванс">
+    <p class="muted" id="pay-hint">Cash payments go into the register at full value. Profit on this offer: ${fmt(pr.value)} ден.${pr.pending ? " + meters" : ""}</p>
+    <button class="btn" onclick="savePayment('${id}')">Save payment</button>
   `);
 }
 function setPayMethod(m) {
   payMethod = m;
   [...$("pay-m").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", (i === 0) === (m === "cash")));
   $("pay-hint").textContent = m === "cash"
-    ? "The full amount goes into the cash register."
-    : "Recorded as paid to the bank — the cash register is not touched.";
+    ? "This payment goes into the cash register."
+    : "Recorded as a bank payment — the cash register is not touched.";
 }
 async function savePayment(id) {
   const o = state.offers.find((x) => x.id === id);
   const client = state.clients.find((c) => c.id === o.client_id);
   const amt = parseFloat($("pay-amt").value);
-  if (!amt || amt <= 0) return toast("Enter the amount received");
+  if (!amt || amt === 0) return toast("Enter the amount received");
   const date = $("pay-date").value || todayStr();
+  const note = $("pay-note").value.trim() || null;
   try {
-    await dbq(db.from("offers").update({ paid_at: date, paid_method: payMethod, paid_amount: amt }).eq("id", id), "Not saved");
+    const pay = await dbq(db.from("offer_payments")
+      .insert({ offer_id: id, amount: amt, method: payMethod, paid_on: date, note })
+      .select().single(), "Payment not saved");
     if (payMethod === "cash") {
       await dbq(db.from("elaks_cash").insert({
-        amount: amt, offer_id: id,
-        note: `Offer ${o.number}${client ? " · " + client.name : ""}`,
+        amount: amt, offer_id: id, payment_id: pay.id,
+        note: `Offer ${o.number}${client ? " · " + client.name : ""}${note ? " · " + note : ""}`,
       }), "Cash entry not saved");
     }
+    await syncOfferPaid(id);
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render();
-  toast(payMethod === "cash" ? "Paid — added to the cash register" : "Marked as paid");
+  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render();
+  setTimeout(() => openOfferSheet(id), 240);
+  toast(payMethod === "cash" ? "Payment added to the register" : "Payment recorded");
 }
-async function undoPayment(id) {
-  if (!confirm("Undo this payment? Any cash register entry for it will be removed too.")) return;
+async function delPayment(pid) {
+  const p = state.payments.find((x) => x.id === pid);
+  if (!p) return;
+  if (!confirm(`Remove this payment of ${fmt(p.amount)} ден.?${p.method === "cash" ? "\n\nIts cash register entry goes with it." : ""}`)) return;
   try {
-    await dbq(db.from("elaks_cash").delete().eq("offer_id", id), "Cash entry not removed");
-    await dbq(db.from("offers").update({ paid_at: null, paid_method: null, paid_amount: null }).eq("id", id), "Not saved");
+    await dbq(db.from("elaks_cash").delete().eq("payment_id", pid), "Cash entry not removed");
+    await dbq(db.from("offer_payments").delete().eq("id", pid), "Not removed");
+    await syncOfferPaid(p.offer_id);
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render(); toast("Payment undone");
+  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render();
+  setTimeout(() => openOfferSheet(p.offer_id), 240);
+  toast("Payment removed");
 }
 function reconcileSheet(id, paid, total) {
   const o = state.offers.find((x) => x.id === id);
@@ -1597,12 +1805,17 @@ function reconcileSheet(id, paid, total) {
 async function settleDiff(id, diff, cash) {
   const o = state.offers.find((x) => x.id === id);
   try {
+    const pay = await dbq(db.from("offer_payments").insert({
+      offer_id: id, amount: diff, method: cash ? "cash" : "bank",
+      paid_on: todayStr(), note: "Balance after job closed",
+    }).select().single(), "Payment not saved");
     if (cash) await dbq(db.from("elaks_cash").insert({
-      amount: diff, offer_id: id, note: `Offer ${o.number} · balance after job closed`,
+      amount: diff, offer_id: id, payment_id: pay.id,
+      note: `Offer ${o.number} · balance after job closed`,
     }), "Cash entry not saved");
-    await dbq(db.from("offers").update({ paid_amount: o.grand_total }).eq("id", id), "Not saved");
+    await syncOfferPaid(id);
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render(); toast("Payment updated");
+  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render(); toast("Balance recorded");
 }
 function duplicateOffer(id) {
   const src = state.offers.find((x) => x.id === id);
@@ -2126,10 +2339,10 @@ function renderHome() {
     const sent = state.offers.filter((o) => o.status === "sent");
     const expired = sent.filter(offerExpired);
     const curMonth = today.slice(0, 7);
-    const monthProfit = state.offers.filter((o) => (o.paid_at || "").slice(0, 7) === curMonth)
+    const monthProfit = state.offers.filter((o) => offerSettled(o) && (o.paid_at || "").slice(0, 7) === curMonth)
       .reduce((s, o) => s + profitOf(o.items).value, 0);
-    const owed = state.offers.filter((o) => o.status === "accepted" && !o.paid_at);
-    const owedSum = sumBy(owed, (o) => o.grand_total);
+    const owed = state.offers.filter((o) => o.status === "accepted" && offerBalance(o) > 0.005);
+    const owedSum = sumBy(owed, (o) => offerBalance(o));
     html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
@@ -2161,6 +2374,29 @@ function renderHome() {
   $("home-body").innerHTML = html;
 }
 
+const paymentsOf = (offerId) => state.payments.filter((p) => p.offer_id === offerId);
+const offerPaid = (o) => {
+  const rows = paymentsOf(o.id);
+  return rows.length ? sumBy(rows, (p) => p.amount) : (parseFloat(o.paid_amount) || 0);
+};
+const offerBalance = (o) => (parseFloat(o.grand_total) || 0) - offerPaid(o);
+const offerSettled = (o) => offerPaid(o) > 0 && offerBalance(o) <= 0.005;
+
+// offers.paid_at / paid_amount are a cache of the payments table, kept in
+// step here so lists and the Home screen never need to join.
+async function syncOfferPaid(offerId) {
+  const { data, error } = await db.from("offer_payments").select("amount, paid_on, method").eq("offer_id", offerId);
+  if (error) { console.error(error); return; }
+  const rows = data || [];
+  const sum = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const last = rows.map((r) => r.paid_on).sort().pop() || null;
+  const methods = [...new Set(rows.map((r) => r.method))];
+  await db.from("offers").update({
+    paid_amount: rows.length ? sum : null,
+    paid_at: rows.length ? last : null,
+    paid_method: rows.length ? (methods.length > 1 ? "mixed" : methods[0]) : null,
+  }).eq("id", offerId);
+}
 function offerExpired(o) {
   if (o.status !== "sent" || !o.offer_date) return false;
   const d = new Date(o.offer_date + "T12:00");
