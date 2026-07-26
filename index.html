@@ -360,6 +360,10 @@ const CONFIG = {
 const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const CTX = { work: "Work", elaks: "Elaks", personal: "Personal", apts: "Apts" };
+// Elaks is ДДВ registered: 18% standard, 5% preferential. Every price in the app
+// is GROSS (ДДВ included), so the base and the tax are always derived, never stored.
+const VAT_RATES = [18, 5];
+const netOf = (gross, rate) => (parseFloat(gross) || 0) / (1 + (parseFloat(rate) || 0) / 100);
 const myCtx = () => state.perm.owner ? ["work", "elaks", "personal", "apts"] : (state.perm.ctx || []);
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
 const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
@@ -1023,9 +1027,15 @@ async function delCashEntry(id, linked) {
   setTimeout(openCashSheet, 240); toast("Entry deleted");
 }
 let arImg = { mode: "keep", thumb: null, full: null };
+let arVat = 18;
+function setArVat(r) {
+  arVat = r;
+  [...$("ar-vat").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", VAT_RATES[i] === r));
+}
 function openArticleSheet(id) {
   const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
   arImg = { mode: "keep", thumb: a.image_thumb || null, full: null };
+  arVat = parseFloat(a.vat_rate ?? 18);
   openSheet(`
     <h2>${id ? "Edit article" : "New article"}</h2>
     <label>Name</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="e.g. 5MP Hikvision DS-2CE17K0T-LFS">
@@ -1038,9 +1048,14 @@ function openArticleSheet(id) {
       <div><label>Min. stock</label><input id="ar-min" type="number" inputmode="decimal" value="${a.min_stock ?? 0}"></div>
     </div>
     <div class="grid2">
-      <div><label>Purchase price</label><input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}"></div>
-      <div><label>Sell price</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
+      <div><label>Purchase price (со ДДВ)</label><input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}"></div>
+      <div><label>Sell price (со ДДВ)</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
     </div>
+    <label>ДДВ rate</label>
+    <div class="chips" id="ar-vat">
+      ${VAT_RATES.map((r) => `<button class="chip ${(a.vat_rate ?? 18) == r ? "on" : ""}" onclick="setArVat(${r})">${r}%</button>`).join("")}
+    </div>
+    <p class="muted" style="font-size:12.5px">Prices are entered with ДДВ included. The base and ДДВ are worked out from them.</p>
     <label>Supplier</label><input id="ar-sup" value="${esc(a.supplier || "")}">
     <label>Photo (appears in offers)</label>
     <div class="row" style="align-items:flex-start">
@@ -1124,6 +1139,7 @@ async function saveArticle(id) {
     min_stock: parseFloat($("ar-min").value) || 0,
     purchase_price: parseFloat($("ar-pp").value) || 0,
     sell_price: parseFloat($("ar-sp").value) || 0,
+    vat_rate: arVat,
     supplier: $("ar-sup").value.trim() || null,
     specs: $("ar-specs").value.trim() || null,
   };
@@ -1218,7 +1234,10 @@ async function openOfferSheet(id) {
     <button class="btn sm ghost" onclick="addFreeItem()">+ Manual item (installation…)</button>
     <div class="totalbar"><span>Total</span><span class="mono" id="of-total">0 ден.</span></div>
     <div class="row" style="justify-content:space-between;margin-top:6px">
-      <span class="muted nw">Profit (sell − purchase + manual items)</span>
+      <span class="muted nw">Основа / ДДВ</span>
+      <span class="mono" id="of-vat">—</span></div>
+    <div class="row" style="justify-content:space-between;margin-top:4px">
+      <span class="muted nw">Profit (net of ДДВ)</span>
       <span class="mono" id="of-profit">0 ден.</span></div>
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
@@ -1247,7 +1266,8 @@ function renderPicker() {
 function addOfferItem(articleId) {
   const a = state.stock.find((x) => x.id === articleId);
   offerItems.push({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit,
-    qty: a.unit === "m" ? null : 1, price: a.sell_price, cost: a.purchase_price || 0 });
+    qty: a.unit === "m" ? null : 1, price: a.sell_price, cost: a.purchase_price || 0,
+    vat: a.vat_rate ?? 18 });
   $("of-search").value = ""; $("of-picker").innerHTML = ""; renderOfferItems();
 }
 function addFreeItem() {
@@ -1262,11 +1282,40 @@ function itemCost(it) {
   const a = state.stock.find((x) => x.id === it.article_id);
   return a ? (parseFloat(a.purchase_price) || 0) : 0;
 }
+// The rate is snapshotted with the item; labour and manual rows are standard 18%.
+function itemVat(it) {
+  if (it.vat !== undefined && it.vat !== null) return parseFloat(it.vat) || 0;
+  const a = state.stock.find((x) => x.id === it.article_id);
+  return a && a.vat_rate !== undefined && a.vat_rate !== null ? (parseFloat(a.vat_rate) || 0) : 18;
+}
+// ДДВ is collected for the state, never income — so profit works on net figures.
 function itemProfit(it) {
   const t = itemTotal(it);
   if (t === null) return null;                       // meters not measured yet
+  const r = itemVat(it);
   const q = it.free ? 0 : (it.unit === "m" ? (it.consumed || 0) : (it.qty || 0));
-  return t - itemCost(it) * q;
+  return netOf(t, r) - netOf(itemCost(it) * q, r);
+}
+// { gross, net, vat, byRate: { 18: amount, 5: amount } } — per-meter rows are skipped
+function vatBreakdown(items) {
+  const byRate = {}; let gross = 0, net = 0;
+  for (const it of items || []) {
+    const t = itemTotal(it);
+    if (t === null) continue;
+    const r = itemVat(it);
+    const n = netOf(t, r);
+    gross += t; net += n;
+    byRate[r] = (byRate[r] || 0) + (t - n);
+  }
+  return { gross, net, vat: gross - net, byRate };
+}
+// the multi-line block printed in the blue total bar of the offer
+function totalsBlock(items, grandTotal, note) {
+  const b = vatBreakdown(items);
+  const lines = [`Основа : ${fmt(b.net)} ден.`];
+  for (const r of VAT_RATES) if (b.byRate[r]) lines.push(`ДДВ ${r}% : ${fmt(b.byRate[r])} ден.`);
+  lines.push(`Вкупно : ${fmt(grandTotal)} ден.${note ? "   " + note : ""}`);
+  return lines.join("\n");
 }
 // { value, pending } — pending marks per-meter rows still waiting on Close job
 function profitOf(items) {
@@ -1308,6 +1357,11 @@ function updateTotal() {
     if (t !== null) sum += t;
   });
   $("of-total").textContent = fmt(sum) + " ден.";
+  const vb = vatBreakdown(offerItems);
+  const vEl = $("of-vat");
+  if (vEl) vEl.textContent = fmt(vb.net) + " + "
+    + VAT_RATES.filter((r) => vb.byRate[r]).map((r) => fmt(vb.byRate[r]) + " (" + r + "%)").join(" + ")
+    + " ден.";
   const pr = profitOf(offerItems);
   const pEl = $("of-profit");
   if (pEl) {
@@ -1394,7 +1448,7 @@ async function printOffer(o) {
           <col style="width:4.9%"><col style="width:8.9%"><col style="width:9.6%"></colgroup>
         <thead><tr><th>Бр</th><th>Слика</th><th>Спецификација</th><th>Ком</th><th>Цена</th><th>Вк. Цена</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td class="pv-total" colspan="6">Вкупно : ${fmt(o.grand_total)} ден.&nbsp;&nbsp; ${esc(o.total_note || "")}</td></tr></tfoot>
+        <tfoot><tr><td class="pv-total" colspan="6">${esc(totalsBlock(o.items, o.grand_total, o.total_note || "")).replace(/\n/g, "<br>")}</td></tr></tfoot>
       </table>
       ${foot ? `<div class="pv-note">${esc(foot)}</div>` : ""}
       <div class="pv-valid">Понудата важи ${o.validity} дена.</div>
@@ -1480,6 +1534,8 @@ async function openReportSheet(month) {
   const cashOut = cash.reduce((s, e) => s + Math.min(0, parseFloat(e.amount) || 0), 0);
   const settled = state.offers.filter((o) => offerSettled(o) && (o.paid_at || "").slice(0, 7) === mo);
   const profit = settled.reduce((s, o) => s + profitOf(o.items).value, 0);
+  const vatOut = settled.reduce((s, o) => s + vatBreakdown(o.items).vat, 0);
+  const netOut = settled.reduce((s, o) => s + vatBreakdown(o.items).net, 0);
   const agg = {};
   for (const mv of movs) agg[mv.article_id] = (agg[mv.article_id] || 0) + (parseFloat(mv.qty) || 0);
   const top = Object.entries(agg).map(([aid, q]) => {
@@ -1488,7 +1544,7 @@ async function openReportSheet(month) {
   }).sort((a, b) => b.qty - a.qty).slice(0, 8);
   const owed = state.offers.filter((o) => o.status === "accepted" && offerBalance(o) > 0.005);
   const label = new Date(mo + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
-  lastReport = { mo, label, received, inCash, cashIn, cashOut, profit, settled, top, owed };
+  lastReport = { mo, label, received, inCash, cashIn, cashOut, profit, settled, top, owed, vatOut, netOut };
 
   const row = (l, v, colour) => `<div class="row bankrow"><span class="muted nw">${l}</span>
     <span class="mono"${colour ? ` style="color:${colour}"` : ""}>${v}</span></div>`;
@@ -1504,6 +1560,9 @@ async function openReportSheet(month) {
     ${row("Total received", fmt(received) + " ден.", "var(--personal)")}
     ${row("of that in cash", fmt(inCash) + " ден.")}
     ${row("Jobs fully settled", settled.length)}
+    <div class="sec">ДДВ on settled jobs</div>
+    ${row("Base (основа)", fmt(netOut) + " ден.")}
+    ${row("ДДВ collected", fmt(vatOut) + " ден.", "var(--amber)")}
     <div class="sec">Cash register</div>
     ${row("In", "+" + fmt(cashIn) + " ден.", "var(--personal)")}
     ${row("Out", "−" + fmt(Math.abs(cashOut)) + " ден.", "var(--danger)")}
@@ -1534,6 +1593,8 @@ async function printReport() {
       <tr><th>Примено вкупно</th><td class="r">${fmt(r.received)} ден.</td></tr>
       <tr><th>Од тоа во кеш</th><td class="r">${fmt(r.inCash)} ден.</td></tr>
       <tr><th>Завршени и платени понуди</th><td class="r">${r.settled.length}</td></tr>
+      <tr><th>Основа (без ДДВ)</th><td class="r">${fmt(r.netOut)} ден.</td></tr>
+      <tr><th>Пресметан ДДВ</th><td class="r">${fmt(r.vatOut)} ден.</td></tr>
       <tr><th>Каса — влез</th><td class="r">${fmt(r.cashIn)} ден.</td></tr>
       <tr><th>Каса — излез</th><td class="r">${fmt(Math.abs(r.cashOut))} ден.</td></tr>
       <tr><th>Каса — резултат</th><td class="r">${fmt(r.cashIn + r.cashOut)} ден.</td></tr>
@@ -1673,6 +1734,7 @@ async function generateDocx(o) {
         img_mark: photo[it.article_id] ? `«IMG:${i}»` : "",
       })),
       total_note: o.total_note || "", grand_total: fmt(o.grand_total),
+      totals_block: totalsBlock(o.items, o.grand_total, o.total_note || ""),
       footnote: metersOpen.length
         ? `* Ставките ${metersOpen.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
         : "",
