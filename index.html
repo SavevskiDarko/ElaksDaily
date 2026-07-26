@@ -1309,15 +1309,6 @@ function vatBreakdown(items) {
   }
   return { gross, net, vat: gross - net, byRate };
 }
-// the multi-line block printed in the blue total bar of the offer
-function totalsBlock(items, grandTotal, note) {
-  const b = vatBreakdown(items);
-  const lines = [`Основа : ${fmt(b.net)} ден.`];
-  for (const r of VAT_RATES) if (b.byRate[r]) lines.push(`ДДВ ${r}% : ${fmt(b.byRate[r])} ден.`);
-  lines.push(`Вкупно : ${fmt(grandTotal)} ден.${note ? "   " + note : ""}`);
-  return lines.join("\n");
-}
-// { value, pending } — pending marks per-meter rows still waiting on Close job
 function profitOf(items) {
   let value = 0, pending = false;
   for (const it of items || []) {
@@ -1448,7 +1439,7 @@ async function printOffer(o) {
           <col style="width:4.9%"><col style="width:8.9%"><col style="width:9.6%"></colgroup>
         <thead><tr><th>Бр</th><th>Слика</th><th>Спецификација</th><th>Ком</th><th>Цена</th><th>Вк. Цена</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td class="pv-total" colspan="6">${esc(totalsBlock(o.items, o.grand_total, o.total_note || "")).replace(/\n/g, "<br>")}</td></tr></tfoot>
+        <tfoot><tr><td class="pv-total" colspan="6">Вкупно : ${fmt(o.grand_total)} ден.&nbsp;&nbsp; ${esc(o.total_note || "")}</td></tr></tfoot>
       </table>
       ${foot ? `<div class="pv-note">${esc(foot)}</div>` : ""}
       <div class="pv-valid">Понудата важи ${o.validity} дена.</div>
@@ -1734,7 +1725,6 @@ async function generateDocx(o) {
         img_mark: photo[it.article_id] ? `«IMG:${i}»` : "",
       })),
       total_note: o.total_note || "", grand_total: fmt(o.grand_total),
-      totals_block: totalsBlock(o.items, o.grand_total, o.total_note || ""),
       footnote: metersOpen.length
         ? `* Ставките ${metersOpen.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
         : "",
