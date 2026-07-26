@@ -1197,7 +1197,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${needsDeduct(o) ? ' · <span style="color:var(--danger)">stock not taken out</span>' : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
     </div>`).join("") : (state.loading ? SKEL(3) : '<div class="empty">No offers.<br>Create with +</div>');
@@ -1257,7 +1257,8 @@ async function openOfferSheet(id) {
     ${id ? paymentsBlock(o) : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
-    ${id && o.status === "accepted" && !o.stock_deducted ? `<button class="btn ghost" onclick="deductStock('${id}')">Deduct from stock</button>` : ""}
+    ${id && needsDeduct(o) ? `<button class="btn amber" onclick="deductStock('${id}')">Take items out of stock</button>` : ""}
+    ${id && o.stock_deducted ? '<p class="muted">Items have been taken out of stock.</p>' : ""}
     ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Delete</button>` : ""}
   `);
   renderOfferItems();
@@ -1405,8 +1406,9 @@ async function saveOffer(id, generate, pdf) {
   let genOk = null;
   if (generate) genOk = await generateDocx(saved);
   closeSheet(); renderOffers();
-  if (pdf) { await printOffer(saved); return; }
+  if (pdf) { await printOffer(saved); setTimeout(() => promptDeduct(saved.id), 500); return; }
   toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
+  setTimeout(() => promptDeduct(saved.id), 400);
 }
 async function printOffer(o) {
   try {
@@ -1768,16 +1770,33 @@ async function generateDocx(o) {
     return false;
   }
 }
-async function deductStock(id) {
-  if (!confirm("Deduct all piece items of this offer from stock?")) return;
+// A piece item leaves stock once the job is agreed or money has arrived.
+// Metre items are booked later by Close job, so they are skipped here.
+const deductLines = (o) => (o.items || []).filter((it) => it.article_id && it.unit !== "m" && (it.qty || 0) > 0);
+const needsDeduct = (o) => !o.stock_deducted && deductLines(o).length > 0
+  && (o.status === "accepted" || offerPaid(o) > 0);
+
+// Offered right after accepting or taking payment, so stock never quietly stays on the shelf.
+async function promptDeduct(id) {
   const o = state.offers.find((x) => x.id === id);
-  const rows = o.items.filter((it) => it.article_id && it.unit !== "m")
+  if (!o || !needsDeduct(o)) return;
+  const list = deductLines(o).map((it) => `· ${it.name} × ${fmt(it.qty)}`).join("\n");
+  if (!confirm(`Take these off the shelf now?\n\n${list}`)) return;
+  await deductStock(id, true);
+}
+async function deductStock(id, silent) {
+  const o = state.offers.find((x) => x.id === id);
+  if (!o) return;
+  if (o.stock_deducted) return toast("Already taken out of stock");
+  if (!silent && !confirm("Take this offer's items out of stock?")) return;
+  const rows = deductLines(o)
     .map((it) => ({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number }));
   try {
     if (rows.length) await dbq(db.from("movements").insert(rows), "Stock not updated");
     await dbq(db.from("offers").update({ stock_deducted: true }).eq("id", id), "Offer not updated");
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "stock"]); renderOffers(); toast("Deducted from stock");
+  closeSheet(); await refreshAll(["offers", "stock"]); render();
+  toast(`Taken out of stock · ${rows.length} article(s)`);
 }
 async function delOffer(id) {
   if (!confirm("Delete this offer?")) return;
@@ -1876,8 +1895,9 @@ async function savePayment(id) {
     await syncOfferPaid(id);
   } catch { return; }
   closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render();
-  setTimeout(() => openOfferSheet(id), 240);
   toast(payMethod === "cash" ? "Payment added to the register" : "Payment recorded");
+  const pending = needsDeduct(state.offers.find((x) => x.id === id) || {});
+  setTimeout(() => (pending ? promptDeduct(id) : openOfferSheet(id)), 300);
 }
 async function delPayment(pid) {
   const p = state.payments.find((x) => x.id === pid);
@@ -2452,6 +2472,7 @@ function renderHome() {
     const billsOpen = state.purchases.filter((p) => purchaseBalance(p) > 0.005);
     const billsLate = billsOpen.filter(purchaseOverdue);
     const billsSum = sumBy(billsOpen, purchaseBalance);
+    const pendingStock = state.offers.filter(needsDeduct);
     html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
@@ -2459,6 +2480,8 @@ function renderHome() {
       <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}${expired.length ? ` <span class="hflag">(${expired.length} expired)</span>` : ""}</b></div>
       <div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>
       ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${owed.length} · ${fmt(owedSum)} ден.</b></div>` : ""}
+      ${pendingStock.length ? `<div class="hrow"><span>Stock not taken out</span>
+        <b class="hflag">${pendingStock.length} offer(s)</b></div>` : ""}
       ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
         <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.${billsLate.length ? ` (${billsLate.length} overdue)` : ""}</b></div>` : ""}
     </div>`;
