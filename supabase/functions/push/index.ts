@@ -118,14 +118,20 @@ Deno.serve(async (req) => {
 
   // ---- 4. unpaid bills reminder (once per month, from the configured day) ----
   try {
-    const { data: cfg } = await db.from("app_settings").select("key, value").in("key", ["bills_day", "bills_sent_on"]);
+    const { data: cfg } = await db.from("app_settings").select("key, value").in("key", ["bills_day", "bills_sent_on", "bill_types"]);
     const get = (k: string) => String((cfg ?? []).find((r: any) => r.key === k)?.value ?? "").replace(/"/g, "");
     const billsDay = parseInt(get("bills_day")) || 5;
     const month = today.slice(0, 7);
     if (dom >= billsDay && hhmm >= digestHour && get("bills_sent_on") !== month) {
       const { data: apts } = await db.from("apartments").select("id").eq("active", true);
       const { data: bs } = await db.from("bills").select("paid").eq("month", month + "-01");
-      const TYPES = 6;
+      // the list of bill types lives in app_settings, written by the app,
+      // so adding a type never leaves this count behind
+      const rawTypes = (cfg ?? []).find((r: any) => r.key === "bill_types")?.value;
+      const typeList = Array.isArray(rawTypes)
+        ? rawTypes
+        : (() => { try { return JSON.parse(rawTypes); } catch { return null; } })();
+      const TYPES = (typeList && typeList.length) ? typeList.length : 6;
       const need = (apts ?? []).length * TYPES;
       const paidN = (bs ?? []).filter((b: any) => b.paid).length;
       const unpaid = Math.max(0, need - paidN);
