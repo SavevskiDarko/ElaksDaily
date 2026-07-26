@@ -270,6 +270,11 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div class="chips" id="off-filter" style="margin-bottom:12px"></div>
       <div id="off-list"></div>
     </div>
+    <div id="el-body-pur" style="display:none">
+      <input class="search" id="pur-list-search" placeholder="Search supplier or document…" oninput="renderPurchases()">
+      <div id="pur-summary"></div>
+      <div id="pur-list"></div>
+    </div>
     <div id="el-body-cli" style="display:none">
       <div id="cli-list"></div>
       <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
@@ -376,7 +381,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, people: [], cashMonth: null, repMonth: null,
-  tasks: [], stock: [], clients: [], offers: [], payments: [], apartments: [], stays: [], bills: [], cash: [],
+  tasks: [], stock: [], clients: [], offers: [], payments: [], purchases: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -461,6 +466,7 @@ const LOADERS = {
   offers:     { need: () => state.perm.elaks,   q: () => db.from("offers").select("*, clients(name)").order("created_at", { ascending: false }).limit(150) },
   cash:       { need: () => state.perm.elaks,   q: () => db.from("elaks_cash").select("*").order("created_at", { ascending: false }).limit(30) },
   payments:   { need: () => state.perm.elaks,   q: () => db.from("offer_payments").select("*").order("paid_on", { ascending: false }).limit(400) },
+  purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
@@ -511,7 +517,9 @@ function tab(name, fromBack) {
 }
 function fabClick() {
   if (state.tab === "today") openTaskSheet();
-  else if (state.tab === "elaks") (state.elaksView === "off" ? openOfferSheet() : state.elaksView === "cli" ? openClientSheet() : openArticleSheet());
+  else if (state.tab === "elaks") (state.elaksView === "off" ? openOfferSheet()
+    : state.elaksView === "pur" ? openPurchaseSheet()
+    : state.elaksView === "cli" ? openClientSheet() : openArticleSheet());
   else if (state.tab === "apt") (state.aptView === "apartments" ? openAptSheet() : openStaySheet());
 }
 function render() {
@@ -1166,13 +1174,15 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["cli", "Clients"]].map(([v, l]) =>
+  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"], ["cli", "Clients"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
   $("el-body-off").style.display = state.elaksView === "off" ? "" : "none";
   $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
+  $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
+  else if (state.elaksView === "pur") renderPurchases();
   else renderClients();
 }
 function renderOffers() {
@@ -1534,8 +1544,11 @@ async function openReportSheet(month) {
     return { name: a ? a.name : "(removed article)", qty: q, unit: a ? unitLbl(a.unit) : "" };
   }).sort((a, b) => b.qty - a.qty).slice(0, 8);
   const owed = state.offers.filter((o) => o.status === "accepted" && offerBalance(o) > 0.005);
+  const buys = state.purchases.filter((p) => (p.doc_date || "").slice(0, 7) === mo);
+  const vatIn = buys.reduce((s, p) => s + purchaseTotals(p.items).vat, 0);
+  const buySum = sumBy(buys, (p) => p.total);
   const label = new Date(mo + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
-  lastReport = { mo, label, received, inCash, cashIn, cashOut, profit, settled, top, owed, vatOut, netOut };
+  lastReport = { mo, label, received, inCash, cashIn, cashOut, profit, settled, top, owed, vatOut, netOut, vatIn, buySum, buys };
 
   const row = (l, v, colour) => `<div class="row bankrow"><span class="muted nw">${l}</span>
     <span class="mono"${colour ? ` style="color:${colour}"` : ""}>${v}</span></div>`;
@@ -1553,7 +1566,12 @@ async function openReportSheet(month) {
     ${row("Jobs fully settled", settled.length)}
     <div class="sec">ДДВ on settled jobs</div>
     ${row("Base (основа)", fmt(netOut) + " ден.")}
-    ${row("ДДВ collected", fmt(vatOut) + " ден.", "var(--amber)")}
+    ${row("ДДВ collected (output)", fmt(vatOut) + " ден.", "var(--amber)")}
+    ${row("ДДВ on purchases (input)", fmt(vatIn) + " ден.", "var(--personal)")}
+    ${row("ДДВ payable", fmt(vatOut - vatIn) + " ден.")}
+    <div class="sec">Bought this month</div>
+    ${row("Supplier bills", buys.length)}
+    ${row("Value", fmt(buySum) + " ден.")}
     <div class="sec">Cash register</div>
     ${row("In", "+" + fmt(cashIn) + " ден.", "var(--personal)")}
     ${row("Out", "−" + fmt(Math.abs(cashOut)) + " ден.", "var(--danger)")}
@@ -1585,7 +1603,10 @@ async function printReport() {
       <tr><th>Од тоа во кеш</th><td class="r">${fmt(r.inCash)} ден.</td></tr>
       <tr><th>Завршени и платени понуди</th><td class="r">${r.settled.length}</td></tr>
       <tr><th>Основа (без ДДВ)</th><td class="r">${fmt(r.netOut)} ден.</td></tr>
-      <tr><th>Пресметан ДДВ</th><td class="r">${fmt(r.vatOut)} ден.</td></tr>
+      <tr><th>Пресметан ДДВ (излезен)</th><td class="r">${fmt(r.vatOut)} ден.</td></tr>
+      <tr><th>Влезен ДДВ од набавки</th><td class="r">${fmt(r.vatIn)} ден.</td></tr>
+      <tr><th>ДДВ за плаќање</th><td class="r">${fmt(r.vatOut - r.vatIn)} ден.</td></tr>
+      <tr><th>Набавки</th><td class="r">${fmt(r.buySum)} ден.</td></tr>
       <tr><th>Каса — влез</th><td class="r">${fmt(r.cashIn)} ден.</td></tr>
       <tr><th>Каса — излез</th><td class="r">${fmt(Math.abs(r.cashOut))} ден.</td></tr>
       <tr><th>Каса — резултат</th><td class="r">${fmt(r.cashIn + r.cashOut)} ден.</td></tr>
@@ -2428,6 +2449,9 @@ function renderHome() {
       .reduce((s, o) => s + profitOf(o.items).value, 0);
     const owed = state.offers.filter((o) => o.status === "accepted" && offerBalance(o) > 0.005);
     const owedSum = sumBy(owed, (o) => offerBalance(o));
+    const billsOpen = state.purchases.filter((p) => purchaseBalance(p) > 0.005);
+    const billsLate = billsOpen.filter(purchaseOverdue);
+    const billsSum = sumBy(billsOpen, purchaseBalance);
     html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
@@ -2435,6 +2459,8 @@ function renderHome() {
       <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}${expired.length ? ` <span class="hflag">(${expired.length} expired)</span>` : ""}</b></div>
       <div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>
       ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${owed.length} · ${fmt(owedSum)} ден.</b></div>` : ""}
+      ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
+        <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.${billsLate.length ? ` (${billsLate.length} overdue)` : ""}</b></div>` : ""}
     </div>`;
   }
 
@@ -2481,6 +2507,250 @@ async function syncOfferPaid(offerId) {
     paid_at: rows.length ? last : null,
     paid_method: rows.length ? (methods.length > 1 ? "mixed" : methods[0]) : null,
   }).eq("id", offerId);
+}
+/* ---------- purchases: what you buy from suppliers ---------- */
+// line: { article_id, name, qty, price (GROSS per unit), vat }
+function purchaseTotals(items) {
+  const byRate = {}; let gross = 0, net = 0;
+  for (const it of items || []) {
+    const t = (parseFloat(it.qty) || 0) * (parseFloat(it.price) || 0);
+    const r = it.vat === undefined || it.vat === null ? 18 : (parseFloat(it.vat) || 0);
+    const n = netOf(t, r);
+    gross += t; net += n;
+    byRate[r] = (byRate[r] || 0) + (t - n);
+  }
+  return { gross, net, vat: gross - net, byRate };
+}
+const purchaseBalance = (p) => (parseFloat(p.total) || 0) - (parseFloat(p.paid_amount) || 0);
+const purchaseOverdue = (p) => !!p.due_date && purchaseBalance(p) > 0.005 && p.due_date < todayStr();
+
+let purItems = [];
+function openPurchaseSheet(id) {
+  const p = id ? state.purchases.find((x) => x.id === id)
+              : { supplier: "", doc_no: "", doc_date: todayStr(), due_date: "", items: [], total: 0 };
+  purItems = JSON.parse(JSON.stringify(p.items || []));
+  const bal = id ? purchaseBalance(p) : 0;
+  openSheet(`
+    <h2>${id ? esc(p.supplier) : "New purchase"}</h2>
+    ${id ? `<p class="muted">${esc(p.doc_no || "no number")} · ${new Date(p.doc_date + "T12:00").toLocaleDateString("en-GB")}</p>` : ""}
+    <label>Supplier</label>
+    <input id="pu-sup" list="pu-sups" value="${esc(p.supplier || "")}" placeholder="e.g. Wizard Systems">
+    <datalist id="pu-sups">${[...new Set(state.stock.map((a) => a.supplier).concat(state.purchases.map((x) => x.supplier)).filter(Boolean))]
+      .map((s) => `<option value="${esc(s)}">`).join("")}</datalist>
+    <div class="grid2">
+      <div><label>Document no.</label><input id="pu-no" value="${esc(p.doc_no || "")}" placeholder="001-464/2026"></div>
+      <div><label>Date</label><input id="pu-date" type="date" value="${p.doc_date || todayStr()}"></div>
+    </div>
+    <label>Due date (датум доспева)</label><input id="pu-due" type="date" value="${p.due_date || ""}">
+
+    <div class="sec">Items</div>
+    <input id="pu-search" placeholder="Search an article you already have…" oninput="renderPurPicker()">
+    <div id="pu-picker"></div>
+    <div class="ohead" style="margin-top:10px"><span>Name</span><span>Qty</span><span>Price</span><span>Total</span><span></span></div>
+    <div id="pu-items"></div>
+    <button class="btn sm ghost" style="margin-top:8px" onclick="addPurLine()">+ Add a line by hand</button>
+    <p class="muted" style="font-size:12.5px">Prices are what the supplier charges you, со ДДВ. A line that isn't linked to an article yet becomes a new article when you receive it into stock.</p>
+
+    <div class="totalbar"><span>Total</span><span class="mono" id="pu-total">0 ден.</span></div>
+    <div class="row" style="justify-content:space-between;margin-top:6px">
+      <span class="muted nw">Основа / ДДВ</span><span class="mono" id="pu-vat">—</span></div>
+
+    <label>Note (opt.)</label><input id="pu-note" value="${esc(p.note || "")}">
+    <button class="btn" onclick="savePurchase('${id || ""}')">Save</button>
+    ${id ? (p.received_at
+      ? `<p class="muted">Received into stock on ${new Date(p.received_at + "T12:00").toLocaleDateString("en-GB")}.</p>`
+      : `<button class="btn amber" onclick="receivePurchase('${id}')">Receive into stock</button>`) : ""}
+    ${id ? (bal > 0.005
+      ? `<button class="btn ghost" onclick="payPurchaseSheet('${id}')">Mark as paid${p.due_date ? " · " + fmt(bal) + " ден." : ""}</button>`
+      : `<div class="card" style="border-color:var(--personal)">
+           <div class="row" style="justify-content:space-between"><b style="color:var(--personal)">Paid</b>
+             <span class="mono">${fmt(p.paid_amount)} ден.</span></div>
+           <div class="muted">${p.paid_at ? new Date(p.paid_at + "T12:00").toLocaleDateString("en-GB") : ""} · ${p.paid_method === "cash" ? "cash — taken from the register" : "bank"}</div>
+           <button class="btn sm ghost" style="margin-top:8px" onclick="undoPurchasePayment('${id}')">Undo payment</button>
+         </div>`) : ""}
+    ${id ? `<button class="btn danger" onclick="delPurchase('${id}')">Delete purchase</button>` : ""}
+  `);
+  renderPurItems();
+}
+function renderPurPicker() {
+  const q = ($("pu-search").value || "").trim().toLowerCase();
+  if (!q) return ($("pu-picker").innerHTML = "");
+  $("pu-picker").innerHTML = state.stock.filter((a) =>
+    a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)).slice(0, 6)
+    .map((a) => `<div class="card row" onclick="addPurLine('${a.id}')">
+      <div style="flex:1"><b>${esc(a.name)}</b>
+        <div class="muted">${esc(a.code || "")} · last cost ${fmt(a.purchase_price)} ден. · stock ${fmt(a.stock)}</div></div>
+    </div>`).join("") || '<p class="muted">Nothing found — add it by hand and it will be created on receipt.</p>';
+}
+function addPurLine(articleId) {
+  const a = articleId ? state.stock.find((x) => x.id === articleId) : null;
+  purItems.push(a
+    ? { article_id: a.id, name: a.name, qty: 1, price: a.purchase_price || 0, vat: a.vat_rate ?? 18 }
+    : { article_id: null, name: "", qty: 1, price: 0, vat: 18 });
+  $("pu-search").value = ""; $("pu-picker").innerHTML = "";
+  renderPurItems();
+}
+function renderPurItems() {
+  $("pu-items").innerHTML = purItems.map((it, i) => `<div class="oitem">
+    <input value="${esc(it.name)}" placeholder="Article name" oninput="purItems[${i}].name=this.value">
+    <input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="purItems[${i}].qty=parseFloat(this.value)||0;purTotals()">
+    <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="purItems[${i}].price=parseFloat(this.value)||0;purTotals()">
+    <input class="mono" value="${fmt((it.qty || 0) * (it.price || 0))}" disabled>
+    <button class="del" onclick="purItems.splice(${i},1);renderPurItems()">✕</button>
+  </div>`).join("");
+  purTotals();
+}
+function purTotals() {
+  const t = purchaseTotals(purItems);
+  $("pu-total").textContent = fmt(t.gross) + " ден.";
+  $("pu-vat").textContent = fmt(t.net) + " + "
+    + VAT_RATES.filter((r) => t.byRate[r]).map((r) => fmt(t.byRate[r]) + " (" + r + "%)").join(" + ") + " ден.";
+  purItems.forEach((it, i) => {
+    const cell = $("pu-items").children[i];
+    if (cell) cell.children[3].value = fmt((it.qty || 0) * (it.price || 0));
+  });
+}
+async function savePurchase(id) {
+  const row = {
+    supplier: $("pu-sup").value.trim(),
+    doc_no: $("pu-no").value.trim() || null,
+    doc_date: $("pu-date").value || todayStr(),
+    due_date: $("pu-due").value || null,
+    items: purItems,
+    total: purchaseTotals(purItems).gross,
+    note: $("pu-note").value.trim() || null,
+  };
+  if (!row.supplier) return toast("Enter the supplier");
+  try {
+    const saved = await dbq(id
+      ? db.from("purchases").update(row).eq("id", id).select().single()
+      : db.from("purchases").insert(row).select().single(), "Purchase not saved");
+    closeSheet(); await refreshAll(["purchases"]); renderPurchases(); toast("Saved");
+    if (!id && purItems.length) setTimeout(() => openPurchaseSheet(saved.id), 240);
+  } catch { return; }
+}
+async function delPurchase(id) {
+  const p = state.purchases.find((x) => x.id === id);
+  if (!confirm("Delete this purchase?" + (p.received_at ? "\n\nThe stock it added stays — remove those movements from the articles if they were wrong." : ""))) return;
+  try { await dbq(db.from("purchases").delete().eq("id", id), "Not deleted"); } catch { return; }
+  closeSheet(); await refreshAll(["purchases"]); renderPurchases(); toast("Deleted");
+}
+// Receiving does three things: creates any article that doesn't exist yet,
+// refreshes the cost on the ones that do, and books the stock in.
+async function receivePurchase(id) {
+  const p = state.purchases.find((x) => x.id === id);
+  if (p.received_at) return toast("Already received");
+  const items = p.items || [];
+  if (!items.length) return toast("Add the items first");
+  const fresh = items.filter((it) => !it.article_id && (it.name || "").trim());
+  const msg = `Receive ${items.length} line(s) into stock?`
+    + (fresh.length ? `\n\n${fresh.length} new article(s) will be created:\n· ` + fresh.map((f) => f.name).join("\n· ") : "");
+  if (!confirm(msg)) return;
+  try {
+    const lines = JSON.parse(JSON.stringify(items));
+    for (const it of lines) {
+      if (!it.article_id) {
+        const made = await dbq(db.from("articles").insert({
+          name: (it.name || "").trim() || "Unnamed", category: "Other", unit: "ком", min_stock: 0,
+          purchase_price: parseFloat(it.price) || 0, sell_price: 0,
+          vat_rate: it.vat ?? 18, supplier: p.supplier, active: true,
+        }).select().single(), "Article not created");
+        it.article_id = made.id;
+      } else {
+        await dbq(db.from("articles").update({ purchase_price: parseFloat(it.price) || 0 }).eq("id", it.article_id), "Cost not updated");
+      }
+    }
+    await dbq(db.from("movements").insert(lines.map((it) => ({
+      article_id: it.article_id, type: "in", qty: parseFloat(it.qty) || 0,
+      ref: p.doc_no || null,
+      note: `${p.supplier}${p.doc_no ? " · " + p.doc_no : ""}`,
+    }))), "Stock not updated");
+    await dbq(db.from("purchases").update({ received_at: todayStr(), items: lines }).eq("id", id), "Purchase not updated");
+  } catch { return; }
+  closeSheet(); await refreshAll(["purchases", "stock"]); renderPurchases();
+  toast(fresh.length ? `Received · ${fresh.length} new article(s) created` : "Received into stock");
+}
+
+let purPayMethod = "cash";
+function payPurchaseSheet(id) {
+  const p = state.purchases.find((x) => x.id === id);
+  purPayMethod = "cash";
+  openSheet(`
+    <h2>Pay supplier bill</h2>
+    <p class="muted">${esc(p.supplier)}${p.doc_no ? " · " + esc(p.doc_no) : ""}</p>
+    <label>Paid by</label>
+    <div class="chips" id="pp-m">
+      <button class="chip on" onclick="setPurPayMethod('cash')">Cash</button>
+      <button class="chip" onclick="setPurPayMethod('bank')">Bank</button>
+    </div>
+    <label>Amount paid (ден.)</label>
+    <input id="pp-amt" type="number" inputmode="decimal" step="any" value="${Math.round(purchaseBalance(p) * 100) / 100}">
+    <label>Date</label><input id="pp-date" type="date" value="${todayStr()}">
+    <p class="muted" id="pp-hint">Cash payments are taken out of the register.</p>
+    <button class="btn" onclick="savePurchasePayment('${id}')">Confirm payment</button>
+  `);
+}
+function setPurPayMethod(m) {
+  purPayMethod = m;
+  [...$("pp-m").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", (i === 0) === (m === "cash")));
+  $("pp-hint").textContent = m === "cash"
+    ? "Cash payments are taken out of the register."
+    : "Recorded as a bank payment — the cash register is not touched.";
+}
+async function savePurchasePayment(id) {
+  const p = state.purchases.find((x) => x.id === id);
+  const amt = parseFloat($("pp-amt").value);
+  if (!amt || amt <= 0) return toast("Enter the amount");
+  try {
+    await dbq(db.from("purchases").update({
+      paid_at: $("pp-date").value || todayStr(), paid_method: purPayMethod,
+      paid_amount: (parseFloat(p.paid_amount) || 0) + amt,
+    }).eq("id", id), "Not saved");
+    if (purPayMethod === "cash") {
+      await dbq(db.from("elaks_cash").insert({
+        amount: -Math.abs(amt), purchase_id: id,
+        note: `${p.supplier}${p.doc_no ? " · " + p.doc_no : ""}`,
+      }), "Cash entry not saved");
+    }
+  } catch { return; }
+  closeSheet(); await refreshAll(["purchases", "cash", "cashTotal"]); render();
+  toast(purPayMethod === "cash" ? "Paid — taken from the register" : "Marked as paid");
+}
+async function undoPurchasePayment(id) {
+  if (!confirm("Undo this payment? Any cash register entry for it will be removed too.")) return;
+  try {
+    await dbq(db.from("elaks_cash").delete().eq("purchase_id", id), "Cash entry not removed");
+    await dbq(db.from("purchases").update({ paid_at: null, paid_method: null, paid_amount: null }).eq("id", id), "Not saved");
+  } catch { return; }
+  closeSheet(); await refreshAll(["purchases", "cash", "cashTotal"]); render(); toast("Payment undone");
+}
+function renderPurchases() {
+  const q = (($("pur-list-search") || {}).value || "").toLowerCase();
+  const list = state.purchases.filter((p) => !q
+    || (p.supplier || "").toLowerCase().includes(q)
+    || (p.doc_no || "").toLowerCase().includes(q));
+  const open = state.purchases.filter((p) => purchaseBalance(p) > 0.005);
+  const late = open.filter(purchaseOverdue);
+  $("pur-summary").innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between"><b>Owed to suppliers</b>
+      <span class="mono">${fmt(sumBy(open, purchaseBalance))} ден.</span></div>
+    <div class="row" style="justify-content:space-between"><span class="muted">${open.length} open bill(s)</span>
+      <b class="${late.length ? "hflag" : "hok"}">${late.length ? late.length + " overdue" : "none overdue"}</b></div>
+  </div>`;
+  $("pur-list").innerHTML = list.length ? list.map((p) => {
+    const bal = purchaseBalance(p);
+    const state_ = bal <= 0.005 ? '<span style="color:var(--personal)">paid</span>'
+      : purchaseOverdue(p) ? '<span style="color:var(--danger)">overdue</span>'
+      : (p.due_date ? "due " + new Date(p.due_date + "T12:00").toLocaleDateString("en-GB") : "unpaid");
+    return `<div class="card offer row" onclick="openPurchaseSheet('${p.id}')">
+      <span class="led ${bal <= 0.005 ? "accepted" : "sent"}"></span>
+      <div style="flex:1;min-width:0">
+        <b>${esc(p.supplier)}</b>
+        <div class="o-num">${esc(p.doc_no || "no number")} · ${new Date(p.doc_date + "T12:00").toLocaleDateString("en-GB")} · ${state_}${p.received_at ? "" : ' · <span style="color:var(--amber)">not in stock</span>'}</div>
+      </div>
+      <span class="mono">${fmt(p.total)}</span>
+    </div>`;
+  }).join("") : (state.loading ? SKEL(3) : '<div class="empty">No purchases yet.<br>Add with +</div>');
 }
 function offerExpired(o) {
   if (o.status !== "sent" || !o.offer_date) return false;
