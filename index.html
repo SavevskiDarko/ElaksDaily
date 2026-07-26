@@ -14,7 +14,7 @@
 :root{
   --navy:#1E3A5F; --navy-deep:#152A46; --amber:#F5B301; --paper:#F7F8FA;
   --card:#FFFFFF; --ink:#23272E; --muted:#6B7280; --line:#E5E8EC;
-  --work:#4C6EF5; --elaks:#1E3A5F; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D;
+  --work:#4C6EF5; --elaks:#1E3A5F; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
   --cond:'IBM Plex Sans Condensed',var(--sans);
@@ -64,7 +64,10 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .mono{font-family:var(--mono)}
 .row{display:flex;align-items:center;gap:10px}
 .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:14px}
-.chips{display:flex;gap:8px;flex-wrap:wrap;overflow-x:auto;padding-bottom:2px}
+.chips{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips.wrap{flex-wrap:wrap;overflow:visible}
 .chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 13px;font-size:13.5px;font-weight:500;white-space:nowrap}
 .chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .btn{background:var(--navy);color:#fff;border-radius:11px;padding:12px 16px;font-weight:600;width:100%;margin-top:14px}
@@ -81,12 +84,18 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .overlay{position:fixed;inset:0;background:rgba(21,42,70,.45);z-index:30;display:none}
 .overlay.on{display:block}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--paper);
-  border-radius:18px 18px 0 0;max-height:88vh;overflow-y:auto;padding:14px var(--pad) calc(20px + env(safe-area-inset-bottom));
+  border-radius:18px 18px 0 0;max-height:88vh;overflow-y:auto;padding:0 var(--pad) calc(20px + env(safe-area-inset-bottom));
   transform:translateY(100%);transition:transform .22s ease;display:none}
 .sheet.on{display:block;transform:translateY(0)}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}}
 .sheet h2{font-family:var(--cond);font-weight:700;font-size:17px;margin-bottom:4px}
-.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto}
+.sheet-top{position:sticky;top:0;z-index:3;background:var(--paper);touch-action:none;
+  margin:0 calc(var(--pad) * -1) 10px;padding:12px var(--pad) 10px;border-radius:18px 18px 0 0}
+.sheet-x{position:absolute;right:10px;top:6px;width:31px;height:31px;border-radius:50%;
+  background:var(--line);color:var(--muted);font-size:13px;font-weight:700;
+  display:flex;align-items:center;justify-content:center}
+.sheet-x:active{opacity:.6}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
 /* ---- tasks ---- */
@@ -133,7 +142,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.on{opacity:1}
 .search{margin-bottom:10px}
-#loadbar{background:#FBE9EC;color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
+#loadbar{background:var(--danger-bg);color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
   align-items:center;gap:10px;border-bottom:1px solid var(--line)}
 #loadbar button{font-weight:700;text-decoration:underline;flex:none}
 .hcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
@@ -209,7 +218,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
 @media (prefers-color-scheme: dark){
-  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5}
+  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22}
   .chip{background:var(--card);color:var(--ink)}
   input,select,textarea{background:var(--card);color:var(--ink)}
   .btn.ghost{background:var(--card);color:var(--ink)}
@@ -510,10 +519,34 @@ function render() {
 }
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2200); }
 let sheetOpen = false, tabPushed = false, ignorePop = false;
+
+// drag the handle down to dismiss — only on the top bar, so scrolling still works
+let sheetDragY = null;
+function sheetDragStart(e) {
+  sheetDragY = e.touches[0].clientY;
+  $("sheet").style.transition = "none";
+}
+function sheetDragMove(e) {
+  if (sheetDragY === null) return;
+  const dy = e.touches[0].clientY - sheetDragY;
+  if (dy > 0) $("sheet").style.transform = "translateY(" + dy + "px)";
+}
+function sheetDragEnd(e) {
+  if (sheetDragY === null) return;
+  const t = e.changedTouches && e.changedTouches[0];
+  const dy = t ? t.clientY - sheetDragY : 0;
+  const sh = $("sheet");
+  sh.style.transition = ""; sh.style.transform = "";
+  sheetDragY = null;
+  if (dy > 90) closeSheet();
+}
 function goBackSilently() { ignorePop = true; history.back(); }
 
 function openSheet(html) {
-  $("sheet").innerHTML = '<div class="grab"></div>' + html;
+  $("sheet").innerHTML = '<div class="sheet-top" ontouchstart="sheetDragStart(event)" '
+    + 'ontouchmove="sheetDragMove(event)" ontouchend="sheetDragEnd(event)">'
+    + '<div class="grab"></div>'
+    + '<button class="sheet-x" onclick="closeSheet()" aria-label="Close">\u2715</button></div>' + html;
   $("overlay").classList.add("on");
   requestAnimationFrame(() => $("sheet").classList.add("on"));
   $("sheet").style.display = "block";
@@ -650,7 +683,7 @@ function openTaskSheet(id) {
     </div>
     <div id="tk-days" style="display:none">
       <label>Repeat on</label>
-      <div class="chips" id="tk-dow">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) =>
+      <div class="chips wrap" id="tk-dow">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) =>
         `<button class="chip ${recurDays(t).includes(i) ? "on" : ""}" data-d="${i}"
           onclick="this.classList.toggle('on')">${d}</button>`).join("")}</div>
     </div>
