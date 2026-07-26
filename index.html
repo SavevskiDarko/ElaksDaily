@@ -50,7 +50,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .tabbar button.on .led{background:var(--amber);box-shadow:0 0 6px var(--amber)}
 
 /* ---- generic ---- */
-.view{display:none;padding:var(--pad)}
+.view{display:none;padding:var(--pad);padding-bottom:calc(var(--pad) + 80px)}
 .view.on{display:block}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px}
 .led{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
@@ -142,6 +142,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hrow b{font-family:var(--mono)}
 .hbig{font-size:26px;font-weight:700;font-family:var(--cond)}
 .hflag{color:var(--danger);font-weight:600}
+.skel{height:58px;border-radius:var(--r);margin-bottom:10px;
+  background:linear-gradient(90deg,var(--line) 25%,var(--card) 37%,var(--line) 63%);
+  background-size:400% 100%;animation:shim 1.3s ease-in-out infinite}
+.skel.tall{height:104px}
+@keyframes shim{0%{background-position:100% 0}100%{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
 .mov.tapp{cursor:pointer}
 .mov.tapp:active{opacity:.6}
 .bankrow{justify-content:space-between;align-items:baseline;margin-top:7px}
@@ -293,7 +299,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div id="data-settings" style="display:none">
       <div class="sec">Backup</div>
       <button class="btn ghost" onclick="backupJson()">Download full backup (JSON)</button>
-      <p class="muted" style="font-size:12.5px">Download once a month and keep it somewhere safe — it contains every task, article, offer, guest and bill.</p>
+      <p class="muted" style="font-size:12.5px">Download once a month and keep it somewhere safe — every task, article, offer, guest, bill and cash entry. Product photos are not included, so the file stays small and reliable.</p>
     </div>
     <div id="team-settings" style="display:none">
       <div class="sec">Team</div>
@@ -341,14 +347,14 @@ const myCtx = () => state.perm.owner ? ["work", "elaks", "personal", "apts"] : (
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
 const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
 const unitLbl = (u) => u === "m" ? "m" : "pcs";
-const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString("mk-MK");
+const fmt = (n) => (Math.round((parseFloat(n) || 0) * 100) / 100).toLocaleString("mk-MK");
 const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  mineOnly: false, people: [],
+  loading: true, mineOnly: false, people: [], cashMonth: null,
   tasks: [], stock: [], clients: [], offers: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
@@ -401,16 +407,23 @@ async function startApp() {
     if (state.perm.owner && $("apts-settings")) $("apts-settings").style.display = "";
     if (state.perm.owner && $("data-settings")) $("data-settings").style.display = "";
   } catch (e) { console.warn("permission lookup", e); }
+  tab("home");                    // paint skeletons before the data lands
   await refreshAll();
-  tab("home");
+  state.loading = false;
+  render();
   updatePushState();
   if (state.role === "owner") {
     try {
-      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day"]);
+      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types"]);
+      let stored = null;
       for (const r of data || []) {
         if (r.key === "digest_hour") $("digest-hour").value = String(r.value).replace(/"/g, "");
         if (r.key === "bills_day" && $("bills-day")) $("bills-day").value = String(r.value).replace(/"/g, "");
+        if (r.key === "bill_types") stored = Array.isArray(r.value) ? r.value : (() => { try { return JSON.parse(r.value); } catch { return null; } })();
       }
+      // keep the notification side in step with BILL_TYPES instead of hardcoding a count
+      if (!stored || stored.join(",") !== BILL_TYPES.join(","))
+        await db.from("app_settings").upsert({ key: "bill_types", value: BILL_TYPES }, { onConflict: "key" });
     } catch (e) { console.warn("settings", e); }
   } else if ($("digest-block")) $("digest-block").style.display = "none";
 }
@@ -562,7 +575,7 @@ function renderToday() {
     html += (overdue.length || inbox.length) ? '<div class="sec">Today</div>' : "";
     html += todays.map(taskRow(today)).join("");
   } else if (!overdue.length && !inbox.length) {
-    html += '<div class="empty">No tasks for today.<br>Add with +</div>';
+    html += (state.loading ? SKEL() : '<div class="empty">No tasks for today.<br>Add with +</div>');
   }
   $("today-list").innerHTML = html;
 
@@ -772,7 +785,7 @@ function renderInv() {
       ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
       <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
       <div class="a-qty">${fmt(a.stock)}<small>${unitLbl(a.unit)}</small></div>
-    </div>`).join("") : '<div class="empty">No articles.<br>Add with +</div>');
+    </div>`).join("") : (state.loading ? SKEL(4) : '<div class="empty">No articles.<br>Add with +</div>'));
 }
 async function openArticleDetail(id) {
   const a = state.stock.find((x) => x.id === id);
@@ -853,24 +866,58 @@ const personName = (uid) => {
   const p = state.people.find((x) => x.user_id === uid);
   return p ? (p.display_name || "Unnamed") : "";
 };
+const SKEL = (n = 3, cls = "") => Array.from({ length: n }, () => `<div class="skel ${cls}"></div>`).join("");
 const initials = (s) => (s || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-function openCashSheet() {
+// The month being viewed is fetched on demand, so entries never fall out of reach.
+async function openCashSheet() {
+  const month = state.cashMonth || todayStr().slice(0, 7);
+  state.cashMonth = month;
+  const [y, m] = month.split("-").map(Number);
+  const from = `${month}-01`;
+  const to = new Date(y, m, 1).toLocaleDateString("sv-SE");   // first day of the next month
+  let rows = [], failed = false;
+  try {
+    const { data, error } = await db.from("elaks_cash").select("*")
+      .gte("created_at", from).lt("created_at", to).order("created_at", { ascending: false });
+    if (error) { failed = true; console.error(error); } else rows = data || [];
+  } catch (e) { failed = true; console.error(e); }
+  state.cash = rows;   // the edit sheet reads from here
+  const inSum = rows.reduce((s, e) => s + Math.max(0, parseFloat(e.amount) || 0), 0);
+  const outSum = rows.reduce((s, e) => s + Math.min(0, parseFloat(e.amount) || 0), 0);
+  const label = new Date(month + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
   openSheet(`
     <h2>Elaks cash register</h2>
-    <div class="totalbar"><span>Balance</span><span class="mono">${fmt(cashBal())} ден.</span></div>
+    <div class="totalbar"><span>Balance now</span><span class="mono">${fmt(cashBal())} ден.</span></div>
     <div class="grid2" style="margin-top:12px">
       <button class="btn sm" style="width:100%" onclick="cashAdjustSheet(1)">+ Add cash</button>
       <button class="btn sm ghost" style="width:100%" onclick="cashAdjustSheet(-1)">− Withdraw</button>
     </div>
-    <div class="sec">Last entries <span class="muted" style="font-weight:400">· tap to edit</span></div>
-    ${state.cash.map((e) => {
+    <div class="row" style="justify-content:center;gap:18px;margin:14px 0 4px">
+      <button class="chip" onclick="shiftCashMonth(-1)">‹</button><b>${label}</b>
+      <button class="chip" onclick="shiftCashMonth(1)">›</button>
+    </div>
+    <div class="row bankrow"><span class="muted nw">In this month</span>
+      <span class="mono" style="color:var(--personal)">+${fmt(inSum)} ден.</span></div>
+    <div class="row bankrow"><span class="muted nw">Out this month</span>
+      <span class="mono" style="color:var(--danger)">−${fmt(Math.abs(outSum))} ден.</span></div>
+    <div class="row bankrow"><span class="muted nw">Month result</span>
+      <span class="mono"><b>${fmt(inSum + outSum)} ден.</b></span></div>
+    <div class="sec">Entries <span class="muted" style="font-weight:400">· tap to edit</span></div>
+    ${failed ? '<p class="muted">Could not load this month — check your connection.</p>' : ""}
+    ${rows.map((e) => {
       const v = parseFloat(e.amount) || 0;
       return `<div class="mov tapp" onclick="openCashEntry('${e.id}')">
         <span><b class="mono" style="color:${v >= 0 ? "var(--personal)" : "var(--danger)"}">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v))}</b>
           ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}${e.offer_id ? ' <span class="muted">· offer</span>' : ""}</span>
-        <span class="muted">${new Date(e.created_at).toLocaleDateString("en-GB")} ›</span></div>`;
-    }).join("") || '<p class="muted">No entries yet — add your starting amount with "+ Add cash".</p>'}
+        <span class="muted">${new Date(e.created_at).getDate()}. ›</span></div>`;
+    }).join("") || (failed ? "" : '<p class="muted">No entries this month.</p>')}
   `);
+}
+function shiftCashMonth(dir) {
+  const [y, m] = state.cashMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 + dir, 1);
+  state.cashMonth = d.toLocaleDateString("sv-SE").slice(0, 7);
+  openCashSheet();
 }
 function cashAdjustSheet(dir) {
   openSheet(`
@@ -1081,7 +1128,7 @@ function renderOffers() {
         <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${o.paid_at ? ' · <span style="color:var(--personal)">paid</span>' : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
-    </div>`).join("") : '<div class="empty">No offers.<br>Create with +</div>';
+    </div>`).join("") : (state.loading ? SKEL(3) : '<div class="empty">No offers.<br>Create with +</div>');
 }
 async function nextOfferNumber() {
   const y = new Date().getFullYear();
@@ -1134,8 +1181,12 @@ async function openOfferSheet(id) {
     ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
     ${id && o.paid_at
       ? `<div class="card" style="border-color:var(--personal)">
-           <div class="row" style="justify-content:space-between"><b style="color:var(--personal)">Paid</b>
+           <div class="row" style="justify-content:space-between">
+             <b style="color:var(--personal)">${(parseFloat(o.paid_amount) || 0) + 0.005 < (parseFloat(o.grand_total) || 0) ? "Part paid" : "Paid"}</b>
              <span class="mono">${fmt(o.paid_amount)} ден.</span></div>
+           ${(parseFloat(o.paid_amount) || 0) + 0.005 < (parseFloat(o.grand_total) || 0)
+             ? `<div class="row" style="justify-content:space-between"><span class="muted nw">Still owed</span>
+                  <span class="mono" style="color:var(--amber)">${fmt((o.grand_total || 0) - (o.paid_amount || 0))} ден.</span></div>` : ""}
            <div class="muted">${new Date(o.paid_at + "T12:00").toLocaleDateString("en-GB")} · ${o.paid_method === "cash" ? "cash — added to the register" : "bank"}</div>
            <button class="btn sm ghost" style="margin-top:8px" onclick="undoPayment('${id}')">Undo payment</button>
          </div>`
@@ -1527,6 +1578,32 @@ async function undoPayment(id) {
   } catch { return; }
   closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render(); toast("Payment undone");
 }
+function reconcileSheet(id, paid, total) {
+  const o = state.offers.find((x) => x.id === id);
+  const diff = total - paid;
+  const owed = diff > 0;
+  openSheet(`
+    <h2>Payment needs checking</h2>
+    <p class="muted">${o.number} — the total changed when the job was closed.</p>
+    <div class="row bankrow"><span class="muted nw">Already paid</span><span class="mono">${fmt(paid)} ден.</span></div>
+    <div class="row bankrow"><span class="muted nw">New total</span><span class="mono">${fmt(total)} ден.</span></div>
+    <div class="row bankrow"><span class="muted nw">${owed ? "Client still owes" : "To give back"}</span>
+      <span class="mono"><b style="color:${owed ? "var(--amber)" : "var(--danger)"}">${fmt(Math.abs(diff))}</b> ден.</span></div>
+    <button class="btn" onclick="settleDiff('${id}', ${diff}, true)">${owed ? "Got it in cash — add to register" : "Refunded in cash — take from register"}</button>
+    <button class="btn ghost" onclick="settleDiff('${id}', ${diff}, false)">Settled by bank — just record it</button>
+    <button class="btn ghost" onclick="closeSheet()">Leave the balance open</button>
+  `);
+}
+async function settleDiff(id, diff, cash) {
+  const o = state.offers.find((x) => x.id === id);
+  try {
+    if (cash) await dbq(db.from("elaks_cash").insert({
+      amount: diff, offer_id: id, note: `Offer ${o.number} · balance after job closed`,
+    }), "Cash entry not saved");
+    await dbq(db.from("offers").update({ paid_amount: o.grand_total }).eq("id", id), "Not saved");
+  } catch { return; }
+  closeSheet(); await refreshAll(["offers", "cash", "cashTotal"]); render(); toast("Payment updated");
+}
 function duplicateOffer(id) {
   const src = state.offers.find((x) => x.id === id);
   closeSheet();
@@ -1573,7 +1650,13 @@ async function closeJob(id) {
     if (movRows.length) await dbq(db.from("movements").insert(movRows), "Stock not updated");
     await dbq(db.from("offers").update({ items, grand_total: total, total_note: null, stock_deducted: true }).eq("id", id), "Offer not updated");
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "stock"]); renderOffers(); toast("Job closed — total and stock updated");
+  closeSheet(); await refreshAll(["offers", "stock"]); renderOffers();
+  const wasPaid = parseFloat(o.paid_amount) || 0;
+  if (o.paid_at && Math.abs(total - wasPaid) > 0.005) {   // the invoice moved after it was paid
+    setTimeout(() => reconcileSheet(id, wasPaid, total), 260);
+    return;
+  }
+  toast("Job closed — total and stock updated");
 }
 
 /* ============================================================
@@ -1703,7 +1786,9 @@ async function saveBillsDay() {
 }
 async function backupJson() {
   toast("Preparing backup…");
-  const tables = ["tasks", "articles", "article_images", "movements", "clients", "offers",
+  // photos are deliberately excluded: they are large, and a backup that fails
+  // when you need it is worse than one that leaves images behind
+  const tables = ["tasks", "articles", "movements", "clients", "offers",
                   "apartments", "stays", "bills", "elaks_cash", "user_roles", "app_settings"];
   const out = { app: "Centrala", version: 1, exported_at: new Date().toISOString(), data: {} };
   const missed = [];
@@ -1824,7 +1909,7 @@ function renderStays() {
   if (cur.length) html += '<div class="sec">Currently staying</div>' + cur.map(stayRow).join("");
   if (up.length) html += '<div class="sec">Upcoming</div>' + up.map(stayRow).join("");
   html += '<div class="sec">Past</div>' + (past.slice(0, 30).map(stayRow).join("") || '<p class="muted">No past stays.</p>');
-  $("apt-body").innerHTML = html || '<div class="empty">No guests yet.<br>Add with +</div>';
+  $("apt-body").innerHTML = html || (state.loading ? SKEL(3) : '<div class="empty">No guests yet.<br>Add with +</div>');
 }
 function openStaySheet(id, pre) {
   const s = id ? state.stays.find((x) => x.id === id)
@@ -1946,7 +2031,7 @@ function renderAptList() {
     <div class="card row" onclick="openAptStatement('${a.id}')">
       <div style="flex:1"><b>${esc(a.name)}</b>
         <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}${a.nightly_rate ? " · " + fmt(a.nightly_rate) + " ден./night" : ""}</div></div>
-    </div>`).join("") : '<div class="empty">No apartments.<br>Add with +</div>';
+    </div>`).join("") : (state.loading ? SKEL(2) : '<div class="empty">No apartments.<br>Add with +</div>');
 }
 function openAptStatement(id, year) {
   const a = state.apartments.find((x) => x.id === id);
@@ -2021,6 +2106,7 @@ async function delApt(id) {
 }
 
 function renderHome() {
+  if (state.loading) { $("home-body").innerHTML = SKEL(3, "tall"); return; }
   const today = todayStr();
   const openTasks = state.tasks.filter((t) => occursOn(t, today) && !isDoneOn(t, today));
   const overdue = state.tasks.filter((t) => !t.recurrence && t.due_date && t.due_date < today && !t.done);
