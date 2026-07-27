@@ -2473,6 +2473,7 @@ function renderHome() {
     const billsLate = billsOpen.filter(purchaseOverdue);
     const billsSum = sumBy(billsOpen, purchaseBalance);
     const pendingStock = state.offers.filter(needsDeduct);
+    const waiting = state.purchases.filter((p) => (p.items || []).length && !purFullyArrived(p));
     html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
@@ -2480,6 +2481,8 @@ function renderHome() {
       <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}${expired.length ? ` <span class="hflag">(${expired.length} expired)</span>` : ""}</b></div>
       <div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>
       ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${owed.length} · ${fmt(owedSum)} ден.</b></div>` : ""}
+      ${waiting.length ? `<div class="hrow"><span>Waiting to arrive</span>
+        <b style="color:var(--amber)">${waiting.length} purchase(s)</b></div>` : ""}
       ${pendingStock.length ? `<div class="hrow"><span>Stock not taken out</span>
         <b class="hflag">${pendingStock.length} offer(s)</b></div>` : ""}
       ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
@@ -2544,6 +2547,17 @@ function purchaseTotals(items) {
   }
   return { gross, net, vat: gross - net, byRate };
 }
+// Deliveries can take months and arrive in pieces, so each line tracks how
+// much has actually turned up. Purchases received before this existed have
+// received_at set and no per-line figure — treat those as fully arrived.
+const lineQty = (it) => parseFloat(it.qty) || 0;
+const lineRecv = (p, it) => (it.recv === undefined || it.recv === null)
+  ? (p.received_at ? lineQty(it) : 0)
+  : (parseFloat(it.recv) || 0);
+const linePending = (p, it) => Math.max(0, lineQty(it) - lineRecv(p, it));
+const purPending = (p) => (p.items || []).filter((it) => linePending(p, it) > 0.0001);
+const purArrivedCount = (p) => (p.items || []).length - purPending(p).length;
+const purFullyArrived = (p) => (p.items || []).length > 0 && purPending(p).length === 0;
 const purchaseBalance = (p) => (parseFloat(p.total) || 0) - (parseFloat(p.paid_amount) || 0);
 const purchaseOverdue = (p) => !!p.due_date && purchaseBalance(p) > 0.005 && p.due_date < todayStr();
 
@@ -2564,7 +2578,10 @@ function openPurchaseSheet(id) {
       <div><label>Document no.</label><input id="pu-no" value="${esc(p.doc_no || "")}" placeholder="001-464/2026"></div>
       <div><label>Date</label><input id="pu-date" type="date" value="${p.doc_date || todayStr()}"></div>
     </div>
-    <label>Due date (датум доспева)</label><input id="pu-due" type="date" value="${p.due_date || ""}">
+    <div class="grid2">
+      <div><label>Payment due</label><input id="pu-due" type="date" value="${p.due_date || ""}"></div>
+      <div><label>Expected arrival</label><input id="pu-exp" type="date" value="${p.expected_date || ""}"></div>
+    </div>
 
     <div class="sec">Items</div>
     <input id="pu-search" placeholder="Search an article you already have…" oninput="renderPurPicker()">
@@ -2580,9 +2597,15 @@ function openPurchaseSheet(id) {
 
     <label>Note (opt.)</label><input id="pu-note" value="${esc(p.note || "")}">
     <button class="btn" onclick="savePurchase('${id || ""}')">Save</button>
-    ${id ? (p.received_at
-      ? `<p class="muted">Received into stock on ${new Date(p.received_at + "T12:00").toLocaleDateString("en-GB")}.</p>`
-      : `<button class="btn amber" onclick="receivePurchase('${id}')">Receive into stock</button>`) : ""}
+    ${id ? (purFullyArrived(p)
+      ? `<p class="muted">Everything has arrived${p.received_at ? " · " + new Date(p.received_at + "T12:00").toLocaleDateString("en-GB") : ""}.</p>`
+      : `<div class="card">
+           <div class="row" style="justify-content:space-between"><b>Waiting to arrive</b>
+             <span class="mono">${purArrivedCount(p)}/${(p.items || []).length} lines in</span></div>
+           ${purPending(p).map((it) => `<div class="mov"><span>${esc(it.name)}</span>
+             <span class="mono">${fmt(linePending(p, it))} of ${fmt(lineQty(it))} to come</span></div>`).join("")}
+           <button class="btn amber" style="margin-top:10px" onclick="receiveSheet('${id}')">They arrived →</button>
+         </div>`) : ""}
     ${id ? (bal > 0.005
       ? `<button class="btn ghost" onclick="payPurchaseSheet('${id}')">Mark as paid${p.due_date ? " · " + fmt(bal) + " ден." : ""}</button>`
       : `<div class="card" style="border-color:var(--personal)">
@@ -2639,6 +2662,7 @@ async function savePurchase(id) {
     doc_no: $("pu-no").value.trim() || null,
     doc_date: $("pu-date").value || todayStr(),
     due_date: $("pu-due").value || null,
+    expected_date: $("pu-exp").value || null,
     items: purItems,
     total: purchaseTotals(purItems).gross,
     note: $("pu-note").value.trim() || null,
@@ -2660,18 +2684,44 @@ async function delPurchase(id) {
 }
 // Receiving does three things: creates any article that doesn't exist yet,
 // refreshes the cost on the ones that do, and books the stock in.
-async function receivePurchase(id) {
+let recvQty = {};
+function receiveSheet(id) {
   const p = state.purchases.find((x) => x.id === id);
-  if (p.received_at) return toast("Already received");
+  const pend = purPending(p);
+  if (!pend.length) return toast("Everything has already arrived");
+  recvQty = {};
+  (p.items || []).forEach((it, i) => { recvQty[i] = linePending(p, it); });
+  openSheet(`
+    <h2>What arrived?</h2>
+    <p class="muted">${esc(p.supplier)}${p.doc_no ? " · " + esc(p.doc_no) : ""} — leave a line at 0 if it still hasn't come.</p>
+    <div class="ohead" style="grid-template-columns:1fr 62px 62px"><span>Article</span><span>Ordered</span><span>Arrived</span></div>
+    ${(p.items || []).map((it, i) => {
+      const pen = linePending(p, it);
+      return `<div class="oitem" style="grid-template-columns:1fr 62px 62px">
+        <div style="min-width:0"><b>${esc(it.name)}</b>
+          ${pen < lineQty(it) ? `<div class="muted">${fmt(lineRecv(p, it))} already in</div>` : ""}</div>
+        <input class="mono" value="${fmt(lineQty(it))}" disabled>
+        <input type="number" inputmode="decimal" min="0" step="any" value="${pen || 0}"
+          ${pen ? "" : "disabled"} oninput="recvQty[${i}]=parseFloat(this.value)||0">
+      </div>`;
+    }).join("")}
+    <button class="btn" style="margin-top:12px" onclick="confirmArrival('${id}')">Book what arrived into stock</button>
+  `);
+}
+async function confirmArrival(id) {
+  const p = state.purchases.find((x) => x.id === id);
   const items = p.items || [];
-  if (!items.length) return toast("Add the items first");
-  const fresh = items.filter((it) => !it.article_id && (it.name || "").trim());
-  const msg = `Receive ${items.length} line(s) into stock?`
-    + (fresh.length ? `\n\n${fresh.length} new article(s) will be created:\n· ` + fresh.map((f) => f.name).join("\n· ") : "");
+  const arriving = items.map((it, i) => ({ it, i, n: Math.min(Math.max(0, recvQty[i] || 0), linePending(p, it)) }))
+    .filter((x) => x.n > 0.0001);
+  if (!arriving.length) return toast("Nothing marked as arrived");
+  const fresh = arriving.filter((x) => !x.it.article_id && (x.it.name || "").trim());
+  const msg = `Book ${arriving.length} line(s) into stock?`
+    + (fresh.length ? `\n\n${fresh.length} new article(s) will be created:\n· ` + fresh.map((f) => f.it.name).join("\n· ") : "");
   if (!confirm(msg)) return;
   try {
     const lines = JSON.parse(JSON.stringify(items));
-    for (const it of lines) {
+    for (const x of arriving) {
+      const it = lines[x.i];
       if (!it.article_id) {
         const made = await dbq(db.from("articles").insert({
           name: (it.name || "").trim() || "Unnamed", category: "Other", unit: "ком", min_stock: 0,
@@ -2682,16 +2732,23 @@ async function receivePurchase(id) {
       } else {
         await dbq(db.from("articles").update({ purchase_price: parseFloat(it.price) || 0 }).eq("id", it.article_id), "Cost not updated");
       }
+      it.recv = lineRecv(p, x.it) + x.n;
     }
-    await dbq(db.from("movements").insert(lines.map((it) => ({
-      article_id: it.article_id, type: "in", qty: parseFloat(it.qty) || 0,
+    await dbq(db.from("movements").insert(arriving.map((x) => ({
+      article_id: lines[x.i].article_id, type: "in", qty: x.n,
       ref: p.doc_no || null,
       note: `${p.supplier}${p.doc_no ? " · " + p.doc_no : ""}`,
     }))), "Stock not updated");
-    await dbq(db.from("purchases").update({ received_at: todayStr(), items: lines }).eq("id", id), "Purchase not updated");
+    const done = lines.every((it) => (parseFloat(it.recv) || 0) + 0.0001 >= lineQty(it));
+    await dbq(db.from("purchases").update({
+      items: lines,
+      received_at: done ? todayStr() : null,
+    }).eq("id", id), "Purchase not updated");
   } catch { return; }
-  closeSheet(); await refreshAll(["purchases", "stock"]); renderPurchases();
-  toast(fresh.length ? `Received · ${fresh.length} new article(s) created` : "Received into stock");
+  closeSheet(); await refreshAll(["purchases", "stock"]); render();
+  const left = purPending(state.purchases.find((x) => x.id === id) || {}).length;
+  toast(left ? `Booked in · ${left} line(s) still to come`
+             : (fresh.length ? `All arrived · ${fresh.length} new article(s) created` : "All arrived and in stock"));
 }
 
 let purPayMethod = "cash";
@@ -2754,11 +2811,14 @@ function renderPurchases() {
     || (p.doc_no || "").toLowerCase().includes(q));
   const open = state.purchases.filter((p) => purchaseBalance(p) > 0.005);
   const late = open.filter(purchaseOverdue);
+  const onOrder = state.purchases.filter((p) => (p.items || []).length && !purFullyArrived(p));
   $("pur-summary").innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between"><b>Owed to suppliers</b>
       <span class="mono">${fmt(sumBy(open, purchaseBalance))} ден.</span></div>
     <div class="row" style="justify-content:space-between"><span class="muted">${open.length} open bill(s)</span>
       <b class="${late.length ? "hflag" : "hok"}">${late.length ? late.length + " overdue" : "none overdue"}</b></div>
+    ${onOrder.length ? `<div class="row" style="justify-content:space-between;margin-top:4px">
+      <span class="muted">Waiting to arrive</span><b style="color:var(--amber)">${onOrder.length} purchase(s)</b></div>` : ""}
   </div>`;
   $("pur-list").innerHTML = list.length ? list.map((p) => {
     const bal = purchaseBalance(p);
@@ -2769,7 +2829,9 @@ function renderPurchases() {
       <span class="led ${bal <= 0.005 ? "accepted" : "sent"}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(p.supplier)}</b>
-        <div class="o-num">${esc(p.doc_no || "no number")} · ${new Date(p.doc_date + "T12:00").toLocaleDateString("en-GB")} · ${state_}${p.received_at ? "" : ' · <span style="color:var(--amber)">not in stock</span>'}</div>
+        <div class="o-num">${esc(p.doc_no || "no number")} · ${new Date(p.doc_date + "T12:00").toLocaleDateString("en-GB")} · ${state_}${
+          purFullyArrived(p) ? ""
+            : ` · <span style="color:var(--amber)">${purArrivedCount(p) ? `${purArrivedCount(p)}/${(p.items || []).length} arrived` : "on order"}${p.expected_date ? " · exp. " + new Date(p.expected_date + "T12:00").toLocaleDateString("en-GB") : ""}</span>`}</div>
       </div>
       <span class="mono">${fmt(p.total)}</span>
     </div>`;
