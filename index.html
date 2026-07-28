@@ -317,6 +317,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
         <div class="row"><input id="bills-day" type="number" min="1" max="28" value="5" style="flex:1">
           <button class="btn sm" onclick="saveBillsDay()">Save</button></div>
       </div>
+      <div class="sec">Guest arrivals</div>
+      <div class="card">
+        <label>Remind me the day before an arrival, at</label>
+        <div class="row"><input id="stay-time" type="time" value="09:00" style="flex:1">
+          <button class="btn sm" onclick="saveStayTime()">Save</button></div>
+      </div>
     </div>
     <div id="data-settings" style="display:none">
       <div class="sec">Backup</div>
@@ -440,11 +446,12 @@ async function startApp() {
   updatePushState();
   if (state.role === "owner") {
     try {
-      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types"]);
+      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types", "stay_remind_time"]);
       let stored = null;
       for (const r of data || []) {
         if (r.key === "digest_hour") $("digest-hour").value = String(r.value).replace(/"/g, "");
         if (r.key === "bills_day" && $("bills-day")) $("bills-day").value = String(r.value).replace(/"/g, "");
+        if (r.key === "stay_remind_time" && $("stay-time")) $("stay-time").value = String(r.value).replace(/"/g, "");
         if (r.key === "bill_types") stored = Array.isArray(r.value) ? r.value : (() => { try { return JSON.parse(r.value); } catch { return null; } })();
       }
       // keep the notification side in step with BILL_TYPES instead of hardcoding a count
@@ -2118,6 +2125,19 @@ async function enablePush() {
     updatePushState(); toast("Notifications enabled");
   } catch (e) { console.error(e); toast("Error enabling push"); }
 }
+async function getSetting(key, fallback) {
+  try {
+    const { data, error } = await db.from("app_settings").select("value").eq("key", key).maybeSingle();
+    if (error || !data) return fallback;
+    const v = typeof data.value === "string" ? data.value.replace(/"/g, "") : data.value;
+    return v || fallback;
+  } catch { return fallback; }
+}
+async function saveStayTime() {
+  const t = $("stay-time").value || "09:00";
+  try { await dbq(db.from("app_settings").upsert({ key: "stay_remind_time", value: t }, { onConflict: "key" }), "Not saved"); } catch { return; }
+  toast("Saved");
+}
 async function saveBillsDay() {
   const d = Math.min(28, Math.max(1, parseInt($("bills-day").value) || 5));
   try { await dbq(db.from("app_settings").upsert({ key: "bills_day", value: String(d) }, { onConflict: "key" }), "Not saved"); } catch { return; }
@@ -2269,6 +2289,11 @@ function openStaySheet(id, pre) {
       <div><label>Amount paid (ден.)</label><input id="st-amt" type="number" inputmode="decimal" value="${s.amount ?? ""}" oninput="this.dataset.touched=1"></div>
     </div>
     <div class="muted" id="st-nights" style="margin-top:4px"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
+        onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${stayHasTask(id) ? "\u2713" : ""}</button>
+      <span>Reminder task the day before they arrive</span>
+    </div>
     <label>Notes (opt.)</label><input id="st-notes" value="${esc(s.notes || "")}">
     <button class="btn" onclick="saveStay('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delStay('${id}')">Delete</button>` : ""}
@@ -2288,6 +2313,39 @@ function stayCalc() {
     ? `${n} night${n > 1 ? "s" : ""}${a && a.nightly_rate ? ` · rate ${fmt(a.nightly_rate)} ден./night` : ""}`
     : "";
 }
+const stayHasTask = (id) => !id ? true : state.tasks.some((t) => t.stay_id === id);
+
+// One task per stay, dated the day before check-in so the existing
+// reminder push does the notifying.
+async function syncStayTask(stay, want) {
+  const existing = state.tasks.find((t) => t.stay_id === stay.id);
+  try {
+    if (!want || !stay.check_in || stay.check_in < todayStr()) {
+      if (existing && !want) await db.from("tasks").delete().eq("id", existing.id);
+      return;
+    }
+    const apt = state.apartments.find((a) => a.id === stay.apartment_id);
+    const time = await getSetting("stay_remind_time", "09:00");
+    const d = new Date(stay.check_in + "T12:00");
+    d.setDate(d.getDate() - 1);
+    const dayBefore = d.toLocaleDateString("sv-SE");
+    const due = dayBefore < todayStr() ? todayStr() : dayBefore;
+    const nights = nightsBetween(stay.check_in, stay.check_out);
+    const row = {
+      title: `Check-in: ${stay.guest_name}${apt ? " · " + apt.name : ""}`,
+      context: "apts", due_date: due, due_time: time, remind: true,
+      notes: `Arrives ${stay.check_in} · leaves ${stay.check_out} · ${nights} night(s)`
+        + (stay.source && stay.source !== "Direct" ? " · " + stay.source : ""),
+      stay_id: stay.id,
+    };
+    if (existing) {
+      if (due > todayStr()) { row.done = false; row.reminded_on = null; }
+      await db.from("tasks").update(row).eq("id", existing.id);
+    } else {
+      await db.from("tasks").insert(row);
+    }
+  } catch (e) { console.error("stay task", e); toast("Stay saved, but the reminder task failed"); }
+}
 async function saveStay(id) {
   const row = {
     apartment_id: $("st-apt").value, guest_name: $("st-guest").value.trim(),
@@ -2301,17 +2359,24 @@ async function saveStay(id) {
   const clash = state.stays.find((x) => x.id !== id && x.apartment_id === row.apartment_id
     && x.check_in < row.check_out && row.check_in < x.check_out);
   if (clash) return alert(`Those dates overlap an existing booking:\n\n${clash.guest_name} · ${clash.check_in} → ${clash.check_out}`);
-  try { await dbq(id ? db.from("stays").update(row).eq("id", id) : db.from("stays").insert(row), "Stay not saved"); }
-  catch (e) {
+  const wantTask = $("st-task").classList.contains("on");
+  let saved;
+  try {
+    saved = await dbq(id
+      ? db.from("stays").update(row).eq("id", id).select().single()
+      : db.from("stays").insert(row).select().single(), "Stay not saved");
+  } catch (e) {
     if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) alert("Those dates are already booked for this apartment.");
     return;
   }
-  closeSheet(); await refreshAll(["stays", "aptCash"]); renderApt(); toast("Saved");
+  await syncStayTask(saved, wantTask);
+  closeSheet(); await refreshAll(["stays", "tasks", "aptCash"]); renderApt();
+  toast(wantTask && row.check_in >= todayStr() ? "Saved · reminder task created" : "Saved");
 }
 async function delStay(id) {
   if (!confirm("Delete this stay?")) return;
   try { await dbq(db.from("stays").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(["stays", "aptCash"]); renderApt();
+  closeSheet(); await refreshAll(["stays", "tasks", "aptCash"]); renderApt();
 }
 
 function shiftAptMonth(dir) {
