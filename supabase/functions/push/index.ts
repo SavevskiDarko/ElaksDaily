@@ -30,7 +30,7 @@ function nowLocal(): Date {
 }
 const pad = (n: number) => String(n).padStart(2, "0");
 
-async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null) {
+async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null) {
   const { data: subs } = await db.from("push_subscriptions").select("*");
   const { data: rr } = await db.from("user_roles").select("*");
   const rowOf = new Map((rr ?? []).map((r) => [r.user_id, r]));
@@ -40,7 +40,8 @@ async function sendToAll(title: string, body: string, tag: string, allow: ((r: a
       if (!r || !allow(r)) continue;
     }
     try {
-      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag }), { urgency: "high", TTL: 3600 });
+      // 12h so a phone that is off or out of signal still receives it
+      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId }), { urgency: "high", TTL: 43200 });
     } catch (e: any) {
       if (e.statusCode === 404 || e.statusCode === 410) {
         await db.from("push_subscriptions").delete().eq("id", s.id); // expired
@@ -75,7 +76,7 @@ Deno.serve(async (req) => {
       const who = t.assigned_to
         ? (r: any) => r.role === "owner" || r.user_id === t.assigned_to
         : (r: any) => r.role === "owner" || (r.task_contexts ?? []).includes(t.context);
-      await sendToAll("Reminder", `${t.title} (${t.due_time.slice(0, 5)})`, `task-${t.id}`, who);
+      await sendToAll("Reminder", `${t.title} (${t.due_time.slice(0, 5)})`, `task-${t.id}`, who, t.id);
       await db.from("tasks").update({ reminded_on: today }).eq("id", t.id);
     }
   }
@@ -240,6 +241,27 @@ Deno.serve(async (req) => {
       }
     }
   } catch (e) { console.error("ical sync", e); }
+
+
+  // ---- 7. one nudge a day for anything still overdue ----
+  try {
+    const { data: cfgO } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "overdue_sent_on"]);
+    const getO = (k: string) => String((cfgO ?? []).find((r: any) => r.key === k)?.value ?? "").replace(/"/g, "");
+    const hour = getO("digest_hour") || "07:30";
+    if (hhmm >= hour && getO("overdue_sent_on") !== today) {
+      const { data: late } = await db.from("tasks").select("id, title, context, assigned_to")
+        .is("recurrence", null).eq("done", false).lt("due_date", today);
+      if ((late ?? []).length) {
+        const byCtx: Record<string, number> = {};
+        for (const t of late!) byCtx[t.context] = (byCtx[t.context] ?? 0) + 1;
+        const body = Object.entries(byCtx).map(([c, n]) => `${c}: ${n}`).join(" \u00b7 ");
+        await sendToAll(`${late!.length} task(s) overdue`, body, "overdue",
+          (r) => r.role === "owner" || Object.keys(byCtx).some((c) => (r.task_contexts ?? []).includes(c)),
+          late!.length === 1 ? late![0].id : null);
+      }
+      await db.from("app_settings").upsert({ key: "overdue_sent_on", value: today }, { onConflict: "key" });
+    }
+  } catch (e) { console.error("overdue nudge", e); }
 
   return new Response("ok");
 });
