@@ -1,4 +1,4 @@
-const CACHE = "centrala-v4";
+const CACHE = "centrala-v5";
 const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./brand-logo.png", "./brand-banner.png", "./brand-footer.png", "./icon-192.png?v=3", "./icon-512.png?v=3"];
 
 self.addEventListener("install", (e) => {
@@ -30,23 +30,36 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let data = { title: "Centrala", body: "", tag: "general" };
   try { data = e.data.json(); } catch (_) {}
-  e.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      tag: data.tag,
-      icon: "./icon-192.png?v=3",
-      badge: "./icon-192.png?v=3",
-      vibrate: [100, 50, 100],
-    })
-  );
+  const opts = {
+    body: data.body,
+    tag: data.tag,
+    icon: "./icon-192.png?v=3",
+    badge: "./icon-192.png?v=3",
+    vibrate: [100, 50, 100],
+    data: { taskId: data.taskId || null },
+  };
+  if (data.taskId) opts.actions = [
+    { action: "done", title: "\u2713 Done" },
+    { action: "snooze", title: "Snooze 1h" },
+  ];
+  e.waitUntil(self.registration.showNotification(data.title, opts));
 });
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
+  const id = (e.notification.data || {}).taskId;
+  // The session lives in the page, not here, so the action is handed to the
+  // app through the URL and carried out the moment it opens or focuses.
+  const url = id ? `./?task=${id}${e.action ? "&do=" + e.action : ""}` : "./";
   e.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      for (const c of list) if ("focus" in c) return c.focus();
-      return clients.openWindow("./");
+      for (const c of list) {
+        if ("focus" in c) {
+          c.postMessage({ centrala: true, taskId: id || null, action: e.action || "open" });
+          return c.focus();
+        }
+      }
+      return clients.openWindow(url);
     })
   );
 });
