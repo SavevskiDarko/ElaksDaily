@@ -387,7 +387,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, people: [], cashMonth: null, repMonth: null,
-  tasks: [], stock: [], clients: [], offers: [], payments: [], purchases: [], apartments: [], stays: [], bills: [], cash: [],
+  tasks: [], stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -476,6 +476,7 @@ const LOADERS = {
   purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
+  feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
   stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
   bills:      { need: () => state.perm.apts,    q: () => db.from("bills").select("*").gte("month", backMonths(24)) },
@@ -2254,7 +2255,7 @@ function renderCalendar() {
 function stayRow(s) {
   return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-      <div class="o-num">${esc(s.apartments?.name || "?")} · ${s.check_in.slice(5)} → ${s.check_out.slice(5)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}</div></div>
+      <div class="o-num">${esc(s.apartments?.name || "?")} · ${s.check_in.slice(5)} → ${s.check_out.slice(5)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}</div></div>
     <span class="o-total mono">${fmt(s.amount)} ден.</span>
   </div>`;
 }
@@ -2271,6 +2272,8 @@ function renderStays() {
   $("apt-body").innerHTML = html || (state.loading ? SKEL(3) : '<div class="empty">No guests yet.<br>Add with +</div>');
 }
 function openStaySheet(id, pre) {
+  const s0 = id ? state.stays.find((x) => x.id === id) : null;
+  if (s0 && s0.external_uid) toast("This booking comes from " + (s0.source || "a calendar") + " — dates may be overwritten");
   const s = id ? state.stays.find((x) => x.id === id)
               : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "", apartment_id: pre && pre.apartment_id };
   openSheet(`
@@ -2491,8 +2494,52 @@ function openAptSheet(id) {
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
     <label>Notes (opt.)</label><input id="ap-notes" value="${esc(a.notes || "")}">
     <button class="btn" onclick="saveApt('${id || ""}')">Save</button>
+    ${id ? feedBlock(id) : '<p class="muted" style="font-size:12.5px">Save the apartment first, then you can connect Booking.com and Airbnb to it.</p>'}
     ${id ? `<button class="btn danger" onclick="delApt('${id}')">Deactivate</button>` : ""}
   `);
+}
+
+/* ---------- Booking.com / Airbnb calendar feeds ---------- */
+function feedBlock(aptId) {
+  const mine = state.feeds.filter((f) => f.apartment_id === aptId);
+  return `<div class="sec">Calendar sync</div>
+    <p class="muted" style="font-size:12.5px">Paste the calendar link from each platform and bookings arrive here by themselves, once an hour.</p>
+    ${mine.map((f) => `<div class="card">
+      <div class="row" style="justify-content:space-between"><b>${esc(f.source)}</b>
+        <button class="chip" onclick="delFeed('${f.id}')">Remove</button></div>
+      <div class="muted" style="word-break:break-all;font-size:11.5px">${esc((f.url || "").slice(0, 60))}…</div>
+      <div class="muted">${f.last_sync
+        ? "Last checked " + new Date(f.last_sync).toLocaleString("en-GB") + (f.last_status ? " · " + esc(f.last_status) : "")
+        : "Not checked yet — the first sync runs within the hour"}</div>
+    </div>`).join("")}
+    <div class="card">
+      <label>Add a calendar</label>
+      <div class="chips" id="fd-src">
+        ${["Booking.com", "Airbnb", "Other"].map((s, i) => `<button class="chip ${i === 0 ? "on" : ""}" onclick="setFeedSrc('${s}')">${s}</button>`).join("")}
+      </div>
+      <input id="fd-url" placeholder="https://…/calendar/ical/….ics" style="margin-top:8px">
+      <button class="btn sm" style="margin-top:8px" onclick="addFeed('${aptId}')">Connect</button>
+    </div>`;
+}
+let feedSrc = "Booking.com";
+function setFeedSrc(s) {
+  feedSrc = s;
+  [...$("fd-src").querySelectorAll(".chip")].forEach((b) => b.classList.toggle("on", b.textContent === s));
+}
+async function addFeed(aptId) {
+  const url = $("fd-url").value.trim();
+  if (!/^https?:\/\//i.test(url)) return toast("Paste the full link, starting with https://");
+  try { await dbq(db.from("ical_feeds").insert({ apartment_id: aptId, source: feedSrc, url }), "Not saved"); } catch { return; }
+  await refreshAll(["feeds"]);
+  closeSheet(); setTimeout(() => openAptSheet(aptId), 240);
+  toast("Connected · first check within the hour");
+}
+async function delFeed(id) {
+  const f = state.feeds.find((x) => x.id === id);
+  if (!confirm("Stop syncing this calendar?\n\nBookings already imported stay where they are.")) return;
+  try { await dbq(db.from("ical_feeds").delete().eq("id", id), "Not removed"); } catch { return; }
+  await refreshAll(["feeds"]);
+  closeSheet(); setTimeout(() => openAptSheet(f.apartment_id), 240);
 }
 async function saveApt(id) {
   const row = { name: $("ap-name").value.trim(), address: $("ap-addr").value.trim() || null,
