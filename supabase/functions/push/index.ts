@@ -158,5 +158,125 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error("offer follow-up", e); }
 
+
+  // ---- 6. pull bookings from Booking.com / Airbnb calendar feeds (hourly) ----
+  try {
+    const { data: runRow } = await db.from("app_settings").select("value").eq("key", "ical_last_run").maybeSingle();
+    const lastRun = String(runRow?.value ?? "").replace(/"/g, "");
+    const mins = lastRun ? (Date.now() - Date.parse(lastRun)) / 60000 : 9999;
+    if (mins >= 55) {
+      await db.from("app_settings").upsert({ key: "ical_last_run", value: new Date().toISOString() }, { onConflict: "key" });
+      const { data: feeds } = await db.from("ical_feeds").select("*").eq("active", true);
+      const { data: apts } = await db.from("apartments").select("id, name, nightly_rate");
+      const remindAt = String((await db.from("app_settings").select("value").eq("key", "stay_remind_time").maybeSingle()).data?.value ?? "09:00").replace(/"/g, "");
+
+      for (const feed of feeds ?? []) {
+        let status = "";
+        try {
+          const res = await fetch(feed.url, { headers: { "User-Agent": "Centrala/1.0" } });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const events = parseIcs(await res.text());
+          const apt = (apts ?? []).find((a: any) => a.id === feed.apartment_id);
+          const seen: string[] = [];
+          let added = 0, updated = 0, clashes = 0;
+
+          for (const ev of events) {
+            if (!ev.uid || !ev.start || !ev.end || ev.end <= today) continue;   // ignore finished stays
+            const uid = `${feed.id}:${ev.uid}`;
+            seen.push(uid);
+            const blocked = /not available|blocked|unavailable|^closed$/i.test(ev.summary ?? "");
+            const name = cleanGuest(ev.summary ?? "", feed.source, blocked);
+            const nights = Math.round((Date.parse(ev.end) - Date.parse(ev.start)) / 86400000);
+            const amount = blocked ? 0 : Math.round(nights * (Number(apt?.nightly_rate) || 0));
+
+            const { data: existing } = await db.from("stays").select("id, check_in, check_out").eq("external_uid", uid).maybeSingle();
+            if (existing) {
+              if (existing.check_in !== ev.start || existing.check_out !== ev.end) {
+                const { error } = await db.from("stays").update({ check_in: ev.start, check_out: ev.end }).eq("id", existing.id);
+                if (error) clashes++; else updated++;
+              }
+              continue;
+            }
+            const { data: made, error } = await db.from("stays").insert({
+              apartment_id: feed.apartment_id, guest_name: name,
+              check_in: ev.start, check_out: ev.end, amount,
+              source: feed.source, external_uid: uid, feed_id: feed.id,
+              notes: blocked ? "Blocked on " + feed.source : null,
+            }).select().single();
+            if (error) { clashes++; continue; }
+            added++;
+
+            // the same day-before reminder a hand-entered stay gets
+            if (!blocked && ev.start > today) {
+              const d = new Date(ev.start + "T12:00");
+              d.setDate(d.getDate() - 1);
+              const due = d.toISOString().slice(0, 10);
+              await db.from("tasks").insert({
+                title: `Check-in: ${name}${apt ? " \u00b7 " + apt.name : ""}`,
+                context: "apts", due_date: due < today ? today : due, due_time: remindAt, remind: true,
+                notes: `Arrives ${ev.start} \u00b7 leaves ${ev.end} \u00b7 ${nights} night(s) \u00b7 ${feed.source}`,
+                stay_id: made.id,
+              });
+            }
+          }
+
+          // a reservation that vanished from the feed was cancelled
+          const { data: mine } = await db.from("stays").select("id, external_uid, check_in")
+            .eq("feed_id", feed.id).gte("check_in", today);
+          const gone = (mine ?? []).filter((s: any) => s.external_uid && !seen.includes(s.external_uid));
+          for (const g of gone) await db.from("stays").delete().eq("id", g.id);
+
+          status = `${added} new, ${updated} changed, ${gone.length} cancelled`
+            + (clashes ? `, ${clashes} clash with an existing booking` : "");
+          if (added) {
+            await sendToAll("New booking", `${added} from ${feed.source}${apt ? " \u00b7 " + apt.name : ""}`,
+              `ical-${feed.id}`, (r) => r.role === "owner" || !!r.see_apts);
+          }
+        } catch (e) {
+          status = "Failed: " + (e instanceof Error ? e.message : String(e));
+          console.error("ical", feed.url, e);
+        }
+        await db.from("ical_feeds").update({ last_sync: new Date().toISOString(), last_status: status }).eq("id", feed.id);
+      }
+    }
+  } catch (e) { console.error("ical sync", e); }
+
   return new Response("ok");
 });
+
+// ---- iCal helpers ----
+function parseIcs(text: string) {
+  const raw = text.replace(/\r\n/g, "\n").split("\n");
+  const lines: string[] = [];
+  for (const l of raw) {                     // RFC 5545: a leading space continues the previous line
+    if (/^[ \t]/.test(l) && lines.length) lines[lines.length - 1] += l.slice(1);
+    else lines.push(l);
+  }
+  const events: any[] = [];
+  let cur: any = null;
+  for (const l of lines) {
+    if (l.startsWith("BEGIN:VEVENT")) cur = {};
+    else if (l.startsWith("END:VEVENT")) { if (cur) events.push(cur); cur = null; }
+    else if (cur) {
+      const i = l.indexOf(":");
+      if (i < 0) continue;
+      const name = l.slice(0, i).split(";")[0].toUpperCase();
+      const val = l.slice(i + 1).trim();
+      if (name === "UID") cur.uid = val;
+      else if (name === "SUMMARY") cur.summary = val;
+      else if (name === "DTSTART") cur.start = icsDate(val);
+      else if (name === "DTEND") cur.end = icsDate(val);
+    }
+  }
+  return events;
+}
+function icsDate(v: string) {
+  const m = v.match(/(\d{4})(\d{2})(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+function cleanGuest(summary: string, source: string, blocked: boolean) {
+  if (blocked) return `Blocked (${source})`;
+  const s = summary.replace(/^CLOSED\s*-\s*/i, "").replace(/\s*\(.*?\)\s*$/, "").trim();
+  if (!s || /^(reserved|booking|airbnb|closed|busy)$/i.test(s)) return `${source} guest`;
+  return s.slice(0, 80);
+}
