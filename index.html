@@ -324,6 +324,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
           <button class="btn sm" onclick="saveStayTime()">Save</button></div>
       </div>
     </div>
+    <div class="sec">Checklist templates</div>
+    <div id="tpl-list"></div>
+    <p class="muted" style="font-size:12.5px">Build a checklist on any task, then use "Save this checklist as a template" to reuse it.</p>
     <div id="data-settings" style="display:none">
       <div class="sec">Backup</div>
       <button class="btn ghost" onclick="backupJson()">Download full backup (JSON)</button>
@@ -387,7 +390,8 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, people: [], cashMonth: null, repMonth: null,
-  tasks: [], stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
+  tasks: [], completions: [], doneSet: new Set(), templates: [],
+  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -444,6 +448,10 @@ async function startApp() {
   state.loading = false;
   render();
   updatePushState();
+  handleNotificationIntent();
+  if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
+  });
   if (state.role === "owner") {
     try {
       const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types", "stay_remind_time"]);
@@ -467,6 +475,8 @@ const backMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n, 1
 // Bounded queries: recent + open records only, so the app stays fast as data grows.
 const LOADERS = {
   people:     { need: () => true,               q: () => db.from("team_members").select("*") },
+  completions:{ need: () => true,               q: () => db.from("task_completions").select("task_id, done_on").gte("done_on", backDays(180)) },
+  templates:  { need: () => true,               q: () => db.from("task_templates").select("*").order("name") },
   tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
   stock:      { need: () => state.perm.elaks,   q: () => db.from("article_stock").select("*").eq("active", true).order("name") },
   clients:    { need: () => state.perm.elaks,   q: () => db.from("clients").select("*").order("name") },
@@ -491,6 +501,7 @@ async function refreshAll(only) {
     if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
     if (LOADERS[k].scalar) state[k] = (r.data && r.data.balance != null) ? parseFloat(r.data.balance) : 0;
     else state[k] = r.data ?? [];
+    if (k === "completions") state.doneSet = new Set((r.data ?? []).map((c) => c.task_id + ":" + c.done_on));
   });
   if (failed.length) {
     $("loadmsg").textContent = "Could not load: " + failed.join(", ") + ". Data shown may be incomplete.";
@@ -500,6 +511,39 @@ async function refreshAll(only) {
 
 /* ---------------- NAV ---------------- */
 async function retryLoad() { await refreshAll(); render(); }
+
+// A notification hands its task over through the URL (or a message when the
+// app is already open); act on it, then clean the address bar.
+function handleNotificationIntent() {
+  const p = new URLSearchParams(location.search);
+  const id = p.get("task");
+  if (!id) return;
+  runTaskIntent(id, p.get("do") || "open");
+  history.replaceState({}, "", location.pathname);
+}
+async function runTaskIntent(id, action) {
+  if (!id) return;
+  await refreshAll(["tasks", "completions"]);
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return toast("That task is no longer there");
+  if (action === "done") {
+    if (!isDoneOn(t, todayStr())) await toggleTask(id);
+    tab("today"); toast("Done \u2713 " + t.title);
+    return;
+  }
+  if (action === "snooze") {
+    const now = new Date();
+    now.setHours(now.getHours() + 1);
+    const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    try {
+      await dbq(db.from("tasks").update({ due_time: hhmm, reminded_on: null }).eq("id", id), "Could not snooze");
+    } catch { return; }
+    await refreshAll(["tasks"]); tab("today"); render();
+    toast("Snoozed until " + hhmm);
+    return;
+  }
+  tab("today"); openTaskSheet(id);
+}
 function netStatus() {
   const bar = $("loadbar");
   if (offlineNow()) {
@@ -532,6 +576,7 @@ function fabClick() {
 }
 function render() {
   updateBadges();
+  if (state.tab === "set") renderTemplates();
   if (state.tab === "home") renderHome();
   if (state.tab === "today") renderToday();
   if (state.tab === "elaks") renderElaks();
@@ -595,14 +640,57 @@ window.addEventListener("popstate", () => {
 ============================================================ */
 const recurDays = (t) => (t.recur_days && t.recur_days.length) ? t.recur_days
   : (t.recur_dow !== null && t.recur_dow !== undefined ? [t.recur_dow] : []);
+// Monday-based week number since the epoch, so "every 2 weeks" stays stable.
+const weekIndex = (ds) => Math.floor((Date.parse(ds + "T12:00") / 86400000 + 3) / 7);
+const lastDayOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+
 function occursOn(t, dateStr) {
+  if (!t.recurrence) return t.due_date === dateStr;
+  const from = t.recur_from || t.due_date || null;
+  if (from && dateStr < from) return false;                    // not started yet
+  if (t.recur_until && dateStr > t.recur_until) return false;  // finished
   const d = new Date(dateStr + "T12:00");
-  if (t.recurrence === "daily") return true;
-  if (t.recurrence === "weekly") return recurDays(t).includes(d.getDay());
-  if (t.recurrence === "monthly") return t.recur_dom === d.getDate();
-  return t.due_date === dateStr;
+  const every = Math.max(1, parseInt(t.recur_every) || 1);
+
+  if (t.recurrence === "daily") {
+    if (every === 1 || !from) return true;
+    const days = Math.round((Date.parse(dateStr + "T12:00") - Date.parse(from + "T12:00")) / 86400000);
+    return days >= 0 && days % every === 0;
+  }
+  if (t.recurrence === "weekly") {
+    if (!recurDays(t).includes(d.getDay())) return false;
+    if (every === 1 || !from) return true;
+    return (weekIndex(dateStr) - weekIndex(from)) % every === 0;
+  }
+  if (t.recurrence === "monthly") {
+    // a task set for the 31st still fires on the 30th, 29th or 28th
+    const target = Math.min(t.recur_dom || 1, lastDayOfMonth(d));
+    if (d.getDate() !== target) return false;
+    if (every === 1 || !from) return true;
+    const f = new Date(from + "T12:00");
+    const months = (d.getFullYear() - f.getFullYear()) * 12 + (d.getMonth() - f.getMonth());
+    return months >= 0 && months % every === 0;
+  }
+  return false;
 }
-function isDoneOn(t, dateStr) { return t.recurrence ? t.last_done === dateStr : t.done; }
+
+// Occurrences in the recent past that were never ticked off.
+function missedDates(t, today, lookback = 30) {
+  if (!t.recurrence) return [];
+  const out = [];
+  const d = new Date(today + "T12:00");
+  for (let i = 1; i <= lookback; i++) {
+    d.setDate(d.getDate() - 1);
+    const ds = d.toLocaleDateString("sv-SE");
+    if (occursOn(t, ds) && !isDoneOn(t, ds)) out.push(ds);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+function isDoneOn(t, dateStr) {
+  if (!t.recurrence) return !!t.done;
+  return state.doneSet.has(t.id + ":" + dateStr) || t.last_done === dateStr;
+}
 
 function renderToday() {
   const today = todayStr();
@@ -621,57 +709,91 @@ function renderToday() {
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("")
     + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`;
+  // "Mine" means what I could pick up: assigned to me, or to nobody
   const vis = (t) => (state.ctxFilter === "all" || t.context === state.ctxFilter)
-    && (!state.mineOnly || t.assigned_to === state.uid);
+    && (!state.mineOnly || t.assigned_to === state.uid || !t.assigned_to);
 
-  const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done);
-  const todays = state.tasks.filter((t) => vis(t) && occursOn(t, today));
+  const byPrio = (a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0);
+  const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done).sort(byPrio);
+  // a recurring task that was due and never ticked is overdue too
+  const missed = [];
+  for (const t of state.tasks) {
+    if (!vis(t) || !t.recurrence) continue;
+    const m = missedDates(t, today);
+    if (m.length) missed.push({ t, dates: m });
+  }
+  const todays = state.tasks.filter((t) => vis(t) && occursOn(t, today)).sort(byPrio);
 
   const inbox = state.tasks.filter((t) => vis(t) && !t.recurrence && !t.due_date && !t.done);
   let html = "";
-  if (overdue.length) {
+  if (overdue.length || missed.length) {
     html += '<div class="sec" style="color:var(--danger)">Overdue</div>' + overdue.map(taskRow(today)).join("");
+    html += missed.map(({ t, dates }) => `<div class="card task">
+      <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}')" aria-label="done"></button>
+      <span class="led ${t.context}"></span>
+      <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
+        <span class="rec"> missed ${new Date(dates[0] + "T12:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}${dates.length > 1 ? ` +${dates.length - 1}` : ""}</span></span>
+    </div>`).join("");
   }
   if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
   if (todays.length) {
-    html += (overdue.length || inbox.length) ? '<div class="sec">Today</div>' : "";
+    html += (overdue.length || missed.length || inbox.length) ? '<div class="sec">Today</div>' : "";
     html += todays.map(taskRow(today)).join("");
-  } else if (!overdue.length && !inbox.length) {
+  } else if (!overdue.length && !missed.length && !inbox.length) {
     html += (state.loading ? SKEL() : '<div class="empty">No tasks for today.<br>Add with +</div>');
   }
   $("today-list").innerHTML = html;
 
-  // week
-  let week = "";
-  for (let i = 1; i <= 7; i++) {
+  // forward view
+  const horizon = state.horizon || 7;
+  let week = `<div class="chips" style="margin-bottom:8px">
+    ${[7, 30].map((n) => `<button class="chip ${horizon === n ? "on" : ""}" onclick="state.horizon=${n};renderToday()">Next ${n} days</button>`).join("")}
+  </div>`;
+  for (let i = 1; i <= horizon; i++) {
     const d = new Date(); d.setDate(d.getDate() + i);
     const ds = d.toLocaleDateString("sv-SE");
     const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds));
     if (!list.length) continue;
     week += `<div class="sec">${d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}</div>` +
-      list.map((t) => `<div class="card task" onclick="openTaskSheet('${t.id}')"><span class="led ${t.context}"></span><span class="t-title">${esc(t.title)}</span>
+      list.sort(byPrio).map((t) => `<div class="card task ${isDoneOn(t, ds) ? "done" : ""}">
+        <button class="tick" onclick="toggleTask('${t.id}','${ds}')" aria-label="done">${isDoneOn(t, ds) ? "✓" : ""}</button>
+        <span class="led ${t.context}"></span>
+        <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}</span>
         ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
   }
-  $("week-list").innerHTML = week || '<div class="empty">Nothing scheduled.</div>';
+  $("week-list").innerHTML = week;
 }
 const taskRow = (today) => (t) => {
   const done = isDoneOn(t, today);
   return `<div class="card task ${done ? "done" : ""}">
     <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
-    <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
+    <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}
       ${t.recurrence ? `<span class="rec"> ↻${t.recurrence === "weekly" && recurDays(t).length > 1
         ? " " + recurDays(t).map((i) => ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][i]).join("") : ""}</span>` : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
+    ${t.photo_thumb ? `<img class="thumb" style="width:30px;height:30px" src="${t.photo_thumb}" alt="">` : ""}
     ${t.assigned_to ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
     ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}
   </div>`;
 };
-async function toggleTask(id) {
-  const t = state.tasks.find((x) => x.id === id); const today = todayStr();
+async function toggleTask(id, onDate) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const day = onDate || todayStr();
+  const was = isDoneOn(t, day);
   const upd = t.recurrence
-    ? { last_done: t.last_done === today ? null : today }
-    : { done: !t.done, last_done: !t.done ? today : null };
-  try { await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated"); } catch { return; }
+    ? { last_done: was ? null : day }
+    : { done: !was, last_done: !was ? day : null };
+  try {
+    await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated");
+    if (was) {
+      await db.from("task_completions").delete().eq("task_id", id).eq("done_on", day);
+      state.doneSet.delete(id + ":" + day);
+    } else {
+      await db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid }, { onConflict: "task_id,done_on" });
+      state.doneSet.add(id + ":" + day);
+    }
+  } catch { return; }
   Object.assign(t, upd); renderToday(); updateBadges();
 }
 let tkChecklist = [];
@@ -694,12 +816,20 @@ function openTaskSheet(id) {
       <div><label>Repeat</label>
         <select id="tk-rec" onchange="tkRecChanged()">
           <option value="">Never</option>
-          <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Every day</option>
-          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Weekly — pick days</option>
-          <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Monthly (that date)</option>
+          <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Days</option>
+          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Weeks — pick days</option>
+          <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Months (that date)</option>
         </select></div>
       <div><label>Reminder</label>
         <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
+    </div>
+    <div id="tk-every" style="display:none">
+      <div class="grid2">
+        <div><label>Every</label>
+          <div class="row"><input id="tk-int" type="number" min="1" max="99" value="${t.recur_every || 1}" style="flex:1">
+            <span class="muted nw" id="tk-int-unit">days</span></div></div>
+        <div><label>Until (opt.)</label><input id="tk-until" type="date" value="${t.recur_until || ""}"></div>
+      </div>
     </div>
     <div id="tk-days" style="display:none">
       <label>Repeat on</label>
@@ -707,25 +837,102 @@ function openTaskSheet(id) {
         `<button class="chip ${recurDays(t).includes(i) ? "on" : ""}" data-d="${i}"
           onclick="this.classList.toggle('on')">${d}</button>`).join("")}</div>
     </div>
+    <div class="row" style="margin-top:12px">
+      <button class="clbox ${t.priority ? "on" : ""}" id="tk-prio"
+        onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2605':''">${t.priority ? "\u2605" : ""}</button>
+      <span>Important — keep it at the top</span>
+    </div>
+    ${state.perm.elaks || state.perm.apts ? `<label>About (opt.)</label>
+    <div class="grid2">
+      ${state.perm.elaks ? `<div><select id="tk-client"><option value="">No client</option>
+        ${state.clients.map((c) => `<option value="${c.id}" ${t.client_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select></div>` : '<div><select id="tk-client" style="display:none"></select></div>'}
+      ${state.perm.apts ? `<div><select id="tk-apt2"><option value="">No apartment</option>
+        ${state.apartments.map((a) => `<option value="${a.id}" ${t.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+      </select></div>` : '<div><select id="tk-apt2" style="display:none"></select></div>'}
+    </div>` : '<select id="tk-client" style="display:none"></select><select id="tk-apt2" style="display:none"></select>'}
+    <label>Photo (opt.)</label>
+    <div class="row" style="align-items:flex-start">
+      <div id="tk-img-prev"></div>
+      <div style="flex:1">
+        <input type="file" accept="image/*" id="tk-img-file" onchange="pickTaskImage(this)">
+        <button class="btn sm ghost" style="margin-top:6px" onclick="removeTaskImage()">Remove photo</button>
+      </div>
+    </div>
     <label>Assigned to</label>
     <select id="tk-who">
       <option value="">Anyone</option>
       ${state.people.map((p) => `<option value="${p.user_id}" ${t.assigned_to === p.user_id ? "selected" : ""}>${esc(p.display_name || "Unnamed")}</option>`).join("")}
     </select>
     <label>Checklist (opt.)</label>
+    ${state.templates.length ? `<div class="chips" style="margin-bottom:8px">
+      ${state.templates.map((tp) => `<button class="chip" onclick="applyTemplate('${tp.id}')">${esc(tp.name)}</button>`).join("")}
+    </div>` : ""}
     <div id="tk-cl"></div>
     <button class="btn sm ghost" onclick="clAdd('${id || ""}')">+ Add item</button>
+    ${'' }<button class="btn sm ghost" onclick="saveAsTemplate()">Save this checklist as a template</button>
     <label>Notes (opt.)</label><textarea id="tk-notes" rows="2">${esc(t.notes || "")}</textarea>
     <button class="btn" onclick="saveTask('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delTask('${id}')">Delete</button>` : ""}
   `);
   renderCl(id || "");
   tkRecChanged();
+  tkImg = { mode: "keep", thumb: t.photo_thumb || null, full: null };
+  renderTkImg();
+}
+let tkImg = { mode: "keep", thumb: null, full: null };
+function renderTkImg() {
+  const el = $("tk-img-prev");
+  if (el) el.innerHTML = tkImg.thumb ? `<img class="thumb" style="width:60px;height:60px" src="${tkImg.thumb}" alt="">` : "";
+}
+function pickTaskImage(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (f.size > 12 * 1024 * 1024) return toast("Photo too large");
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => { tkImg = { mode: "new", thumb: imgResize(im, 72, 0.6), full: imgResize(im, 900, 0.75) }; renderTkImg(); };
+    im.onerror = () => toast("Could not read that image");
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+function removeTaskImage() {
+  tkImg = { mode: "remove", thumb: null, full: null };
+  const f = $("tk-img-file"); if (f) f.value = "";
+  renderTkImg();
+}
+function applyTemplate(tid) {
+  const tp = state.templates.find((x) => x.id === tid);
+  if (!tp) return;
+  tkChecklist = (tp.checklist || []).map((c) => ({ text: typeof c === "string" ? c : c.text, done: false }));
+  if (!$("tk-title").value.trim()) $("tk-title").value = tp.name;
+  if (tp.notes && !$("tk-notes").value.trim()) $("tk-notes").value = tp.notes;
+  renderCl("");
+  toast("Checklist from " + tp.name);
+}
+async function saveAsTemplate() {
+  const items = tkChecklist.filter((c) => (c.text || "").trim());
+  if (!items.length) return toast("Add some checklist items first");
+  const name = prompt("Name for this template", $("tk-title").value.trim() || "Checklist");
+  if (!name) return;
+  try {
+    await dbq(db.from("task_templates").insert({
+      name: name.trim(), context: $("tk-ctx").querySelector(".chip.on").dataset.c,
+      checklist: items.map((c) => ({ text: c.text, done: false })),
+      notes: $("tk-notes").value.trim() || null,
+    }), "Template not saved");
+  } catch { return; }
+  await refreshAll(["templates"]); toast("Template saved");
 }
 function tkRecChanged() {
   const box = $("tk-days");
   if (!box) return;
-  const weekly = $("tk-rec").value === "weekly";
+  const rec = $("tk-rec").value;
+  const weekly = rec === "weekly";
+  if ($("tk-every")) $("tk-every").style.display = rec ? "" : "none";
+  if ($("tk-int-unit")) $("tk-int-unit").textContent = rec === "daily" ? "days" : rec === "weekly" ? "weeks" : "months";
   box.style.display = weekly ? "" : "none";
   if (weekly && !box.querySelector(".chip.on")) {
     const d = new Date(($("tk-date").value || todayStr()) + "T12:00").getDay();
@@ -777,13 +984,27 @@ async function saveTask(id) {
     recur_dow: rec === "weekly" ? days[0] : null,
     recur_days: rec === "weekly" ? days : null,
     recur_dom: rec === "monthly" ? d.getDate() : null,
+    recur_every: rec ? Math.max(1, parseInt(($("tk-int") || {}).value) || 1) : 1,
+    recur_from: rec ? ($("tk-date").value || todayStr()) : null,
+    recur_until: rec ? (($("tk-until") || {}).value || null) : null,
+    priority: $("tk-prio").classList.contains("on"),
+    client_id: ($("tk-client") || {}).value || null,
+    apartment_id: ($("tk-apt2") || {}).value || null,
     remind: $("tk-rem").value === "1",
     assigned_to: $("tk-who").value || null,
     notes: $("tk-notes").value.trim() || null,
     checklist: tkChecklist.filter((it) => it.text.trim()).length ? tkChecklist.filter((it) => it.text.trim()) : null,
   };
   if (!row.title) return toast("Enter a title");
-  try { await dbq(id ? db.from("tasks").update(row).eq("id", id) : db.from("tasks").insert(row), "Task not saved"); } catch { return; }
+  if (tkImg.mode === "new") row.photo_thumb = tkImg.thumb;
+  if (tkImg.mode === "remove") row.photo_thumb = null;
+  try {
+    let tid = id;
+    if (id) await dbq(db.from("tasks").update(row).eq("id", id), "Task not saved");
+    else tid = (await dbq(db.from("tasks").insert(row).select().single(), "Task not saved")).id;
+    if (tkImg.mode === "new") await dbq(db.from("task_photos").upsert({ task_id: tid, data: tkImg.full }, { onConflict: "task_id" }), "Photo not saved");
+    if (tkImg.mode === "remove") await db.from("task_photos").delete().eq("task_id", tid);
+  } catch { return; }
   closeSheet(); await refreshAll(["tasks"]); renderToday(); toast("Saved");
 }
 async function delTask(id) {
@@ -792,20 +1013,25 @@ async function delTask(id) {
   closeSheet(); await refreshAll(["tasks"]); renderToday();
 }
 function openHistory() {
-  const done = state.tasks.filter((t) => !t.recurrence && t.done)
-    .sort((a, b) => (b.last_done || "").localeCompare(a.last_done || ""));
+  const rows = [];
+  for (const t of state.tasks) {
+    if (!t.recurrence) { if (t.done) rows.push({ t, on: t.last_done || "" }); continue; }
+    for (const c of state.completions) if (c.task_id === t.id) rows.push({ t, on: c.done_on, rec: true });
+  }
+  rows.sort((a, b) => (b.on || "").localeCompare(a.on || ""));
+  const done = rows;
   const fmtD = (d) => d ? new Date(d + "T12:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "Earlier";
   let html = `<h2>Completed tasks</h2>`;
   if (!done.length) html += '<p class="muted">Nothing completed yet.</p>';
   let lastD = null;
-  for (const t of done.slice(0, 300)) {
-    const d = t.last_done || "";
-    if (d !== lastD) { html += `<div class="sec">${fmtD(t.last_done)}</div>`; lastD = d; }
+  for (const r of done.slice(0, 300)) {
+    const t = r.t;
+    if (r.on !== lastD) { html += `<div class="sec">${fmtD(r.on)}</div>`; lastD = r.on; }
     html += `<div class="card task done">
       <span class="led ${t.context}"></span>
-      <span class="t-title">${esc(t.title)}</span>
-      <button class="btn sm ghost" onclick="restoreTask('${t.id}')">Restore</button>
-      <button style="color:var(--danger);font-size:17px;padding:4px" onclick="histDelTask('${t.id}')" aria-label="delete">✕</button>
+      <span class="t-title">${esc(t.title)}${r.rec ? '<span class="rec"> ↻</span>' : ""}</span>
+      ${r.rec ? "" : `<button class="btn sm ghost" onclick="restoreTask('${t.id}')">Restore</button>
+      <button style="color:var(--danger);font-size:17px;padding:4px" onclick="histDelTask('${t.id}')" aria-label="delete">✕</button>`}
     </div>`;
   }
   openSheet(html);
@@ -1821,6 +2047,7 @@ async function createJobTask(id) {
   const row = {
     title: `Монтажа: ${client ? client.name : o.title} · ${o.number}`,
     context: "elaks", due_date: todayStr(), remind: false,
+    offer_id: o.id, client_id: o.client_id || null,
     checklist: checklist.length ? checklist : null,
     notes: `Offer ${o.number}${o.system ? " · " + o.system : ""}`,
   };
@@ -2015,6 +2242,13 @@ function renderClients() {
       <div style="flex:1"><b>${esc(c.name)}</b><div class="muted">${esc(c.contact || "")}</div></div>
     </div>`).join("") || '<p class="muted">No clients.</p>';
 }
+function relatedTasks(field, id) {
+  const list = state.tasks.filter((t) => t[field] === id && !t.done);
+  if (!list.length) return "";
+  return '<div class="sec">Open tasks</div>' + list.map((t) => `<div class="mov tapp" onclick="openTaskSheet('${t.id}')">
+    <span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
+    <span class="muted">${t.due_date ? new Date(t.due_date + "T12:00").toLocaleDateString("en-GB") : ""} ›</span></div>`).join("");
+}
 function openClientSheet(id) {
   const c = id ? state.clients.find((x) => x.id === id) : {};
   openSheet(`
@@ -2028,6 +2262,7 @@ function openClientSheet(id) {
     <label>Address</label><input id="cl-address" value="${esc(c.address || "")}">
     <label>Note</label><input id="cl-note" value="${esc(c.note || "")}">
     <button class="btn" onclick="saveClient('${id || ""}')">Save</button>
+    ${id ? relatedTasks("client_id", id) : ""}
     ${id ? '<div class="sec">Offers</div>' + (state.offers.filter((o) => o.client_id === id).map((o) =>
       `<div class="mov"><span>${o.number} · ${esc(o.title)} · ${STATUS[o.status]}</span><span class="mono">${fmt(o.grand_total)} ден.</span></div>`).join("") || '<p class="muted">No offers yet.</p>') : ""}
   `);
@@ -2133,6 +2368,21 @@ async function getSetting(key, fallback) {
     const v = typeof data.value === "string" ? data.value.replace(/"/g, "") : data.value;
     return v || fallback;
   } catch { return fallback; }
+}
+function renderTemplates() {
+  const el = $("tpl-list");
+  if (!el) return;
+  el.innerHTML = state.templates.length
+    ? state.templates.map((tp) => `<div class="mov">
+        <span><b>${esc(tp.name)}</b> <span class="muted">${(tp.checklist || []).length} item(s)</span></span>
+        <button style="color:var(--danger);font-size:17px;padding:4px" onclick="delTemplate('${tp.id}')" aria-label="delete">✕</button>
+      </div>`).join("")
+    : '<p class="muted">No templates yet.</p>';
+}
+async function delTemplate(id) {
+  if (!confirm("Delete this template?")) return;
+  try { await dbq(db.from("task_templates").delete().eq("id", id), "Not deleted"); } catch { return; }
+  await refreshAll(["templates"]); renderTemplates();
 }
 async function saveStayTime() {
   const t = $("stay-time").value || "09:00";
@@ -2478,6 +2728,7 @@ function openAptStatement(id, year) {
     ${Object.keys(bySource).length
       ? Object.entries(bySource).map(([k, v]) => `<div class="mov"><span>${esc(k)}</span><span class="mono">${fmt(v)} ден.</span></div>`).join("")
       : '<p class="muted">No stays this year.</p>'}
+    ${relatedTasks("apartment_id", id)}
     <button class="btn ghost" onclick="openAptSheet('${id}')">Edit apartment</button>
   `);
 }
@@ -2960,7 +3211,8 @@ function updateBadges() {
   const today = todayStr();
   const n = state.tasks.filter((t) =>
     (occursOn(t, today) && !isDoneOn(t, today)) ||
-    (!t.recurrence && t.due_date && t.due_date < today && !t.done)).length;
+    (!t.recurrence && t.due_date && t.due_date < today && !t.done) ||
+    (t.recurrence && missedDates(t, today, 14).length > 0)).length;
   const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
   const set = (name, v) => { const e = $("bdg-" + name); if (e) { e.textContent = v; e.classList.toggle("on", v > 0); } };
   set("today", n); set("elaks", low);
