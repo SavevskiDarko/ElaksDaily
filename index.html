@@ -761,6 +761,21 @@ function renderToday() {
         <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}</span>
         ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
   }
+  // Everything beyond the forward window — a check-in three weeks away used
+  // to be invisible here, which made it look as if no task had been created.
+  const horizonEnd = (() => { const d = new Date(); d.setDate(d.getDate() + horizon); return d.toLocaleDateString("sv-SE"); })();
+  const later = state.tasks
+    .filter((t) => vis(t) && !t.recurrence && !t.done && t.due_date && t.due_date > horizonEnd)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date));
+  if (later.length) {
+    week += `<div class="sec">Later · ${later.length}</div>` + later.slice(0, 40).map((t) => `<div class="card task">
+      <button class="tick" onclick="toggleTask('${t.id}','${t.due_date}')" aria-label="done"></button>
+      <span class="led ${t.context}"></span>
+      <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
+      <span class="t-time">${new Date(t.due_date + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
+    </div>`).join("");
+  }
+  if (!week.includes("class=\"sec\"")) week += '<div class="empty">Nothing scheduled.</div>';
   $("week-list").innerHTML = week;
 }
 const taskRow = (today) => (t) => {
@@ -787,10 +802,12 @@ async function toggleTask(id, onDate) {
   try {
     await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated");
     if (was) {
-      await db.from("task_completions").delete().eq("task_id", id).eq("done_on", day);
+      const r = await db.from("task_completions").delete().eq("task_id", id).eq("done_on", day);
+      if (r.error) { console.error(r.error); toast("Could not un-tick that day"); return; }
       state.doneSet.delete(id + ":" + day);
     } else {
-      await db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid }, { onConflict: "task_id,done_on" });
+      const r = await db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid }, { onConflict: "task_id,done_on" });
+      if (r.error) { console.error(r.error); toast("Could not record that day"); return; }
       state.doneSet.add(id + ":" + day);
     }
   } catch { return; }
@@ -2545,7 +2562,12 @@ function openStaySheet(id, pre) {
     <div class="row" style="margin-top:12px">
       <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${stayHasTask(id) ? "\u2713" : ""}</button>
-      <span>Reminder task the day before they arrive</span>
+      <span>Reminder task the day before they arrive${(() => {
+        const ex = id ? state.tasks.find((t) => t.stay_id === id) : null;
+        return ex && ex.due_date
+          ? ` <span class="muted">· set for ${new Date(ex.due_date + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>`
+          : "";
+      })()}</span>
     </div>
     <label>Notes (opt.)</label><input id="st-notes" value="${esc(s.notes || "")}">
     <button class="btn" onclick="saveStay('${id || ""}')">Save</button>
@@ -2575,7 +2597,7 @@ async function syncStayTask(stay, want) {
   try {
     if (!want || !stay.check_in || stay.check_in < todayStr()) {
       if (existing && !want) await db.from("tasks").delete().eq("id", existing.id);
-      return;
+      return { ok: false, skipped: true };
     }
     const apt = state.apartments.find((a) => a.id === stay.apartment_id);
     const time = await getSetting("stay_remind_time", "09:00");
@@ -2591,13 +2613,17 @@ async function syncStayTask(stay, want) {
         + (stay.source && stay.source !== "Direct" ? " · " + stay.source : ""),
       stay_id: stay.id,
     };
-    if (existing) {
-      if (due > todayStr()) { row.done = false; row.reminded_on = null; }
-      await db.from("tasks").update(row).eq("id", existing.id);
-    } else {
-      await db.from("tasks").insert(row);
-    }
-  } catch (e) { console.error("stay task", e); toast("Stay saved, but the reminder task failed"); }
+    if (existing && due > todayStr()) { row.done = false; row.reminded_on = null; }
+    // supabase reports errors in the result rather than throwing, so check it
+    const res = existing
+      ? await db.from("tasks").update(row).eq("id", existing.id)
+      : await db.from("tasks").insert(row);
+    if (res.error) { console.error("stay task", res.error); return { ok: false, msg: res.error.message }; }
+    return { ok: true, on: due };
+  } catch (e) {
+    console.error("stay task", e);
+    return { ok: false, msg: e && e.message ? e.message : "unknown error" };
+  }
 }
 async function saveStay(id) {
   const row = {
@@ -2622,9 +2648,12 @@ async function saveStay(id) {
     if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) alert("Those dates are already booked for this apartment.");
     return;
   }
-  await syncStayTask(saved, wantTask);
+  const res = await syncStayTask(saved, wantTask);
   closeSheet(); await refreshAll(["stays", "tasks", "aptCash"]); renderApt();
-  toast(wantTask && row.check_in >= todayStr() ? "Saved · reminder task created" : "Saved");
+  if (res && res.ok) toast("Saved · reminder on " + new Date(res.on + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" }));
+  else if (res && res.msg) alert("The stay was saved, but its reminder task could not be created:\n\n" + res.msg
+    + "\n\nIf this mentions a missing column, the tasks migration has not been run yet.");
+  else toast("Saved");
 }
 async function delStay(id) {
   if (!confirm("Delete this stay?")) return;
