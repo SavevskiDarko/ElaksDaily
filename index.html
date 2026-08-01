@@ -383,7 +383,24 @@ const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
 const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
 const unitLbl = (u) => u === "m" ? "m" : "pcs";
 const fmt = (n) => (Math.round((parseFloat(n) || 0) * 100) / 100).toLocaleString("mk-MK");
-const todayStr = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
+const todayStr = () => new Date().toLocaleDateString("sv-SE");
+// Every date shown to the user is dd-mm-yyyy. ISO strings (sv-SE) stay
+// internal — they are what the database stores and sorts on.
+const p2 = (n) => String(n).padStart(2, "0");
+function dmy(v) {
+  if (v == null || v === "") return "";      // a missing date shows nothing, never today
+  const d = v instanceof Date ? v : new Date(String(v).length === 10 ? v + "T12:00" : v);
+  return isNaN(d) ? "" : `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+const dm = (v) => dmy(v).slice(0, 5);
+function dmyTime(v) {
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d) ? "" : `${dmy(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+const wd = (v, style = "short") => {
+  const d = v == null ? new Date() : (v instanceof Date ? v : new Date(String(v).length === 10 ? v + "T12:00" : v));
+  return isNaN(d) ? "" : d.toLocaleDateString("en-GB", { weekday: style });
+}; // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
@@ -417,7 +434,7 @@ async function logout() { await db.auth.signOut(); location.reload(); }
 
 async function startApp() {
   $("app").style.display = "block";
-  $("bar-date").textContent = new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  $("bar-date").textContent = wd() + " " + dmy(new Date());
   try {
     const { data: { user } } = await db.auth.getUser();
     state.uid = user ? user.id : null;
@@ -732,7 +749,7 @@ function renderToday() {
       <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}')" aria-label="done"></button>
       <span class="led ${t.context}"></span>
       <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
-        <span class="rec"> missed ${new Date(dates[0] + "T12:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}${dates.length > 1 ? ` +${dates.length - 1}` : ""}</span></span>
+        <span class="rec"> missed ${dmy(dates[0])}${dates.length > 1 ? ` +${dates.length - 1}` : ""}</span></span>
     </div>`).join("");
   }
   if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
@@ -754,7 +771,7 @@ function renderToday() {
     const ds = d.toLocaleDateString("sv-SE");
     const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds));
     if (!list.length) continue;
-    week += `<div class="sec">${d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}</div>` +
+    week += `<div class="sec">${wd(d, "long")} · ${dmy(d)}</div>` +
       list.sort(byPrio).map((t) => `<div class="card task ${isDoneOn(t, ds) ? "done" : ""}">
         <button class="tick" onclick="toggleTask('${t.id}','${ds}')" aria-label="done">${isDoneOn(t, ds) ? "✓" : ""}</button>
         <span class="led ${t.context}"></span>
@@ -772,7 +789,7 @@ function renderToday() {
       <button class="tick" onclick="toggleTask('${t.id}','${t.due_date}')" aria-label="done"></button>
       <span class="led ${t.context}"></span>
       <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
-      <span class="t-time">${new Date(t.due_date + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
+      <span class="t-time">${dmy(t.due_date)}</span>
     </div>`).join("");
   }
   if (!week.includes("class=\"sec\"")) week += '<div class="empty">Nothing scheduled.</div>';
@@ -1037,7 +1054,7 @@ function openHistory() {
   }
   rows.sort((a, b) => (b.on || "").localeCompare(a.on || ""));
   const done = rows;
-  const fmtD = (d) => d ? new Date(d + "T12:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "Earlier";
+  const fmtD = (d) => d ? wd(d) + " " + dmy(d) : "Earlier";
   let html = `<h2>Completed tasks</h2>`;
   if (!done.length) html += '<p class="muted">Nothing completed yet.</p>';
   let lastD = null;
@@ -1118,7 +1135,7 @@ async function openArticleDetail(id) {
     </div>
     <div class="sec">Recent movements</div>
     ${(movs || []).map((m) => `<div class="mov"><span>${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))} ${unitLbl(a.unit)} ${esc(m.note || m.ref || "")}</span>
-      <span class="muted">${new Date(m.created_at).toLocaleDateString("mk-MK")}</span></div>`).join("") || '<p class="muted">No movements.</p>'}
+      <span class="muted">${dmy(m.created_at)}</span></div>`).join("") || '<p class="muted">No movements.</p>'}
     <button class="btn ghost" onclick="openArticleSheet('${id}')">Edit article</button>
   `);
 }
@@ -1252,7 +1269,7 @@ function openCashEntry(id) {
   cashDir = v >= 0 ? 1 : -1;
   openSheet(`
     <h2>Edit cash entry</h2>
-    <p class="muted">${new Date(e.created_at).toLocaleString("en-GB")}</p>
+    <p class="muted">${dmyTime(e.created_at)}</p>
     <label>Type</label>
     <div class="chips" id="ce-dir">
       <button class="chip ${cashDir > 0 ? "on" : ""}" onclick="setCashDir(1)">+ Money in</button>
@@ -1695,7 +1712,7 @@ async function printOffer(o) {
         ${fld("Контакт тел:", client && client.phone)}
         ${fld("Адреса:", client && client.address)}
         ${fld("e-mail:", client && client.email)}
-        <tr><td>Датум:</td><td>${new Date(o.offer_date).toLocaleDateString("mk-MK")}</td></tr>
+        <tr><td>Датум:</td><td>${dmy(o.offer_date)}</td></tr>
       </table>
       <table class="pv-items">
         <colgroup><col style="width:3.4%"><col style="width:21.4%"><col style="width:51.8%">
@@ -1849,7 +1866,7 @@ async function printReport() {
   if (!r) return;
   await printDoc(`
     <div class="rp-h1">Извештај — ${r.label}</div>
-    <div class="rp-sub">ЕЛАКС · генериран ${new Date().toLocaleDateString("mk-MK")}</div>
+    <div class="rp-sub">ЕЛАКС · генериран ${dmy()}</div>
     <div class="rp-bar"><span>Профит од завршени работи</span><span>${fmt(r.profit)} ден.</span></div>
     <table class="rp-tbl">
       <tr><th>Примено вкупно</th><td class="r">${fmt(r.received)} ден.</td></tr>
@@ -1914,7 +1931,7 @@ function orderLines(gi) {
 async function copyOrder(gi) {
   const g = orderGroups[gi], lines = orderLines(gi);
   if (!lines.length) return toast("All quantities are zero");
-  const text = `Побарување за нарачка — ЕЛАКС\n${g.supplier}\n${new Date().toLocaleDateString("mk-MK")}\n\n`
+  const text = `Побарување за нарачка — ЕЛАКС\n${g.supplier}\n${dmy()}\n\n`
     + lines.map((l, i) => `${i + 1}. ${l.a.name}${l.a.code ? " (" + l.a.code + ")" : ""} — ${fmt(l.qty)} ${unitLbl(l.a.unit)}`).join("\n");
   try {
     await navigator.clipboard.writeText(text);
@@ -1926,7 +1943,7 @@ async function printOrder(gi) {
   if (!lines.length) return toast("All quantities are zero");
   await printDoc(`
     <div class="rp-h1">Побарување за нарачка</div>
-    <div class="rp-sub">${esc(g.supplier)} · ${new Date().toLocaleDateString("mk-MK")}</div>
+    <div class="rp-sub">${esc(g.supplier)} · ${dmy()}</div>
     <table class="rp-tbl">
       <tr><th>Бр</th><th>Артикл</th><th>Код</th><th class="r">Количина</th></tr>
       ${lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.a.name)}</td>
@@ -1985,7 +2002,7 @@ async function generateDocx(o) {
     const client = state.clients.find((c) => c.id === o.client_id);
     doc.render({
       title: o.title, system: o.system || "",
-      offer_number: o.number, date: new Date(o.offer_date).toLocaleDateString("mk-MK"),
+      offer_number: o.number, date: dmy(o.offer_date),
       client: client ? client.name : "", validity: o.validity,
       client_contact: client ? (client.contact || "") : "",
       client_phone: client ? (client.phone || "") : "",
@@ -2089,7 +2106,7 @@ function paymentsBlock(o) {
       ${rows.map((p) => `<div class="mov tapp" onclick="delPayment('${p.id}')">
         <span><b class="mono" style="color:${(parseFloat(p.amount) || 0) < 0 ? "var(--danger)" : "var(--personal)"}">${fmt(p.amount)}</b>
           ${p.method === "cash" ? "cash" : (p.method === "bank" ? "bank" : esc(p.method))}${p.note ? " · " + esc(p.note) : ""}</span>
-        <span class="muted">${new Date(p.paid_on + "T12:00").toLocaleDateString("en-GB")} ›</span></div>`).join("")}
+        <span class="muted">${dmy(p.paid_on)} ›</span></div>`).join("")}
       <button class="btn sm ghost" style="margin-top:10px" onclick="payOfferSheet('${o.id}')">
         ${rows.length ? "+ Add another payment" : "+ Record a payment / deposit"}</button>
     </div>`;
@@ -2264,7 +2281,7 @@ function relatedTasks(field, id) {
   if (!list.length) return "";
   return '<div class="sec">Open tasks</div>' + list.map((t) => `<div class="mov tapp" onclick="openTaskSheet('${t.id}')">
     <span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
-    <span class="muted">${t.due_date ? new Date(t.due_date + "T12:00").toLocaleDateString("en-GB") : ""} ›</span></div>`).join("");
+    <span class="muted">${t.due_date ? dmy(t.due_date) : ""} ›</span></div>`).join("");
 }
 function openClientSheet(id) {
   const c = id ? state.clients.find((x) => x.id === id) : {};
@@ -2522,7 +2539,7 @@ function renderCalendar() {
 function stayRow(s) {
   return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-      <div class="o-num">${esc(s.apartments?.name || "?")} · ${s.check_in.slice(5)} → ${s.check_out.slice(5)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}</div></div>
+      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}</div></div>
     <span class="o-total mono">${fmt(s.amount)} ден.</span>
   </div>`;
 }
@@ -2565,7 +2582,7 @@ function openStaySheet(id, pre) {
       <span>Reminder task the day before they arrive${(() => {
         const ex = id ? state.tasks.find((t) => t.stay_id === id) : null;
         return ex && ex.due_date
-          ? ` <span class="muted">· set for ${new Date(ex.due_date + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>`
+          ? ` <span class="muted">· set for ${dmy(ex.due_date)}</span>`
           : "";
       })()}</span>
     </div>
@@ -2650,7 +2667,7 @@ async function saveStay(id) {
   }
   const res = await syncStayTask(saved, wantTask);
   closeSheet(); await refreshAll(["stays", "tasks", "aptCash"]); renderApt();
-  if (res && res.ok) toast("Saved · reminder on " + new Date(res.on + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" }));
+  if (res && res.ok) toast("Saved · reminder on " + dmy(res.on));
   else if (res && res.msg) alert("The stay was saved, but its reminder task could not be created:\n\n" + res.msg
     + "\n\nIf this mentions a missing column, the tasks migration has not been run yet.");
   else toast("Saved");
@@ -2789,7 +2806,7 @@ function feedBlock(aptId) {
         <button class="chip" onclick="delFeed('${f.id}')">Remove</button></div>
       <div class="muted" style="word-break:break-all;font-size:11.5px">${esc((f.url || "").slice(0, 60))}…</div>
       <div class="muted">${f.last_sync
-        ? "Last checked " + new Date(f.last_sync).toLocaleString("en-GB") + (f.last_status ? " · " + esc(f.last_status) : "")
+        ? "Last checked " + dmyTime(f.last_sync) + (f.last_status ? " · " + esc(f.last_status) : "")
         : "Not checked yet — the first sync runs within the hour"}</div>
     </div>`).join("")}
     <div class="card">
@@ -2961,7 +2978,7 @@ function openPurchaseSheet(id) {
   const bal = id ? purchaseBalance(p) : 0;
   openSheet(`
     <h2>${id ? esc(p.supplier) : "New purchase"}</h2>
-    ${id ? `<p class="muted">${esc(p.doc_no || "no number")} · ${new Date(p.doc_date + "T12:00").toLocaleDateString("en-GB")}</p>` : ""}
+    ${id ? `<p class="muted">${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)}</p>` : ""}
     <label>Supplier</label>
     <input id="pu-sup" list="pu-sups" value="${esc(p.supplier || "")}" placeholder="e.g. Wizard Systems">
     <datalist id="pu-sups">${[...new Set(state.stock.map((a) => a.supplier).concat(state.purchases.map((x) => x.supplier)).filter(Boolean))]
@@ -2990,7 +3007,7 @@ function openPurchaseSheet(id) {
     <label>Note (opt.)</label><input id="pu-note" value="${esc(p.note || "")}">
     <button class="btn" onclick="savePurchase('${id || ""}')">Save</button>
     ${id ? (purFullyArrived(p)
-      ? `<p class="muted">Everything has arrived${p.received_at ? " · " + new Date(p.received_at + "T12:00").toLocaleDateString("en-GB") : ""}.</p>`
+      ? `<p class="muted">Everything has arrived${p.received_at ? " · " + dmy(p.received_at) : ""}.</p>`
       : `<div class="card">
            <div class="row" style="justify-content:space-between"><b>Waiting to arrive</b>
              <span class="mono">${purArrivedCount(p)}/${(p.items || []).length} lines in</span></div>
@@ -3003,7 +3020,7 @@ function openPurchaseSheet(id) {
       : `<div class="card" style="border-color:var(--personal)">
            <div class="row" style="justify-content:space-between"><b style="color:var(--personal)">Paid</b>
              <span class="mono">${fmt(p.paid_amount)} ден.</span></div>
-           <div class="muted">${p.paid_at ? new Date(p.paid_at + "T12:00").toLocaleDateString("en-GB") : ""} · ${p.paid_method === "cash" ? "cash — taken from the register" : "bank"}</div>
+           <div class="muted">${p.paid_at ? dmy(p.paid_at) : ""} · ${p.paid_method === "cash" ? "cash — taken from the register" : "bank"}</div>
            <button class="btn sm ghost" style="margin-top:8px" onclick="undoPurchasePayment('${id}')">Undo payment</button>
          </div>`) : ""}
     ${id ? `<button class="btn danger" onclick="delPurchase('${id}')">Delete purchase</button>` : ""}
@@ -3216,14 +3233,14 @@ function renderPurchases() {
     const bal = purchaseBalance(p);
     const state_ = bal <= 0.005 ? '<span style="color:var(--personal)">paid</span>'
       : purchaseOverdue(p) ? '<span style="color:var(--danger)">overdue</span>'
-      : (p.due_date ? "due " + new Date(p.due_date + "T12:00").toLocaleDateString("en-GB") : "unpaid");
+      : (p.due_date ? "due " + dmy(p.due_date) : "unpaid");
     return `<div class="card offer row" onclick="openPurchaseSheet('${p.id}')">
       <span class="led ${bal <= 0.005 ? "accepted" : "sent"}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(p.supplier)}</b>
-        <div class="o-num">${esc(p.doc_no || "no number")} · ${new Date(p.doc_date + "T12:00").toLocaleDateString("en-GB")} · ${state_}${
+        <div class="o-num">${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)} · ${state_}${
           purFullyArrived(p) ? ""
-            : ` · <span style="color:var(--amber)">${purArrivedCount(p) ? `${purArrivedCount(p)}/${(p.items || []).length} arrived` : "on order"}${p.expected_date ? " · exp. " + new Date(p.expected_date + "T12:00").toLocaleDateString("en-GB") : ""}</span>`}</div>
+            : ` · <span style="color:var(--amber)">${purArrivedCount(p) ? `${purArrivedCount(p)}/${(p.items || []).length} arrived` : "on order"}${p.expected_date ? " · exp. " + dmy(p.expected_date) : ""}</span>`}</div>
       </div>
       <span class="mono">${fmt(p.total)}</span>
     </div>`;
