@@ -352,7 +352,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <p class="muted" style="margin-top:14px">Centrala · version 1.2</p>
   </div>
 
-  <button class="mic" id="mic" onclick="startVoice()" aria-label="New task by voice">⬤</button>
+  <button class="mic" id="mic" onclick="startVoice()" aria-label="New task by voice" title="New task by voice">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor" stroke="none"></rect>
+      <path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18.5V21"></path><path d="M8.5 21h7"></path>
+    </svg></button>
   <button class="fab" id="fab" onclick="fabClick()">+</button>
 
   <div class="tabbar">
@@ -649,6 +654,12 @@ function openSheet(html) {
   if (!sheetOpen) { sheetOpen = true; history.pushState({ centrala: "sheet" }, ""); }
 }
 function closeSheet(fromBack) {
+  if (rec && !voiceStopping) {          // never leave the microphone listening
+    voiceStopping = true;
+    clearTimeout(silenceT); clearTimeout(maxT); clearInterval(tickT);
+    try { rec.stop(); } catch (_) {}
+    const m = $("mic"); if (m) m.classList.remove("rec");
+  }
   $("sheet").classList.remove("on");
   $("overlay").classList.remove("on");
   setTimeout(() => { $("sheet").style.display = "none"; }, 220);
@@ -3002,55 +3013,94 @@ function parseSpoken(raw) {
   return out;
 }
 
-let rec = null, voiceText = "", voiceParsed = null, voiceBusy = false;
+let rec = null, voiceText = "", voiceFinal = "", voiceParsed = null, voiceBusy = false;
+let voiceStopping = false, silenceT = null, maxT = null, tickT = null, voiceStart = 0, voiceErr = "";
+
+const VOICE_SILENCE_MS = 4000;   // how long a pause may last before it counts as "finished"
+const VOICE_MAX_MS = 90000;      // hard ceiling
+
 function startVoice() {
   if (!SR) return alert("This phone's browser cannot listen.\n\nUse the microphone on your keyboard instead: tap +, then the mic key while typing the title.");
-  voiceText = ""; voiceParsed = null;
+  voiceText = ""; voiceFinal = ""; voiceParsed = null; voiceStopping = false; voiceErr = "";
+  voiceStart = Date.now();
   openSheet(voiceSheetHtml("listening"));
   $("mic").classList.add("rec");
+  tickT = setInterval(() => {
+    const el = $("v-secs");
+    if (el) el.textContent = Math.round((Date.now() - voiceStart) / 1000) + "s";
+  }, 500);
+  maxT = setTimeout(() => finishVoice(true), VOICE_MAX_MS);
+  launchRec();
+}
+function launchRec() {
   try {
     rec = new SR();
     rec.lang = voiceLang();
     rec.interimResults = true;
-    rec.continuous = false;
+    rec.continuous = true;                    // Chrome otherwise stops at the first pause
     rec.onresult = (e) => {
-      let txt = "";
-      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
-      voiceText = txt;
-      const el = $("v-text"); if (el) el.textContent = txt;
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) voiceFinal += (voiceFinal ? " " : "") + r[0].transcript.trim();
+        else interim += r[0].transcript;
+      }
+      voiceText = (voiceFinal + " " + interim).trim();
+      const el = $("v-text");
+      if (el) el.textContent = voiceText || "…";
+      resetSilence();
     };
     rec.onerror = (e) => {
-      $("mic").classList.remove("rec");
-      const msg = e.error === "not-allowed"
+      if (e.error === "no-speech" || e.error === "aborted") return;   // a pause, not a failure
+      voiceErr = e.error === "not-allowed"
         ? "Microphone permission is off for this app. Allow it in the browser's site settings and try again."
-        : e.error === "no-speech" ? "I didn't hear anything." : "Listening failed: " + e.error;
-      renderVoiceSheet("error", msg);
+        : "Listening failed: " + e.error;
+      finishVoice(true);
     };
     rec.onend = () => {
-      $("mic").classList.remove("rec");
-      if (!voiceText.trim()) return renderVoiceSheet("error", "I didn't hear anything.");
-      voiceParsed = parseSpoken(voiceText);
-      renderVoiceSheet("ready");
+      // keep the session alive across Chrome's own restarts until the speaker stops
+      if (!voiceStopping && Date.now() - voiceStart < VOICE_MAX_MS) {
+        setTimeout(() => { if (!voiceStopping) { try { rec.start(); } catch (_) {} } }, 120);
+        return;
+      }
+      finishVoice();
     };
     rec.start();
+    resetSilence();
   } catch (e) {
-    $("mic").classList.remove("rec");
-    renderVoiceSheet("error", "Could not start listening: " + e.message);
+    voiceErr = "Could not start listening: " + e.message;
+    finishVoice(true);
   }
 }
-function stopVoice() { try { rec && rec.stop(); } catch {} }
+function resetSilence() {
+  clearTimeout(silenceT);
+  silenceT = setTimeout(() => { if (voiceText.trim()) finishVoice(); }, VOICE_SILENCE_MS);
+}
+function stopVoice() { voiceStopping = true; try { rec && rec.stop(); } catch (_) {} finishVoice(); }
+function finishVoice(force) {
+  voiceStopping = true;
+  clearTimeout(silenceT); clearTimeout(maxT); clearInterval(tickT);
+  try { rec && rec.stop(); } catch (_) {}
+  const m = $("mic"); if (m) m.classList.remove("rec");
+  if (!sheetOpen) return;
+  if (voiceErr) return renderVoiceSheet("error", voiceErr);
+  if (!voiceText.trim()) return renderVoiceSheet("error", "I didn't hear anything.");
+  voiceParsed = parseSpoken(voiceText);
+  renderVoiceSheet("ready");
+}
 function voiceSheetHtml(mode, msg) {
   const lang = voiceLang();
   const langChips = `<div class="chips">
     ${[["mk-MK", "Македонски"], ["en-US", "English"]].map(([l, n]) =>
       `<button class="chip ${lang === l ? "on" : ""}" onclick="setVoiceLang('${l}')">${n}</button>`).join("")}
   </div>`;
-  if (mode === "listening") return `<h2>Listening…</h2>
+  if (mode === "listening") return `<h2>Listening… <span class="muted mono" id="v-secs" style="font-size:14px">0s</span></h2>
     ${langChips}
-    <div class="vbig" id="v-text"><span class="dim">Say what you need, for example:<br>
+    <div class="vbig" id="v-text"><span class="dim">Take your time — pauses are fine. For example:<br>
       "Јави се на Марко утре во 14:30 елакс"<br>"Call the supplier tomorrow at 9 work"</span></div>
+    <p class="vhint">It keeps listening until you tap Done, or about four seconds after you stop talking.</p>
     <button class="btn" onclick="stopVoice()">Done speaking</button>
-    <button class="btn ghost" onclick="stopVoice();closeSheet()">Cancel</button>`;
+    <button class="btn ghost" onclick="voiceStopping=true;stopVoice();closeSheet()">Cancel</button>`;
   if (mode === "error") return `<h2>Nothing recorded</h2>${langChips}
     <p class="muted">${esc(msg || "")}</p>
     <button class="btn" onclick="startVoice()">Try again</button>
@@ -3065,9 +3115,8 @@ function voiceSheetHtml(mode, msg) {
     <button class="btn ghost" onclick="startVoice()">Say it again</button>`;
 }
 function renderVoiceSheet(mode, msg) {
-  const sh = $("sheet");
-  if (!sh || !sheetOpen) return;
-  sh.innerHTML = sh.innerHTML.slice(0, sh.innerHTML.indexOf("</div>") + 6) + voiceSheetHtml(mode || "ready", msg);
+  if (!sheetOpen) return;
+  openSheet(voiceSheetHtml(mode || "ready", msg));   // keeps the handle and ✕ intact
 }
 function speak(txt) {
   try {
