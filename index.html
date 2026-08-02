@@ -3013,7 +3013,7 @@ function parseSpoken(raw) {
   return out;
 }
 
-let rec = null, voiceText = "", voiceFinal = "", voiceParsed = null, voiceBusy = false;
+let rec = null, voiceText = "", voiceFinal = "", voiceSession = "", voiceParsed = null, voiceBusy = false;
 let voiceStopping = false, silenceT = null, maxT = null, tickT = null, voiceStart = 0, voiceErr = "";
 
 const VOICE_SILENCE_MS = 4000;   // how long a pause may last before it counts as "finished"
@@ -3021,7 +3021,7 @@ const VOICE_MAX_MS = 90000;      // hard ceiling
 
 function startVoice() {
   if (!SR) return alert("This phone's browser cannot listen.\n\nUse the microphone on your keyboard instead: tap +, then the mic key while typing the title.");
-  voiceText = ""; voiceFinal = ""; voiceParsed = null; voiceStopping = false; voiceErr = "";
+  voiceText = ""; voiceFinal = ""; voiceSession = ""; voiceParsed = null; voiceStopping = false; voiceErr = "";
   voiceStart = Date.now();
   openSheet(voiceSheetHtml("listening"));
   $("mic").classList.add("rec");
@@ -3039,13 +3039,17 @@ function launchRec() {
     rec.interimResults = true;
     rec.continuous = true;                    // Chrome otherwise stops at the first pause
     rec.onresult = (e) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      // Rebuild from the whole result list every time. Appending as results
+      // arrive double-counts: Chrome re-reports a phrase when it turns final
+      // and again after each restart, which is what produced "јави се јави се".
+      let fin = "", interim = "";
+      for (let i = 0; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) voiceFinal += (voiceFinal ? " " : "") + r[0].transcript.trim();
+        if (r.isFinal) fin += (fin ? " " : "") + r[0].transcript.trim();
         else interim += r[0].transcript;
       }
-      voiceText = (voiceFinal + " " + interim).trim();
+      voiceSession = fin;
+      voiceText = despam([voiceFinal, voiceSession, interim].filter(Boolean).join(" "));
       const el = $("v-text");
       if (el) el.textContent = voiceText || "…";
       resetSilence();
@@ -3058,7 +3062,9 @@ function launchRec() {
       finishVoice(true);
     };
     rec.onend = () => {
-      // keep the session alive across Chrome's own restarts until the speaker stops
+      // bank what this engine instance heard, so the next one starts clean
+      if (voiceSession) voiceFinal = despam((voiceFinal ? voiceFinal + " " : "") + voiceSession);
+      voiceSession = "";
       if (!voiceStopping && Date.now() - voiceStart < VOICE_MAX_MS) {
         setTimeout(() => { if (!voiceStopping) { try { rec.start(); } catch (_) {} } }, 120);
         return;
@@ -3071,6 +3077,18 @@ function launchRec() {
     voiceErr = "Could not start listening: " + e.message;
     finishVoice(true);
   }
+}
+// Recognisers stutter: a word or short phrase repeated back to back is almost
+// always an artefact, not speech. Collapse those, leave everything else alone.
+function despam(t) {
+  let s = String(t || "").replace(/\s+/g, " ").trim();
+  const re = /(^|\s)((?:\S+\s+){0,3}?\S+)(?:\s+\2)+(?=\s|$)/gi;
+  for (let pass = 0; pass < 5; pass++) {     // "Јави јави се јави се" needs more than one sweep
+    const before = s;
+    s = s.replace(re, "$1$2");
+    if (s === before) break;
+  }
+  return s.trim();
 }
 function resetSilence() {
   clearTimeout(silenceT);
