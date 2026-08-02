@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
           const events = parseIcs(await res.text());
           const apt = (apts ?? []).find((a: any) => a.id === feed.apartment_id);
           const seen: string[] = [];
-          let added = 0, updated = 0, clashes = 0;
+          let added = 0, updated = 0, clashes = 0, skippedBlocks = 0, replacedBlocks = 0;
 
           for (const ev of events) {
             if (!ev.uid || !ev.start || !ev.end || ev.end <= today) continue;   // ignore finished stays
@@ -198,6 +198,24 @@ Deno.serve(async (req) => {
               }
               continue;
             }
+
+            // Platforms export blocks as well as reservations, and a listing that
+            // imports another calendar re-exports those too — so the same nights
+            // can arrive several times. A block over nights already covered adds
+            // nothing; a real reservation replaces any block sitting on it.
+            const { data: over } = await db.from("stays")
+              .select("id, guest_name, external_uid")
+              .eq("apartment_id", feed.apartment_id)
+              .lt("check_in", ev.end).gt("check_out", ev.start);
+            if ((over ?? []).length) {
+              if (blocked) { skippedBlocks++; continue; }
+              const onlyBlocks = over!.every((o: any) => (o.notes ?? "").startsWith("Blocked") || /^Blocked/i.test(o.guest_name ?? ""));
+              if (onlyBlocks) {
+                await db.from("stays").delete().in("id", over!.map((o: any) => o.id));
+                replacedBlocks += over!.length;
+              } else { clashes++; continue; }
+            }
+
             const { data: made, error } = await db.from("stays").insert({
               apartment_id: feed.apartment_id, guest_name: name,
               check_in: ev.start, check_out: ev.end, amount,
@@ -228,6 +246,8 @@ Deno.serve(async (req) => {
           for (const g of gone) await db.from("stays").delete().eq("id", g.id);
 
           status = `${added} new, ${updated} changed, ${gone.length} cancelled`
+            + (skippedBlocks ? `, ${skippedBlocks} duplicate block(s) ignored` : "")
+            + (replacedBlocks ? `, ${replacedBlocks} block(s) replaced by a booking` : "")
             + (clashes ? `, ${clashes} clash with an existing booking` : "");
           if (added) {
             await sendToAll("New booking", `${added} from ${feed.source}${apt ? " \u00b7 " + apt.name : ""}`,
