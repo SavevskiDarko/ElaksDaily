@@ -393,6 +393,8 @@ function dmy(v) {
   return isNaN(d) ? "" : `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
 const dm = (v) => dmy(v).slice(0, 5);
+// dates may arrive as "2026-08-03" or a full timestamp; compare on the day only
+const dOnly = (v) => String(v || "").slice(0, 10);
 function dmyTime(v) {
   const d = v instanceof Date ? v : new Date(v);
   return isNaN(d) ? "" : `${dmy(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
@@ -2539,20 +2541,53 @@ function renderCalendar() {
 function stayRow(s) {
   return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}</div></div>
+      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${
+        dOnly(s.check_in) === todayStr() ? ' · <span style="color:var(--amber)">arrives today</span>'
+        : dOnly(s.check_out) === todayStr() ? ' · <span style="color:var(--amber)">checks out today</span>' : ""}</div></div>
     <span class="o-total mono">${fmt(s.amount)} ден.</span>
   </div>`;
 }
 function renderStays() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first (Apartments tab above).</div>'; return; }
   const t = todayStr();
-  const cur = state.stays.filter((s) => s.check_in <= t && s.check_out > t);
-  const up = state.stays.filter((s) => s.check_in > t).sort((a, b) => a.check_in.localeCompare(b.check_in));
-  const past = state.stays.filter((s) => s.check_out <= t);
+  // A guest is "currently staying" until the end of their check-out day —
+  // one pass, so a booking can only ever land in a single section.
+  const cur = [], up = [], past = [];
+  for (const s of state.stays) {
+    const ci = dOnly(s.check_in), co = dOnly(s.check_out);
+    if (!ci || !co) { up.push(s); continue; }
+    if (ci > t) up.push(s);
+    else if (co < t) past.push(s);
+    else cur.push(s);
+  }
+  cur.sort((a, b) => dOnly(a.check_out).localeCompare(dOnly(b.check_out)));
+  up.sort((a, b) => dOnly(a.check_in).localeCompare(dOnly(b.check_in)));
+  past.sort((a, b) => dOnly(b.check_out).localeCompare(dOnly(a.check_out)));
+
+  // The only way one guest can show twice is two records for the same booking —
+  // typically one typed by hand and the same one synced in from a platform.
+  const dupes = [];
+  const live = state.stays.filter((s) => dOnly(s.check_out) >= t);
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const a = live[i], b = live[j];
+      if (a.apartment_id !== b.apartment_id) continue;
+      if (dOnly(a.check_in) < dOnly(b.check_out) && dOnly(b.check_in) < dOnly(a.check_out)) dupes.push([a, b]);
+    }
+  }
+
   let html = "";
-  if (cur.length) html += '<div class="sec">Currently staying</div>' + cur.map(stayRow).join("");
-  if (up.length) html += '<div class="sec">Upcoming</div>' + up.map(stayRow).join("");
-  html += '<div class="sec">Past</div>' + (past.slice(0, 30).map(stayRow).join("") || '<p class="muted">No past stays.</p>');
+  if (dupes.length) html += `<div class="card" style="border-color:var(--danger)">
+    <b style="color:var(--danger)">${dupes.length} overlapping booking(s)</b>
+    <div class="muted">Two records cover the same nights in one apartment — open each and delete the one you don't want.</div>
+    ${dupes.slice(0, 5).map(([a, b]) => `<div class="mov">
+      <span class="tapp" onclick="openStaySheet('${a.id}')">${esc(a.guest_name)} ${dm(a.check_in)}→${dm(a.check_out)}${a.external_uid ? " · synced" : " · typed"} ›</span>
+      <span class="tapp" onclick="openStaySheet('${b.id}')">${esc(b.guest_name)} ${dm(b.check_in)}→${dm(b.check_out)}${b.external_uid ? " · synced" : " · typed"} ›</span>
+    </div>`).join("")}
+  </div>`;
+  if (cur.length) html += '<div class="sec">Currently staying</div>' + cur.map((s) => stayRow(s)).join("");
+  if (up.length) html += '<div class="sec">Upcoming</div>' + up.map((s) => stayRow(s)).join("");
+  html += '<div class="sec">Past</div>' + (past.slice(0, 30).map((s) => stayRow(s)).join("") || '<p class="muted">No past stays.</p>');
   $("apt-body").innerHTML = html || (state.loading ? SKEL(3) : '<div class="empty">No guests yet.<br>Add with +</div>');
 }
 function openStaySheet(id, pre) {
