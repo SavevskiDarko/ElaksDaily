@@ -158,7 +158,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 #loadbar button{font-weight:700;text-decoration:underline;flex:none}
 .hcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
 .hcard h3{font-family:var(--cond);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
-.hrow{display:flex;justify-content:space-between;align-items:center;padding:3px 0;gap:10px}
+.hrow{display:flex;justify-content:space-between;align-items:center;padding:4px 0;gap:10px;flex-wrap:wrap}
+.hrow > :first-child{flex:0 0 auto;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow > :last-child{margin-left:auto;white-space:nowrap;text-align:right}
+.hsub{font-size:12.5px;color:var(--muted);line-height:1.5;margin:2px 0 4px}
+.hsub b{color:var(--ink);font-weight:600}
+.hnote{font-size:12px;color:var(--muted);text-align:right;margin:-2px 0 4px}
+.hnote.warn{color:var(--danger)}
 .htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
 .hrow b{font-family:var(--mono)}
@@ -3317,13 +3323,17 @@ function renderHome() {
   const upNext = B.todays.slice().sort((a, b) =>
     (b.priority ? 1 : 0) - (a.priority ? 1 : 0)
     || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
+  const areas = myCtx().filter((c) => byCtx(c) > 0);
   let html = `<div class="hcard" onclick="tab('today')">
     <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
-    <div class="row" style="justify-content:space-between;align-items:flex-end">
+    <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
       <span class="hbig">${B.todays.length}</span>
-      <span class="muted">${B.late ? `<span class="hflag">${B.late} overdue</span> · ` : ""}${myCtx().map((c) => `${CTX[c]} ${byCtx(c)}`).join(" · ")}</span>
+      <span style="white-space:nowrap">${B.late ? `<span class="hflag">${B.late} overdue</span>` : '<span class="hok">nothing late</span>'}</span>
     </div>
-    ${B.undated.length ? `<div class="hrow"><span>No date yet</span><b>${B.undated.length}</b></div>` : ""}
+    <div class="hsub">${areas.length
+      ? areas.map((c) => `${CTX[c]} <b>${byCtx(c)}</b>`).join(" · ")
+      : (B.todays.length ? "" : "nothing scheduled today")}${
+      B.undated.length ? `${areas.length ? " · " : ""}no date <b>${B.undated.length}</b>` : ""}</div>
     ${upNext.slice(0, 3).map((t) => `<div class="hrow">
       <span style="display:flex;align-items:center;gap:9px;min-width:0">
         <button class="tick sm" onclick="event.stopPropagation();toggleTask('${t.id}')" aria-label="done"></button>
@@ -3353,15 +3363,18 @@ function renderHome() {
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
       <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
-      <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}${expired.length ? ` <span class="hflag">(${expired.length} expired)</span>` : ""}</b></div>
+      <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
+      ${expired.length ? `<div class="hnote warn">${expired.length} expired</div>` : ""}
       <div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>
-      ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${owed.length} · ${fmt(owedSum)} ден.</b></div>` : ""}
+      ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${fmt(owedSum)} ден.</b></div>
+      <div class="hnote">${owed.length} offer${owed.length > 1 ? "s" : ""}</div>` : ""}
       ${waiting.length ? `<div class="hrow"><span>Waiting to arrive</span>
-        <b style="color:var(--amber)">${waiting.length} purchase(s)</b></div>` : ""}
+        <b style="color:var(--amber)">${waiting.length}</b></div>` : ""}
       ${pendingStock.length ? `<div class="hrow"><span>Stock not taken out</span>
-        <b class="hflag">${pendingStock.length} offer(s)</b></div>` : ""}
+        <b class="hflag">${pendingStock.length}</b></div>` : ""}
       ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
-        <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.${billsLate.length ? ` (${billsLate.length} overdue)` : ""}</b></div>` : ""}
+        <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.</b></div>
+      <div class="hnote ${billsLate.length ? "warn" : ""}">${billsOpen.length} bill${billsOpen.length > 1 ? "s" : ""}${billsLate.length ? ` · ${billsLate.length} overdue` : ""}</div>` : ""}
     </div>`;
   }
 
@@ -3378,7 +3391,7 @@ function renderHome() {
     html += `<div class="hcard" onclick="state.aptView='stays';tab('apt')">
       <h3>Apartments</h3>
       <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
-      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " check-in" : ""}${inn && out ? " · " : ""}${out ? out + " check-out" : ""}</b></div>` : ""}
+      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " in" : ""}${inn && out ? " · " : ""}${out ? out + " out" : ""}</b></div>` : ""}
       <div class="hrow"><span>Bills this month</span><b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " unpaid" : "all paid"}</b></div>
       <div class="hrow"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
     </div>`;
