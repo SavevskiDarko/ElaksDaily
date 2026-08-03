@@ -169,6 +169,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 @keyframes shim{0%{background-position:100% 0}100%{background-position:0 0}}
 @media (prefers-reduced-motion:reduce){.skel{animation:none}}
 .mov.tapp{cursor:pointer}
+.sec.tapp{cursor:pointer;display:flex;align-items:center;gap:6px}
+.sec.tapp:active{opacity:.6}
 .mov.tapp:active{opacity:.6}
 .bankrow{justify-content:space-between;align-items:baseline;margin-top:7px}
 .nw{white-space:nowrap}
@@ -263,9 +265,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
-    <div class="sec">Next 7 days</div>
+    <button class="btn sm ghost" style="margin:2px 0 14px" onclick="openHistory()">Completed tasks →</button>
     <div id="week-list"></div>
-    <button class="btn ghost" onclick="openHistory()">Completed tasks →</button>
   </div>
 
   <!-- ELAKS BUSINESS -->
@@ -425,7 +426,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  loading: true, mineOnly: false, people: [], cashMonth: null, repMonth: null,
+  loading: true, mineOnly: false, showDone: false, people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -730,7 +731,7 @@ const taskInScope = (t, ctx) =>
 // One rule for what needs attention, read by Home, the Tasks tab and the badge,
 // so the three can never disagree about how much is late or due.
 function taskBuckets(today, ctx) {
-  const overdue = [], missed = [], todays = [], undated = [];
+  const overdue = [], missed = [], todays = [], undated = [], doneToday = [];
   for (const t of state.tasks) {
     if (!taskInScope(t, ctx)) continue;
     if (t.recurrence) {
@@ -739,9 +740,12 @@ function taskBuckets(today, ctx) {
     } else if (!t.done && t.due_date && t.due_date < today) overdue.push(t);
     else if (!t.done && !t.due_date) undated.push(t);
     if (occursOn(t, today) && !isDoneOn(t, today)) todays.push(t);
+    // finished today: a recurring occurrence ticked for today, or a one-off
+    // whose completion was recorded today (whatever day it was due)
+    if (t.recurrence ? isDoneOn(t, today) : (t.done && t.last_done === today)) doneToday.push(t);
   }
   const ids = new Set([...overdue, ...todays].map((t) => t.id).concat(missed.map((m) => m.t.id)));
-  return { overdue, missed, todays, undated, late: overdue.length + missed.length, attention: ids.size };
+  return { overdue, missed, todays, undated, doneToday, late: overdue.length + missed.length, attention: ids.size };
 }
 
 // Occurrences in the recent past that were never ticked off.
@@ -762,6 +766,16 @@ function isDoneOn(t, dateStr) {
   return state.doneSet.has(t.id + ":" + dateStr) || t.last_done === dateStr;
 }
 
+// Says what is actually filtering, and offers the way out.
+function emptyToday() {
+  const bits = [];
+  if (state.ctxFilter && state.ctxFilter !== "all") bits.push(CTX[state.ctxFilter]);
+  if (state.mineOnly) bits.push("assigned to you");
+  if (!bits.length) return '<div class="empty">No tasks for today.<br>Add with + or the microphone</div>';
+  return `<div class="empty">Nothing in ${bits.join(" · ")} today.<br>
+    <button class="btn sm ghost" style="margin-top:10px;display:inline-flex;width:auto"
+      onclick="state.ctxFilter='all';state.mineOnly=false;renderToday()">Show everything</button></div>`;
+}
 function renderToday() {
   const today = todayStr();
   const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
@@ -772,7 +786,9 @@ function renderToday() {
     $("ctx-filter").innerHTML = "";
     $("today-list").innerHTML = hits.length
       ? `<div class="sec">${hits.length} result${hits.length > 1 ? "s" : ""}</div>` + hits.map(taskRow(today)).join("")
-      : '<div class="empty">Nothing found.</div>';
+      : `<div class="empty">Nothing found for "${esc(q)}".<br>
+          <button class="btn sm ghost" style="margin-top:10px;display:inline-flex;width:auto"
+            onclick="$('tk-search').value='';renderToday()">Clear search</button></div>`;
     $("week-list").innerHTML = "";
     return;
   }
@@ -801,7 +817,12 @@ function renderToday() {
     html += (overdue.length || missed.length || inbox.length) ? '<div class="sec">Today</div>' : "";
     html += todays.map(taskRow(today)).join("");
   } else if (!overdue.length && !missed.length && !inbox.length) {
-    html += (state.loading ? SKEL() : '<div class="empty">No tasks for today.<br>Add with +</div>');
+    html += state.loading ? SKEL() : emptyToday();
+  }
+  if (B.doneToday.length) {
+    html += `<div class="sec tapp" onclick="state.showDone=!state.showDone;renderToday()">
+      Done today · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`;
+    if (state.showDone) html += B.doneToday.map(taskRow(today)).join("");
   }
   $("today-list").innerHTML = html;
 
@@ -3276,8 +3297,11 @@ function renderHome() {
       <span class="muted">${B.late ? `<span class="hflag">${B.late} overdue</span> · ` : ""}${myCtx().map((c) => `${CTX[c]} ${byCtx(c)}`).join(" · ")}</span>
     </div>
     ${B.undated.length ? `<div class="hrow"><span>No date yet</span><b>${B.undated.length}</b></div>` : ""}
-    ${B.todays.slice(0, 3).map((t) => `<div class="hrow"><span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
-      <span class="muted mono">${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
+    ${B.todays.slice(0, 3).map((t) => `<div class="hrow">
+      <span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
+      <span class="muted mono" style="display:flex;align-items:center;gap:7px">
+        ${t.assigned_to && t.assigned_to !== state.uid ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
+        ${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
   </div>`;
 
   if (state.perm.elaks) {
