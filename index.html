@@ -342,6 +342,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
         <div class="row"><input id="bills-day" type="number" min="1" max="28" value="5" style="flex:1">
           <button class="btn sm" onclick="saveBillsDay()">Save</button></div>
       </div>
+      <div class="sec">Check-out</div>
+      <div class="card">
+        <label>Guests leave by</label>
+        <div class="row"><input id="apt-checkout" type="time" value="11:00" style="flex:1">
+          <button class="btn sm" onclick="saveCheckoutTime()">Save</button></div>
+        <p class="muted" style="font-size:12.5px">After this time a stay moves from "Currently staying" to "Past". A single apartment can override it.</p>
+      </div>
       <div class="sec">Guest arrivals</div>
       <div class="card">
         <label>Remind me the day before an arrival, at</label>
@@ -428,6 +435,27 @@ function dmy(v) {
 const dm = (v) => dmy(v).slice(0, 5);
 // dates may arrive as "2026-08-03" or a full timestamp; compare on the day only
 const dOnly = (v) => String(v || "").slice(0, 10);
+const nowHM = () => { const d = new Date(); return p2(d.getHours()) + ":" + p2(d.getMinutes()); };
+function setting(key, fallback) {
+  const r = (state.settings || []).find((x) => x.key === key);
+  if (!r || r.value == null) return fallback;
+  const v = typeof r.value === "string" ? r.value.replace(/"/g, "") : r.value;
+  return v || fallback;
+}
+// An apartment may set its own check-out time; otherwise the house default.
+const checkoutTimeFor = (aptId) => {
+  const a = state.apartments.find((x) => x.id === aptId);
+  return (a && a.checkout_time ? String(a.checkout_time).slice(0, 5) : null) || setting("checkout_time", "11:00");
+};
+// A stay is over once its check-out day has passed, or once check-out time has
+// come on the day itself — the guest has left, so the list should say so.
+function stayEnded(s) {
+  const co = dOnly(s.check_out), t = todayStr();
+  if (!co) return false;
+  if (co < t) return true;
+  if (co > t) return false;
+  return nowHM() >= checkoutTimeFor(s.apartment_id);
+}
 function dmyTime(v) {
   const d = v instanceof Date ? v : new Date(v);
   return isNaN(d) ? "" : `${dmy(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
@@ -442,7 +470,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, people: [], cashMonth: null, repMonth: null,
-  tasks: [], completions: [], doneSet: new Set(), templates: [],
+  tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
@@ -506,12 +534,13 @@ async function startApp() {
   });
   if (state.role === "owner") {
     try {
-      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types", "stay_remind_time"]);
+      const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types", "stay_remind_time", "checkout_time"]);
       let stored = null;
       for (const r of data || []) {
         if (r.key === "digest_hour") $("digest-hour").value = String(r.value).replace(/"/g, "");
         if (r.key === "bills_day" && $("bills-day")) $("bills-day").value = String(r.value).replace(/"/g, "");
         if (r.key === "stay_remind_time" && $("stay-time")) $("stay-time").value = String(r.value).replace(/"/g, "");
+        if (r.key === "checkout_time" && $("apt-checkout")) $("apt-checkout").value = String(r.value).replace(/"/g, "");
         if (r.key === "bill_types") stored = Array.isArray(r.value) ? r.value : (() => { try { return JSON.parse(r.value); } catch { return null; } })();
       }
       // keep the notification side in step with BILL_TYPES instead of hardcoding a count
@@ -527,6 +556,7 @@ const backMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n, 1
 // Bounded queries: recent + open records only, so the app stays fast as data grows.
 const LOADERS = {
   people:     { need: () => true,               q: () => db.from("team_members").select("*") },
+  settings:   { need: () => true,               q: () => db.from("app_settings").select("key, value") },
   completions:{ need: () => true,               q: () => db.from("task_completions").select("task_id, done_on").gte("done_on", backDays(180)) },
   templates:  { need: () => true,               q: () => db.from("task_templates").select("*").order("name") },
   tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
@@ -567,7 +597,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260803-154819";
+const BUILD = "20260803-203819";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -582,7 +612,13 @@ async function checkForUpdate() {
     $("updbar").classList.add("on");          // mid-edit: let him finish first
   } catch (e) { /* offline — nothing to do */ }
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  checkForUpdate();
+  render();                       // check-out time may have passed while away
+});
+// "Currently staying" depends on the time of day, so keep it honest while open
+setInterval(() => { if (!document.hidden) render(); }, 5 * 60 * 1000);
 window.addEventListener("focus", checkForUpdate);
 
 // A notification hands its task over through the URL (or a message when the
@@ -2539,6 +2575,11 @@ async function delTemplate(id) {
   try { await dbq(db.from("task_templates").delete().eq("id", id), "Not deleted"); } catch { return; }
   await refreshAll(["templates"]); renderTemplates();
 }
+async function saveCheckoutTime() {
+  const t = $("apt-checkout").value || "11:00";
+  try { await dbq(db.from("app_settings").upsert({ key: "checkout_time", value: t }, { onConflict: "key" }), "Not saved"); } catch { return; }
+  await refreshAll(["settings"]); render(); toast("Saved");
+}
 async function saveStayTime() {
   const t = $("stay-time").value || "09:00";
   try { await dbq(db.from("app_settings").upsert({ key: "stay_remind_time", value: t }, { onConflict: "key" }), "Not saved"); } catch { return; }
@@ -2662,7 +2703,10 @@ function stayRow(s) {
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
       <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${
         dOnly(s.check_in) === todayStr() ? ' · <span style="color:var(--amber)">arrives today</span>'
-        : dOnly(s.check_out) === todayStr() ? ' · <span style="color:var(--amber)">checks out today</span>' : ""}</div></div>
+        : dOnly(s.check_out) === todayStr()
+          ? (stayEnded(s) ? ' · <span class="muted">checked out today</span>'
+             : ` · <span style="color:var(--amber)">leaves today by ${checkoutTimeFor(s.apartment_id)}</span>`)
+          : ""}</div></div>
     <span class="o-total mono">${fmt(s.amount)} ден.</span>
   </div>`;
 }
@@ -2676,7 +2720,7 @@ function renderStays() {
     const ci = dOnly(s.check_in), co = dOnly(s.check_out);
     if (!ci || !co) { up.push(s); continue; }
     if (ci > t) up.push(s);
-    else if (co < t) past.push(s);
+    else if (stayEnded(s)) past.push(s);
     else cur.push(s);
   }
   cur.sort((a, b) => dOnly(a.check_out).localeCompare(dOnly(b.check_out)));
@@ -2942,6 +2986,8 @@ function openAptSheet(id) {
       <div><label>Size (m²)</label><input id="ap-size" type="number" inputmode="decimal" value="${a.size_m2 ?? ""}"></div>
       <div><label>Nightly rate (ден.)</label><input id="ap-rate" type="number" inputmode="decimal" value="${a.nightly_rate ?? ""}"></div>
     </div>
+    <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
+    <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
     <label>Notes (opt.)</label><input id="ap-notes" value="${esc(a.notes || "")}">
     <button class="btn" onclick="saveApt('${id || ""}')">Save</button>
@@ -2996,6 +3042,7 @@ async function saveApt(id) {
   const row = { name: $("ap-name").value.trim(), address: $("ap-addr").value.trim() || null,
     size_m2: parseFloat($("ap-size").value) || null, nightly_rate: parseFloat($("ap-rate").value) || null,
     opening_balance: parseFloat($("ap-open").value) || 0,
+    checkout_time: $("ap-checkout").value || null,
     notes: $("ap-notes").value.trim() || null };
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
