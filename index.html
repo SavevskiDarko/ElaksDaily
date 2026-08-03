@@ -167,6 +167,18 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hnote.warn{color:var(--danger)}
 .htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
+.setrow{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);padding:13px 14px;margin-bottom:8px;cursor:pointer}
+.setrow:active{opacity:.65}
+.setrow .ico{width:34px;height:34px;border-radius:10px;background:var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+.setrow .txt{flex:1;min-width:0}
+.setrow .txt b{display:block;font-size:15px}
+.setrow .txt span{display:block;font-size:12.5px;color:var(--muted);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.setrow .chev{color:var(--muted);font-size:18px;flex:none}
+.setgrp{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);margin:20px 0 8px}
 .updbar{position:fixed;left:12px;right:12px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:35;
   background:var(--navy);color:#fff;border-radius:12px;padding:11px 14px;display:none;
   align-items:center;justify-content:space-between;gap:10px;box-shadow:0 6px 18px rgba(30,58,95,.4)}
@@ -315,63 +327,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
   <!-- SETTINGS -->
   <div class="view" id="v-set">
-    <div class="sec">Notifications</div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div><b>Push notifications</b><div class="muted" id="push-state">—</div></div>
-        <button class="btn sm amber" onclick="enablePush()">Enable</button>
-      </div>
-      <div id="digest-block">
-        <label>Daily digest at</label>
-        <div class="row"><input id="digest-hour" type="time" value="07:30" style="flex:1">
-          <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
-      </div>
-    </div>
-    <div id="biz-settings">
-    <div class="sec">Export (CSV)</div>
-    <div class="grid2">
-      <button class="btn sm ghost" style="width:100%" onclick="exportCsv('articles')">Articles</button>
-      <button class="btn sm ghost" style="width:100%" onclick="exportCsv('movements')">Movements</button>
-    </div>
-    <button class="btn ghost" onclick="exportCsv('offers')">Offers</button>
-    </div>
-    <div id="apts-settings" style="display:none">
-      <div class="sec">Apartment bills</div>
-      <div class="card">
-        <label>Remind me about unpaid bills from day</label>
-        <div class="row"><input id="bills-day" type="number" min="1" max="28" value="5" style="flex:1">
-          <button class="btn sm" onclick="saveBillsDay()">Save</button></div>
-      </div>
-      <div class="sec">Check-out</div>
-      <div class="card">
-        <label>Guests leave by</label>
-        <div class="row"><input id="apt-checkout" type="time" value="11:00" style="flex:1">
-          <button class="btn sm" onclick="saveCheckoutTime()">Save</button></div>
-        <p class="muted" style="font-size:12.5px">After this time a stay moves from "Currently staying" to "Past". A single apartment can override it.</p>
-      </div>
-      <div class="sec">Guest arrivals</div>
-      <div class="card">
-        <label>Remind me the day before an arrival, at</label>
-        <div class="row"><input id="stay-time" type="time" value="09:00" style="flex:1">
-          <button class="btn sm" onclick="saveStayTime()">Save</button></div>
-      </div>
-    </div>
-    <div class="sec">Checklist templates</div>
-    <div id="tpl-list"></div>
-    <p class="muted" style="font-size:12.5px">Build a checklist on any task, then use "Save this checklist as a template" to reuse it.</p>
-    <div id="data-settings" style="display:none">
-      <div class="sec">Backup</div>
-      <button class="btn ghost" onclick="backupJson()">Download full backup (JSON)</button>
-      <p class="muted" style="font-size:12.5px">Download once a month and keep it somewhere safe — every task, article, offer, guest, bill and cash entry. Product photos are not included, so the file stays small and reliable.</p>
-    </div>
-    <div id="team-settings" style="display:none">
-      <div class="sec">Team</div>
-      <div id="team-list"></div>
-      <p class="muted" style="font-size:12.5px">Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.</p>
-    </div>
-    <div class="sec">Account</div>
-    <button class="btn ghost" onclick="logout()">Sign out</button>
-    <p class="muted" style="margin-top:14px">Centrala · version 1.2</p>
+    <div id="set-menu"></div>
   </div>
 
   <div class="updbar" id="updbar"><span>A newer version is ready</span>
@@ -597,7 +553,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260803-203819";
+const BUILD = "20260803-204537";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -689,7 +645,7 @@ function fabClick() {
 }
 function render() {
   updateBadges();
-  if (state.tab === "set") renderTemplates();
+  if (state.tab === "set") renderSettings();
   if (state.tab === "home") renderHome();
   if (state.tab === "today") renderToday();
   if (state.tab === "elaks") renderElaks();
@@ -2483,7 +2439,9 @@ function permSummary(r) {
   return parts.join(" · ") || "No access yet";
 }
 function renderTeam() {
-  $("team-list").innerHTML = state.team.map((r) => `
+  const el = $("team-list");                  // only exists while the Team sheet is open
+  if (!el) return;
+  el.innerHTML = state.team.map((r) => `
     <div class="card row" ${r.role === "owner" ? "" : `onclick="openPermSheet('${r.user_id}')"`}>
       <div style="flex:1"><b>${esc(r.display_name || "Unnamed")}</b>
         <div class="muted">${permSummary(r)}</div></div>
@@ -2539,8 +2497,13 @@ function urlB64(s) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 async function updatePushState() {
-  if (!("Notification" in window)) { $("push-state").textContent = "Not supported"; return; }
-  $("push-state").textContent = Notification.permission === "granted" ? "Enabled on this device" : "Disabled";
+  const supported = "Notification" in window;
+  state.pushOn = supported ? Notification.permission === "granted" : false;
+  const el = $("push-state");                 // only present while the sheet is open
+  if (el) el.textContent = !supported ? "Not supported on this device"
+    : state.pushOn ? "On for this device" : "Off";
+  const btn = el && el.closest(".card") ? el.closest(".card").querySelector("button") : null;
+  if (btn) { btn.textContent = state.pushOn ? "Turn off" : "Enable"; btn.classList.toggle("ghost", state.pushOn); }
 }
 async function enablePush() {
   try {
@@ -2560,6 +2523,99 @@ async function getSetting(key, fallback) {
     return v || fallback;
   } catch { return fallback; }
 }
+// Settings as a menu of areas rather than one long scroll of unrelated
+// controls. Each row shows what it is set to, so the common case — checking a
+// value — needs no tapping at all.
+function renderSettings() {
+  const el = $("set-menu");
+  if (!el) return;
+  const row = (icon, title, sub, action) =>
+    `<div class="setrow" onclick="${action}"><span class="ico">${icon}</span>
+      <span class="txt"><b>${title}</b><span>${sub}</span></span><span class="chev">›</span></div>`;
+
+  const pushSub = state.pushOn === true ? `On · daily summary ${setting("digest_hour", "07:30")}`
+    : state.pushOn === false ? "Off — tap to turn on" : "Daily summary " + setting("digest_hour", "07:30");
+  let html = '<div class="setgrp" style="margin-top:2px">You</div>'
+    + row("&#128276;", "Notifications", pushSub, "openSetSheet('push')")
+    + row("&#10003;", "Checklist templates",
+        state.templates.length ? `${state.templates.length} saved` : "None yet", "openSetSheet('templates')");
+
+  if (state.perm.elaks || state.perm.apts) html += '<div class="setgrp">Business</div>';
+  if (state.perm.elaks) html += row("&#128230;", "Elaks", "Export articles, movements and offers", "openSetSheet('elaks')");
+  if (state.perm.apts) html += row("&#127968;", "Apartments",
+    `Check-out ${setting("checkout_time", "11:00")} · arrivals ${setting("stay_remind_time", "09:00")} · bills from day ${setting("bills_day", "5")}`,
+    "openSetSheet('apts')");
+
+  if (state.perm.owner) html += '<div class="setgrp">Administration</div>'
+    + row("&#128101;", "Team", `${(state.team || []).length} ${(state.team || []).length === 1 ? "person" : "people"} with access`, "openSetSheet('team')")
+    + row("&#128190;", "Backup", "Download everything as one file", "openSetSheet('backup')");
+
+  html += '<div class="setgrp">App</div>'
+    + row("&#8505;", "About Centrala", "Version " + String(BUILD).slice(0, 8), "openSetSheet('about')")
+    + `<div class="setrow" onclick="logout()" style="border-color:var(--danger)">
+        <span class="ico" style="background:var(--danger-bg)">&#9211;</span>
+        <span class="txt"><b style="color:var(--danger)">Sign out</b><span>${esc(state.email || "")}</span></span></div>`;
+  el.innerHTML = html;
+}
+
+function openSetSheet(kind) {
+  if (kind === "push") {
+    openSheet(`<h2>Notifications</h2>
+      <div class="card"><div class="row" style="justify-content:space-between">
+        <div><b>Push notifications</b><div class="muted" id="push-state">—</div></div>
+        <button class="btn sm amber" onclick="enablePush()">Enable</button></div></div>
+      <label>Daily summary at</label>
+      <div class="row"><input id="digest-hour" type="time" value="${setting("digest_hour", "07:30")}" style="flex:1">
+        <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
+      <p class="muted" style="font-size:12.5px">One message each morning with what is due — plus reminders for tasks with a time, guest arrivals the day before, and unpaid bills.</p>`);
+    updatePushState();
+  } else if (kind === "templates") {
+    openSheet(`<h2>Checklist templates</h2><div id="tpl-list"></div>
+      <p class="muted" style="font-size:12.5px">Build a checklist on any task, then use "Save this checklist as a template" to reuse it.</p>`);
+    renderTemplates();
+  } else if (kind === "elaks") {
+    openSheet(`<h2>Elaks</h2><div class="sec">Export as CSV</div>
+      <button class="btn ghost" onclick="exportCsv('articles')">Articles and stock</button>
+      <button class="btn ghost" onclick="exportCsv('movements')">Stock movements</button>
+      <button class="btn ghost" onclick="exportCsv('offers')">Offers</button>
+      <p class="muted" style="font-size:12.5px">Opens in Excel — useful for your accountant, or for checking figures outside the app.</p>`);
+  } else if (kind === "apts") {
+    openSheet(`<h2>Apartments</h2>
+      <label>Guests leave by (check-out)</label>
+      <input id="apt-checkout" type="time" value="${setting("checkout_time", "11:00")}">
+      <p class="muted" style="font-size:12.5px">After this time a stay moves from "Currently staying" to "Past". A single apartment can override it.</p>
+      <label>Remind me the day before an arrival, at</label>
+      <input id="stay-time" type="time" value="${setting("stay_remind_time", "09:00")}">
+      <label>Remind me about unpaid bills from day</label>
+      <input id="bills-day" type="number" min="1" max="28" value="${setting("bills_day", "5")}">
+      <button class="btn" onclick="saveAptSettings()">Save</button>`);
+  } else if (kind === "team") {
+    openSheet(`<h2>Team</h2><div id="team-list"></div>
+      <p class="muted" style="font-size:12.5px">Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.</p>`);
+    loadTeam();
+  } else if (kind === "backup") {
+    openSheet(`<h2>Backup</h2>
+      <button class="btn" onclick="backupJson()">Download full backup</button>
+      <p class="muted" style="font-size:12.5px">Every task, article, offer, guest, bill, purchase and cash entry in one file. Photos are left out so it stays small and reliable. Worth doing once a month — keep it somewhere that is not your phone.</p>`);
+  } else if (kind === "about") {
+    openSheet(`<h2>Centrala</h2>
+      <div class="hrow"><span class="muted">Version</span><b class="mono">${BUILD}</b></div>
+      <div class="hrow"><span class="muted">Signed in as</span><b>${esc(state.email || "")}</b></div>
+      <div class="hrow"><span class="muted">Access</span><b>${[state.perm.elaks ? "Elaks" : "", state.perm.apts ? "Apartments" : ""].filter(Boolean).join(" · ") || "Tasks only"}</b></div>
+      <button class="btn ghost" style="margin-top:14px" onclick="lastBuildCheck=0;checkForUpdate();toast('Checking…')">Check for updates</button>`);
+  }
+}
+
+async function saveAptSettings() {
+  const rows = [
+    { key: "checkout_time", value: $("apt-checkout").value || "11:00" },
+    { key: "stay_remind_time", value: $("stay-time").value || "09:00" },
+    { key: "bills_day", value: String(parseInt($("bills-day").value) || 5) },
+  ];
+  try { await dbq(db.from("app_settings").upsert(rows, { onConflict: "key" }), "Not saved"); } catch { return; }
+  closeSheet(); await refreshAll(["settings"]); render(); toast("Saved");
+}
+
 function renderTemplates() {
   const el = $("tpl-list");
   if (!el) return;
