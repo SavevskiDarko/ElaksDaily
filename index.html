@@ -720,6 +720,30 @@ function occursOn(t, dateStr) {
   return false;
 }
 
+const MISS_LOOKBACK = 30;
+
+// "Mine" means what I could pick up: assigned to me, or to nobody.
+const taskInScope = (t, ctx) =>
+  (!state.mineOnly || t.assigned_to === state.uid || !t.assigned_to)
+  && (!ctx || ctx === "all" || t.context === ctx);
+
+// One rule for what needs attention, read by Home, the Tasks tab and the badge,
+// so the three can never disagree about how much is late or due.
+function taskBuckets(today, ctx) {
+  const overdue = [], missed = [], todays = [], undated = [];
+  for (const t of state.tasks) {
+    if (!taskInScope(t, ctx)) continue;
+    if (t.recurrence) {
+      const m = missedDates(t, today, MISS_LOOKBACK);
+      if (m.length) missed.push({ t, dates: m });
+    } else if (!t.done && t.due_date && t.due_date < today) overdue.push(t);
+    else if (!t.done && !t.due_date) undated.push(t);
+    if (occursOn(t, today) && !isDoneOn(t, today)) todays.push(t);
+  }
+  const ids = new Set([...overdue, ...todays].map((t) => t.id).concat(missed.map((m) => m.t.id)));
+  return { overdue, missed, todays, undated, late: overdue.length + missed.length, attention: ids.size };
+}
+
 // Occurrences in the recent past that were never ticked off.
 function missedDates(t, today, lookback = 30) {
   if (!t.recurrence) return [];
@@ -755,22 +779,13 @@ function renderToday() {
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("")
     + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`;
-  // "Mine" means what I could pick up: assigned to me, or to nobody
-  const vis = (t) => (state.ctxFilter === "all" || t.context === state.ctxFilter)
-    && (!state.mineOnly || t.assigned_to === state.uid || !t.assigned_to);
-
+  const vis = (t) => taskInScope(t, state.ctxFilter);
   const byPrio = (a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0);
-  const overdue = state.tasks.filter((t) => vis(t) && !t.recurrence && t.due_date && t.due_date < today && !t.done).sort(byPrio);
-  // a recurring task that was due and never ticked is overdue too
-  const missed = [];
-  for (const t of state.tasks) {
-    if (!vis(t) || !t.recurrence) continue;
-    const m = missedDates(t, today);
-    if (m.length) missed.push({ t, dates: m });
-  }
-  const todays = state.tasks.filter((t) => vis(t) && occursOn(t, today)).sort(byPrio);
-
-  const inbox = state.tasks.filter((t) => vis(t) && !t.recurrence && !t.due_date && !t.done);
+  const B = taskBuckets(today, state.ctxFilter);
+  const overdue = B.overdue.slice().sort(byPrio);
+  const missed = B.missed;
+  const todays = B.todays.slice().sort(byPrio);
+  const inbox = B.undated;
   let html = "";
   if (overdue.length || missed.length) {
     html += '<div class="sec" style="color:var(--danger)">Overdue</div>' + overdue.map(taskRow(today)).join("");
@@ -3252,16 +3267,16 @@ function editSpokenTask() {
 function renderHome() {
   if (state.loading) { $("home-body").innerHTML = SKEL(3, "tall"); return; }
   const today = todayStr();
-  const openTasks = state.tasks.filter((t) => occursOn(t, today) && !isDoneOn(t, today));
-  const overdue = state.tasks.filter((t) => !t.recurrence && t.due_date && t.due_date < today && !t.done);
-  const byCtx = (c) => openTasks.filter((t) => t.context === c).length;
+  const B = taskBuckets(today);                 // same numbers as the Tasks tab and the badge
+  const byCtx = (c) => B.todays.filter((t) => t.context === c).length;
   let html = `<div class="hcard" onclick="tab('today')">
-    <h3>Today</h3>
+    <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
     <div class="row" style="justify-content:space-between;align-items:flex-end">
-      <span class="hbig">${openTasks.length}</span>
-      <span class="muted">${overdue.length ? `<span class="hflag">${overdue.length} overdue</span> · ` : ""}${myCtx().map((c) => `${CTX[c]} ${byCtx(c)}`).join(" · ")}</span>
+      <span class="hbig">${B.todays.length}</span>
+      <span class="muted">${B.late ? `<span class="hflag">${B.late} overdue</span> · ` : ""}${myCtx().map((c) => `${CTX[c]} ${byCtx(c)}`).join(" · ")}</span>
     </div>
-    ${openTasks.slice(0, 3).map((t) => `<div class="hrow"><span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
+    ${B.undated.length ? `<div class="hrow"><span>No date yet</span><b>${B.undated.length}</b></div>` : ""}
+    ${B.todays.slice(0, 3).map((t) => `<div class="hrow"><span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
       <span class="muted mono">${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
   </div>`;
 
@@ -3651,10 +3666,7 @@ function offerExpired(o) {
 
 function updateBadges() {
   const today = todayStr();
-  const n = state.tasks.filter((t) =>
-    (occursOn(t, today) && !isDoneOn(t, today)) ||
-    (!t.recurrence && t.due_date && t.due_date < today && !t.done) ||
-    (t.recurrence && missedDates(t, today, 14).length > 0)).length;
+  const n = taskBuckets(today).attention;
   const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
   const set = (name, v) => { const e = $("bdg-" + name); if (e) { e.textContent = v; e.classList.toggle("on", v > 0); } };
   set("today", n); set("elaks", low);
