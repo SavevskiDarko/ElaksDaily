@@ -2953,7 +2953,12 @@ function parseSpoken(raw) {
     let cut = false;
     for (const body of tagBodies) {
       const tail = new RegExp("(?:^|\\s)(?:" + body + ")\\s*$", "i");
-      if (tail.test(s.trim())) { s = " " + s.trim().replace(tail, "").trim() + " "; cut = true; break; }
+      if (!tail.test(s.trim())) continue;
+      const left = s.trim().replace(tail, "").trim();
+      // "check the apartment" — the word is the object, not a tag
+      const dangling = /(?:^|\s)(?:the|a|an|to|and|of|на|во|го|ја|се|од|за|со|му|ми)$/i.test(left);
+      if (!left || left.split(/\s+/).length < 2 || dangling) continue;
+      s = " " + left + " "; cut = true; break;
     }
     if (!cut) break;
   }
@@ -2989,24 +2994,51 @@ function parseSpoken(raw) {
     }
   }
 
+  // "потсети ме" / "remind me" asks for a notification even without a time
+  out.askedRemind = !!eat("потсети ме|потсети|remind me|reminder|alarm");
+
+  // spoken hours often come back as words
+  const NUM = { еден: 1, една: 1, два: 2, две: 2, три: 3, четири: 4, пет: 5, шест: 6, седум: 7,
+    осум: 8, девет: 9, десет: 10, единаесет: 11, дванаесет: 12,
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+    ten: 10, eleven: 11, twelve: 12 };
+  const morning = /наутро|утринава|morning|am\b/i.test(s);
+
   let m = eat("(?:во|в|at|@)?\\s*(\\d{1,2})[:.](\\d{2})(?:\\s*(?:часот|h))?");
   if (m) out.due_time = p2(Math.min(23, +m[1])) + ":" + p2(Math.min(59, +m[2]));
   if (!out.due_time) {
-    m = eat("(?:во|at)\\s+(\\d{1,2})\\s*(am|pm|часот|h)?");
+    m = eat("(?:во|at)\\s+(\\d{1,2}|" + Object.keys(NUM).join("|") + ")\\s*(am|pm|часот|h)?");
     if (m) {
-      let hh = +m[1];
+      const raw = (m[1] || "").toLowerCase();
+      let hh = /^\d+$/.test(raw) ? +raw : (NUM[raw] || 0);
       const suf = (m[2] || "").toLowerCase();
       if (suf === "pm" && hh < 12) hh += 12;
-      if (suf === "am" && hh === 12) hh = 0;
+      else if (suf === "am" && hh === 12) hh = 0;
+      // "во 5" almost always means the afternoon; "во 5 наутро" does not
+      else if (hh >= 1 && hh <= 6 && !morning) hh += 12;
       if (hh <= 23) out.due_time = p2(hh) + ":00";
     }
   }
-  if (!out.due_time && eat("наутро|утринава|morning")) out.due_time = "08:00";
-  if (!out.due_time && eat("попладне|afternoon")) out.due_time = "15:00";
-  if (!out.due_time && eat("навечер|evening")) out.due_time = "19:00";
+  const gotMorning = eat("наутро|утринава|morning");
+  const gotNoon = eat("попладне|afternoon");
+  const gotEve = eat("навечер|evening");
+  if (!out.due_time) {
+    if (gotMorning) out.due_time = "08:00";
+    else if (gotNoon) out.due_time = "15:00";
+    else if (gotEve) out.due_time = "19:00";
+  }
 
   // Words tacked on the end as tags ("… елакс", "… urgent") are noise in a
   // title; the same words inside the sentence are part of it and stay.
+  if (out.askedRemind && !out.due_time) {
+    if (!out.due_date || out.due_date === new Date().toLocaleDateString("sv-SE")) {
+      const n = new Date(); n.setHours(n.getHours() + 1, 0, 0, 0);   // an hour from now
+      out.due_time = p2(n.getHours()) + ":00";
+      if (!out.due_date) out.due_date = n.toLocaleDateString("sv-SE");
+    } else out.due_time = "09:00";
+  }
+  if (out.due_time && !out.due_date) out.due_date = new Date().toLocaleDateString("sv-SE");
+
   let title = s.replace(/\s{2,}/g, " ").trim();
   title = title.replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, "");
   out.title = title.charAt(0).toUpperCase() + title.slice(1);
@@ -3138,13 +3170,30 @@ function voiceSheetHtml(mode, msg) {
     <button class="btn" onclick="startVoice()">Try again</button>
     <button class="btn ghost" onclick="closeSheet()">Close</button>`;
   const p = voiceParsed || {};
+  const willRemind = !!(p.due_time && p.remind !== false);
   return `<h2>New task</h2>
     <div class="vbig">${esc(p.title || "")}</div>
     <div class="vhint">${p.priority ? "★ important · " : ""}${p.context ? CTX[p.context] : "no area"} ·
       ${p.due_date ? dmy(p.due_date) : "no date"}${p.due_time ? " · " + p.due_time : ""}</div>
+    <div class="row" style="margin-top:12px">
+      <button class="clbox ${willRemind ? "on" : ""}" id="v-rem" onclick="toggleVoiceRemind()">${willRemind ? "\u2713" : ""}</button>
+      <span>${willRemind
+        ? `Notify me at ${p.due_time}${p.due_date && p.due_date !== todayStr() ? " on " + dmy(p.due_date) : ""}`
+        : "Notify me — tap, or say a time like \"во 14:30\""}</span>
+    </div>
     <button class="btn" style="margin-top:14px" onclick="saveSpokenTask()">Save task</button>
     <button class="btn ghost" onclick="editSpokenTask()">Edit before saving</button>
     <button class="btn ghost" onclick="startVoice()">Say it again</button>`;
+}
+function toggleVoiceRemind() {
+  if (!voiceParsed) return;
+  if (!voiceParsed.due_time) {                 // nothing to fire on yet — pick the next hour
+    const n = new Date(); n.setHours(n.getHours() + 1, 0, 0, 0);
+    voiceParsed.due_time = p2(n.getHours()) + ":00";
+    voiceParsed.due_date = voiceParsed.due_date || n.toLocaleDateString("sv-SE");
+    voiceParsed.remind = true;
+  } else voiceParsed.remind = voiceParsed.remind === false;
+  renderVoiceSheet("ready");
 }
 function renderVoiceSheet(mode, msg) {
   if (!sheetOpen) return;
@@ -3166,14 +3215,17 @@ async function saveSpokenTask() {
   const row = {
     title: p.title, context: p.context || myCtx()[0],
     due_date: p.due_date, due_time: p.due_time,
-    remind: !!p.due_time, priority: p.priority, notes: null,
+    remind: !!(p.due_time && p.remind !== false), priority: p.priority, notes: null,
   };
   try { await dbq(db.from("tasks").insert(row), "Task not saved"); }
   catch { voiceBusy = false; return; }
   voiceBusy = false;
   closeSheet(); await refreshAll(["tasks"]); render();
-  toast("Saved: " + p.title);
-  speak(voiceLang().startsWith("mk") ? "Зачувано" : "Saved");
+  const rem = !!(p.due_time && p.remind !== false);
+  toast("Saved: " + p.title + (rem ? " · reminder " + p.due_time : ""));
+  speak(voiceLang().startsWith("mk")
+    ? (rem ? "Зачувано, потсетник во " + p.due_time : "Зачувано")
+    : (rem ? "Saved, reminder at " + p.due_time : "Saved"));
 }
 function editSpokenTask() {
   const p = voiceParsed || {};
