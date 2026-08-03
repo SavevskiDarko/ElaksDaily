@@ -3049,7 +3049,7 @@ function launchRec() {
         else interim += r[0].transcript;
       }
       voiceSession = fin;
-      voiceText = despam([voiceFinal, voiceSession, interim].filter(Boolean).join(" "));
+      voiceText = despam(mergeText(mergeText(voiceFinal, voiceSession), interim));
       const el = $("v-text");
       if (el) el.textContent = voiceText || "…";
       resetSilence();
@@ -3062,11 +3062,13 @@ function launchRec() {
       finishVoice(true);
     };
     rec.onend = () => {
-      // bank what this engine instance heard, so the next one starts clean
-      if (voiceSession) voiceFinal = despam((voiceFinal ? voiceFinal + " " : "") + voiceSession);
+      // Bank this engine's text, then build a NEW engine. Restarting the same
+      // one keeps its results list, so it hands the whole utterance back again
+      // and the transcript grows with every pause.
+      voiceFinal = despam(mergeText(voiceFinal, voiceSession));
       voiceSession = "";
       if (!voiceStopping && Date.now() - voiceStart < VOICE_MAX_MS) {
-        setTimeout(() => { if (!voiceStopping) { try { rec.start(); } catch (_) {} } }, 120);
+        setTimeout(() => { if (!voiceStopping) launchRec(); }, 150);
         return;
       }
       finishVoice();
@@ -3078,11 +3080,23 @@ function launchRec() {
     finishVoice(true);
   }
 }
+// Joins two pieces of transcript without repeating anything they share.
+// Some engines hand back the whole utterance again after a restart, so a
+// plain concatenation grows: "call Evan and make a call Evan and make a new".
+function mergeText(a, b) {
+  a = String(a || "").trim(); b = String(b || "").trim();
+  if (!a) return b;
+  if (!b) return a;
+  if (a === b || a.endsWith(b)) return a;      // already contained
+  if (b.startsWith(a)) return b;               // b is the same, only longer
+  return a + " " + b;
+}
+
 // Recognisers stutter: a word or short phrase repeated back to back is almost
 // always an artefact, not speech. Collapse those, leave everything else alone.
 function despam(t) {
   let s = String(t || "").replace(/\s+/g, " ").trim();
-  const re = /(^|\s)((?:\S+\s+){0,3}?\S+)(?:\s+\2)+(?=\s|$)/gi;
+  const re = /(^|\s)((?:\S+\s+){0,7}?\S+)(?:\s+\2)+(?=\s|$)/gi;
   for (let pass = 0; pass < 5; pass++) {     // "Јави јави се јави се" needs more than one sweep
     const before = s;
     s = s.replace(re, "$1$2");
