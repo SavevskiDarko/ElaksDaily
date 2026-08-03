@@ -158,7 +158,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 #loadbar button{font-weight:700;text-decoration:underline;flex:none}
 .hcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
 .hcard h3{font-family:var(--cond);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
-.hrow{display:flex;justify-content:space-between;align-items:center;padding:3px 0}
+.hrow{display:flex;justify-content:space-between;align-items:center;padding:3px 0;gap:10px}
+.htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
 .hrow b{font-family:var(--mono)}
 .hbig{font-size:26px;font-weight:700;font-family:var(--cond)}
 .hflag{color:var(--danger);font-weight:600}
@@ -776,25 +778,45 @@ function emptyToday() {
     <button class="btn sm ghost" style="margin-top:10px;display:inline-flex;width:auto"
       onclick="state.ctxFilter='all';state.mineOnly=false;renderToday()">Show everything</button></div>`;
 }
-function renderToday() {
-  const today = todayStr();
-  const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
-  if (q) {
-    const hits = state.tasks.filter((t) =>
-      (t.title || "").toLowerCase().includes(q) || (t.notes || "").toLowerCase().includes(q) ||
-      (t.checklist || []).some((c) => (c.text || "").toLowerCase().includes(q)));
-    $("ctx-filter").innerHTML = "";
-    $("today-list").innerHTML = hits.length
-      ? `<div class="sec">${hits.length} result${hits.length > 1 ? "s" : ""}</div>` + hits.map(taskRow(today)).join("")
-      : `<div class="empty">Nothing found for "${esc(q)}".<br>
-          <button class="btn sm ghost" style="margin-top:10px;display:inline-flex;width:auto"
-            onclick="$('tk-search').value='';renderToday()">Clear search</button></div>`;
-    $("week-list").innerHTML = "";
-    return;
-  }
+function renderCtxChips() {
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("")
     + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`;
+}
+// A search result needs its date and, if finished, when — the plain row shows neither.
+const searchRow = (today) => (t) => {
+  const done = !t.recurrence && t.done;
+  const when = done ? "done " + dmy(t.last_done)
+    : t.recurrence ? "repeats"
+    : t.due_date ? dmy(t.due_date) : "no date";
+  return `<div class="card task ${done ? "done" : ""}">
+    <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
+    <span class="led ${t.context}"></span>
+    <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
+    <span class="t-time">${when}</span>
+  </div>`;
+};
+function renderToday() {
+  const today = todayStr();
+  const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
+  renderCtxChips();
+  if (q) {
+    const hits = state.tasks.filter((t) => taskInScope(t, state.ctxFilter) && (
+      (t.title || "").toLowerCase().includes(q) || (t.notes || "").toLowerCase().includes(q) ||
+      (t.checklist || []).some((c) => (c.text || "").toLowerCase().includes(q))));
+    const open = hits.filter((t) => !isDoneOn(t, today) || t.recurrence);
+    const done = hits.filter((t) => !t.recurrence && t.done);
+    $("today-list").innerHTML = hits.length
+      ? `<div class="sec tapp" onclick="$('tk-search').value='';renderToday()">
+           ${hits.length} result${hits.length > 1 ? "s" : ""} <span class="muted" style="font-weight:400">· clear ✕</span></div>`
+        + open.map(searchRow(today)).join("")
+        + (done.length ? '<div class="sec">Completed</div>' + done.map(searchRow(today)).join("") : "")
+      : `<div class="empty">Nothing found for "${esc(q)}"${state.ctxFilter !== "all" || state.mineOnly ? " with these filters" : ""}.<br>
+          <button class="btn sm ghost" style="margin-top:10px;display:inline-flex;width:auto"
+            onclick="$('tk-search').value='';state.ctxFilter='all';state.mineOnly=false;renderToday()">Clear search and filters</button></div>`;
+    $("week-list").innerHTML = "";
+    return;
+  }
   const vis = (t) => taskInScope(t, state.ctxFilter);
   const byPrio = (a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0);
   const B = taskBuckets(today, state.ctxFilter);
@@ -893,7 +915,7 @@ async function toggleTask(id, onDate) {
       state.doneSet.add(id + ":" + day);
     }
   } catch { return; }
-  Object.assign(t, upd); renderToday(); updateBadges();
+  Object.assign(t, upd); render();
 }
 let tkChecklist = [];
 function openTaskSheet(id) {
@@ -3290,6 +3312,11 @@ function renderHome() {
   const today = todayStr();
   const B = taskBuckets(today);                 // same numbers as the Tasks tab and the badge
   const byCtx = (c) => B.todays.filter((t) => t.context === c).length;
+  // starred first, then by time, untimed last — the preview shows what matters,
+  // not whatever the query happened to return first
+  const upNext = B.todays.slice().sort((a, b) =>
+    (b.priority ? 1 : 0) - (a.priority ? 1 : 0)
+    || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
   let html = `<div class="hcard" onclick="tab('today')">
     <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
     <div class="row" style="justify-content:space-between;align-items:flex-end">
@@ -3297,11 +3324,15 @@ function renderHome() {
       <span class="muted">${B.late ? `<span class="hflag">${B.late} overdue</span> · ` : ""}${myCtx().map((c) => `${CTX[c]} ${byCtx(c)}`).join(" · ")}</span>
     </div>
     ${B.undated.length ? `<div class="hrow"><span>No date yet</span><b>${B.undated.length}</b></div>` : ""}
-    ${B.todays.slice(0, 3).map((t) => `<div class="hrow">
-      <span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
-      <span class="muted mono" style="display:flex;align-items:center;gap:7px">
+    ${upNext.slice(0, 3).map((t) => `<div class="hrow">
+      <span style="display:flex;align-items:center;gap:9px;min-width:0">
+        <button class="tick sm" onclick="event.stopPropagation();toggleTask('${t.id}')" aria-label="done"></button>
+        <span class="led ${t.context}"></span>
+        <span class="htxt">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span></span>
+      <span class="muted mono" style="display:flex;align-items:center;gap:7px;flex:none">
         ${t.assigned_to && t.assigned_to !== state.uid ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
         ${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
+    ${B.todays.length > 3 ? `<div class="hrow"><span class="muted">+ ${B.todays.length - 3} more</span><span class="muted">›</span></div>` : ""}
   </div>`;
 
   if (state.perm.elaks) {
