@@ -167,6 +167,11 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hnote.warn{color:var(--danger)}
 .htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
+.updbar{position:fixed;left:12px;right:12px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:35;
+  background:var(--navy);color:#fff;border-radius:12px;padding:11px 14px;display:none;
+  align-items:center;justify-content:space-between;gap:10px;box-shadow:0 6px 18px rgba(30,58,95,.4)}
+.updbar.on{display:flex}
+.updbar button{background:var(--amber);color:var(--navy-deep);border-radius:9px;padding:7px 14px;font-weight:700}
 .hrow b{font-family:var(--mono)}
 .hbig{font-size:26px;font-weight:700;font-family:var(--cond)}
 .hflag{color:var(--danger);font-weight:600}
@@ -362,6 +367,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <p class="muted" style="margin-top:14px">Centrala · version 1.2</p>
   </div>
 
+  <div class="updbar" id="updbar"><span>A newer version is ready</span>
+    <button onclick="location.reload()">Reload</button></div>
   <button class="mic" id="mic" onclick="startVoice()" aria-label="New task by voice" title="New task by voice">
     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -556,6 +563,27 @@ async function refreshAll(only) {
 
 /* ---------------- NAV ---------------- */
 async function retryLoad() { await refreshAll(); render(); }
+
+// The app sits open in the background for days, so a deploy never reaches it
+// until the page is really reloaded — switching to it from recents just resumes
+// the old page. Check whenever it comes back to the foreground.
+const BUILD = "20260803-154819";
+let lastBuildCheck = Date.now();
+async function checkForUpdate() {
+  if (Date.now() - lastBuildCheck < 60000) return;
+  lastBuildCheck = Date.now();
+  try {
+    const res = await fetch("./index.html?ts=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/const BUILD = "([^"]+)"/);
+    if (!m || m[1] === BUILD) return;
+    const busy = sheetOpen || (document.activeElement && /input|textarea|select/i.test(document.activeElement.tagName));
+    if (!busy) return location.reload();      // nothing in progress — just take it
+    $("updbar").classList.add("on");          // mid-edit: let him finish first
+  } catch (e) { /* offline — nothing to do */ }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
+window.addEventListener("focus", checkForUpdate);
 
 // A notification hands its task over through the URL (or a message when the
 // app is already open); act on it, then clean the address bar.
