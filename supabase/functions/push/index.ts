@@ -110,9 +110,13 @@ Deno.serve(async (req) => {
     const open = openToday(all ?? []);
     const byCtx = (c: string) => open.filter((t) => t.context === c).length;
     const lowCount = (stock ?? []).filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
-    let body = `Work: ${byCtx("work")} · Elaks: ${byCtx("elaks")} · Personal: ${byCtx("personal")} · Apts: ${byCtx("apts")}`;
+    // the per-area counts already contain these, so name them rather than
+    // sending a second message that repeats the same tasks
+    const lateN = open.filter((t) => !t.recurrence && t.due_date && t.due_date < today).length;
+    let body = lateN ? `${lateN} overdue · ` : "";
+    body += `Work: ${byCtx("work")} · Elaks: ${byCtx("elaks")} · Personal: ${byCtx("personal")} · Apts: ${byCtx("apts")}`;
     if (lowCount) body += ` · Low stock: ${lowCount}`;
-    await sendToAll("Good morning — today", body, "digest", (r) => r.role === "owner");
+    await sendToAll(`Good morning — ${open.length} today`, body, "digest", (r) => r.role === "owner");
     await db.from("app_settings").update({ value: today }).eq("key", "digest_sent_on");
   }
 
@@ -263,7 +267,8 @@ Deno.serve(async (req) => {
   } catch (e) { console.error("ical sync", e); }
 
 
-  // ---- 7. one nudge a day for anything still overdue ----
+  // ---- 7. overdue nudge for the team (the owner gets this inside the digest,
+  //         so sending it here as well would be the same news twice) ----
   try {
     const { data: cfgO } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "overdue_sent_on"]);
     const getO = (k: string) => String((cfgO ?? []).find((r: any) => r.key === k)?.value ?? "").replace(/"/g, "");
@@ -276,7 +281,7 @@ Deno.serve(async (req) => {
         for (const t of late!) byCtx[t.context] = (byCtx[t.context] ?? 0) + 1;
         const body = Object.entries(byCtx).map(([c, n]) => `${c}: ${n}`).join(" \u00b7 ");
         await sendToAll(`${late!.length} task(s) overdue`, body, "overdue",
-          (r) => r.role === "owner" || Object.keys(byCtx).some((c) => (r.task_contexts ?? []).includes(c)),
+          (r) => r.role !== "owner" && Object.keys(byCtx).some((c) => (r.task_contexts ?? []).includes(c)),
           late!.length === 1 ? late![0].id : null);
       }
       await db.from("app_settings").upsert({ key: "overdue_sent_on", value: today }, { onConflict: "key" });
