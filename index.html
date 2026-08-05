@@ -309,6 +309,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     </div>
     <div id="el-body-pur" style="display:none">
       <input class="search" id="pur-list-search" placeholder="Search supplier or document…" oninput="renderPurchases()">
+      <input type="file" accept="image/*" capture="environment" id="doc-file" style="display:none" onchange="readDocPhoto(this)">
+      <button class="btn ghost" style="margin-bottom:10px" onclick="$('doc-file').click()">📷 Photograph a supplier note</button>
       <div id="pur-summary"></div>
       <div id="pur-list"></div>
     </div>
@@ -553,7 +555,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260805-213914";
+const BUILD = "20260805-214734";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3622,6 +3624,118 @@ const purchaseBalance = (p) => (parseFloat(p.total) || 0) - (parseFloat(p.paid_a
 const purchaseOverdue = (p) => !!p.due_date && purchaseBalance(p) > 0.005 && p.due_date < todayStr();
 
 let purItems = [];
+
+// Photograph a delivery note; the server reads it and hands back lines to check.
+function readDocPhoto(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  if (setting("ai_key_set", "") !== "yes")
+    return alert("Add your API key first: Settings → Document reading.");
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = async () => {
+      // big enough to read small print, small enough to send quickly
+      const scale = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(im.naturalWidth * scale);
+      c.height = Math.round(im.naturalHeight * scale);
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(im, 0, 0, c.width, c.height);
+      const b64 = c.toDataURL("image/jpeg", 0.85).split(",")[1];
+      await sendDocForReading(b64);
+    };
+    im.onerror = () => toast("Could not read that photo");
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+
+async function sendDocForReading(b64) {
+  openSheet(`<h2>Reading the note…</h2>
+    <div class="skel tall"></div><div class="skel"></div><div class="skel"></div>
+    <p class="muted">This takes a few seconds. Nothing is saved until you confirm.</p>`);
+  try {
+    const { data: sess } = await db.auth.getSession();
+    const res = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/read-doc", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (sess?.session?.access_token || ""),
+        "apikey": CONFIG.SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ image: b64, mediaType: "image/jpeg" }),
+    });
+    const out = await res.json();
+    if (!res.ok || out.error) throw new Error(out.error || ("Reading failed (" + res.status + ")"));
+    showReadResult(out);
+  } catch (e) {
+    console.error(e);
+    openSheet(`<h2>Could not read it</h2>
+      <p class="muted">${esc(e.message || "Something went wrong.")}</p>
+      <button class="btn" onclick="$('doc-file').click()">Try another photo</button>
+      <button class="btn ghost" onclick="closeSheet()">Close</button>`);
+  }
+}
+
+// Everything parsed is shown for checking, with the arithmetic tested against
+// the total printed on the paper before anything is saved.
+function showReadResult(d) {
+  purItems = (d.items || []).map((it) => ({
+    article_id: null,
+    name: [it.code ? it.code + " ·" : "", it.name].filter(Boolean).join(" ").trim(),
+    qty: Number(it.qty) || 1,
+    price: Number(it.line_total_gross) && Number(it.qty)
+      ? Math.round((Number(it.line_total_gross) / Number(it.qty)) * 100) / 100
+      : Number(it.unit_price_gross) || 0,
+    vat: it.vat_rate === 5 ? 5 : 18,
+  }));
+  const computed = purchaseTotals(purItems).gross;
+  const printed = Number(d.printed_total_gross);
+  const ok = Number.isFinite(printed) ? Math.abs(printed - computed) < 1 : null;
+  docRead = { supplier: d.supplier || "", doc_no: d.doc_no || "", doc_date: d.doc_date || todayStr(),
+              due_date: d.due_date || "", notes: d.notes || "" };
+  openSheet(`
+    <h2>Check the note</h2>
+    <p class="muted">${esc(docRead.supplier || "supplier not read")}${docRead.doc_no ? " · " + esc(docRead.doc_no) : ""}
+      · ${purItems.length} line(s)</p>
+    <div class="card" style="border-color:${ok === false ? "var(--danger)" : "var(--personal)"}">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">Lines add up to</span>
+        <span class="mono">${fmt(computed)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">Printed on the note</span>
+        <span class="mono">${Number.isFinite(printed) ? fmt(printed) + " ден." : "not read"}</span></div>
+      <div class="muted" style="margin-top:4px">${ok === true
+        ? "✓ They match — the lines below were read correctly."
+        : ok === false
+          ? "These do not match. A line has been misread — check the quantities and prices below before saving."
+          : "The printed total could not be read, so it could not be checked. Compare it yourself."}</div>
+    </div>
+    ${d.notes ? `<p class="muted" style="font-size:12.5px">${esc(d.notes)}</p>` : ""}
+    <button class="btn" onclick="openParsedPurchase()">Open as a purchase</button>
+    <button class="btn ghost" onclick="$('doc-file').click()">Photograph again</button>
+  `);
+}
+let docRead = null;
+function openParsedPurchase() {
+  const d = docRead || {};
+  closeSheet();
+  setTimeout(() => {
+    const keep = purItems.slice();
+    openPurchaseSheet();
+    setTimeout(() => {
+      purItems = keep;
+      if ($("pu-sup")) $("pu-sup").value = d.supplier || "";
+      if ($("pu-no")) $("pu-no").value = d.doc_no || "";
+      if ($("pu-date")) $("pu-date").value = d.doc_date || todayStr();
+      if ($("pu-due")) $("pu-due").value = d.due_date || "";
+      if ($("pu-note") && d.notes) $("pu-note").value = d.notes;
+      renderPurItems();
+      toast("Check the lines, then Save");
+    }, 140);
+  }, 240);
+}
 function openPurchaseSheet(id) {
   const p = id ? state.purchases.find((x) => x.id === id)
               : { supplier: "", doc_no: "", doc_date: todayStr(), due_date: "", items: [], total: 0 };
