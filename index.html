@@ -553,7 +553,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260805-213507";
+const BUILD = "20260805-213914";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2634,18 +2634,16 @@ async function saveAiKey() {
   if (!/^sk-ant-/.test(key)) {
     if (!confirm("That does not look like an Anthropic key (they start with sk-ant-).\n\nSave it anyway?")) return;
   }
-  try {
-    await dbq(db.from("secrets").upsert({ name: "anthropic_api_key", value: key }, { onConflict: "name" }), "Not saved");
-    await dbq(db.from("app_settings").upsert({ key: "ai_key_set", value: "yes" }, { onConflict: "key" }), "Not saved");
-  } catch { return; }
+  // goes through a function that runs with the database's own rights, so the
+  // key can be written to a table nothing signed in is allowed to read
+  try { await dbq(db.rpc("set_secret", { p_name: "anthropic_api_key", p_value: key }), "Not saved"); }
+  catch { return; }
   closeSheet(); await refreshAll(["settings"]); render(); toast("Key saved");
 }
 async function removeAiKey() {
   if (!confirm("Remove the saved key? Reading photographed notes will stop working.")) return;
-  try {
-    await dbq(db.from("secrets").delete().eq("name", "anthropic_api_key"), "Not removed");
-    await dbq(db.from("app_settings").upsert({ key: "ai_key_set", value: "no" }, { onConflict: "key" }), "Not saved");
-  } catch { return; }
+  try { await dbq(db.rpc("clear_secret", { p_name: "anthropic_api_key" }), "Not removed"); }
+  catch { return; }
   closeSheet(); await refreshAll(["settings"]); render(); toast("Key removed");
 }
 
