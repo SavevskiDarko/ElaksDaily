@@ -553,7 +553,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260803-204537";
+const BUILD = "20260805-213507";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2547,6 +2547,9 @@ function renderSettings() {
     "openSetSheet('apts')");
 
   if (state.perm.owner) html += '<div class="setgrp">Administration</div>'
+    + row("&#128274;", "Document reading",
+        setting("ai_key_set", "") === "yes" ? "Key saved · reading notes is on" : "Not set up — add your API key",
+        "openSetSheet('aikey')")
     + row("&#128101;", "Team", `${(state.team || []).length} ${(state.team || []).length === 1 ? "person" : "people"} with access`, "openSetSheet('team')")
     + row("&#128190;", "Backup", "Download everything as one file", "openSetSheet('backup')");
 
@@ -2597,6 +2600,23 @@ function openSetSheet(kind) {
     openSheet(`<h2>Backup</h2>
       <button class="btn" onclick="backupJson()">Download full backup</button>
       <p class="muted" style="font-size:12.5px">Every task, article, offer, guest, bill, purchase and cash entry in one file. Photos are left out so it stays small and reliable. Worth doing once a month — keep it somewhere that is not your phone.</p>`);
+  } else if (kind === "aikey") {
+    const on = setting("ai_key_set", "") === "yes";
+    openSheet(`<h2>Document reading</h2>
+      <p class="muted">Lets Centrala read a photographed supplier note and fill in the purchase for you.</p>
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <b>${on ? "Key saved" : "No key yet"}</b>
+          <span class="${on ? "hok" : "muted"}">${on ? "ready" : "not set"}</span></div>
+        <div class="muted" style="font-size:12.5px;margin-top:4px">
+          The key is stored so that only the server can read it — the app writes it and cannot read it back, and neither can anyone signed in.</div>
+      </div>
+      <label>API key</label>
+      <input id="ai-key" type="password" autocomplete="off" spellcheck="false"
+        placeholder="${on ? "Enter a new key to replace the saved one" : "sk-ant-..."}">
+      <button class="btn" onclick="saveAiKey()">${on ? "Replace key" : "Save key"}</button>
+      ${on ? '<button class="btn danger" onclick="removeAiKey()">Remove key</button>' : ""}
+      <p class="muted" style="font-size:12.5px">Create one at console.anthropic.com → API keys. Reading a note costs a fraction of a denar; you are billed by Anthropic, not through Centrala.</p>`);
   } else if (kind === "about") {
     openSheet(`<h2>Centrala</h2>
       <div class="hrow"><span class="muted">Version</span><b class="mono">${BUILD}</b></div>
@@ -2604,6 +2624,29 @@ function openSetSheet(kind) {
       <div class="hrow"><span class="muted">Access</span><b>${[state.perm.elaks ? "Elaks" : "", state.perm.apts ? "Apartments" : ""].filter(Boolean).join(" · ") || "Tasks only"}</b></div>
       <button class="btn ghost" style="margin-top:14px" onclick="lastBuildCheck=0;checkForUpdate();toast('Checking…')">Check for updates</button>`);
   }
+}
+
+// The key goes into a table the app can write but never read: there is no
+// select policy on it, so only the server (service role) can fetch it.
+async function saveAiKey() {
+  const key = ($("ai-key").value || "").trim();
+  if (!key) return toast("Paste the key first");
+  if (!/^sk-ant-/.test(key)) {
+    if (!confirm("That does not look like an Anthropic key (they start with sk-ant-).\n\nSave it anyway?")) return;
+  }
+  try {
+    await dbq(db.from("secrets").upsert({ name: "anthropic_api_key", value: key }, { onConflict: "name" }), "Not saved");
+    await dbq(db.from("app_settings").upsert({ key: "ai_key_set", value: "yes" }, { onConflict: "key" }), "Not saved");
+  } catch { return; }
+  closeSheet(); await refreshAll(["settings"]); render(); toast("Key saved");
+}
+async function removeAiKey() {
+  if (!confirm("Remove the saved key? Reading photographed notes will stop working.")) return;
+  try {
+    await dbq(db.from("secrets").delete().eq("name", "anthropic_api_key"), "Not removed");
+    await dbq(db.from("app_settings").upsert({ key: "ai_key_set", value: "no" }, { onConflict: "key" }), "Not saved");
+  } catch { return; }
+  closeSheet(); await refreshAll(["settings"]); render(); toast("Key removed");
 }
 
 async function saveAptSettings() {
