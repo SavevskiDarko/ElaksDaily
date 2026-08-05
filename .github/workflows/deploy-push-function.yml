@@ -1,4 +1,4 @@
-name: Deploy push function
+name: Deploy edge functions
 
 on:
   push:
@@ -17,4 +17,6 @@ jobs:
       - name: Deploy edge function
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase functions deploy push --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
+        run: |
+          supabase functions deploy push --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
+          supabase functions deploy read-doc --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
