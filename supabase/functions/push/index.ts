@@ -121,13 +121,23 @@ Deno.serve(async (req) => {
   }
 
 
-  // ---- 4. unpaid bills reminder (once per month, from the configured day) ----
+  // ---- 4. unpaid bills reminder ----
+  // Bills arrive the month after they cover: on 5 August the electricity bill
+  // on the table is July's. So this counts the PREVIOUS month, and keeps
+  // reminding weekly until every one of them is entered and paid.
   try {
     const { data: cfg } = await db.from("app_settings").select("key, value").in("key", ["bills_day", "bills_sent_on", "bill_types"]);
     const get = (k: string) => String((cfg ?? []).find((r: any) => r.key === k)?.value ?? "").replace(/"/g, "");
     const billsDay = parseInt(get("bills_day")) || 5;
-    const month = today.slice(0, 7);
-    if (dom >= billsDay && hhmm >= digestHour && get("bills_sent_on") !== month) {
+    const prev = new Date(today + "T12:00Z");
+    prev.setUTCMonth(prev.getUTCMonth() - 1);
+    const month = prev.toISOString().slice(0, 7);          // the month the bills are FOR
+    const label = prev.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+    // marker is "<month>@<date last sent>", so it can repeat weekly
+    const [lastMonth, lastSent] = String(get("bills_sent_on") || "").split("@");
+    const daysSince = lastSent ? Math.floor((Date.parse(today) - Date.parse(lastSent)) / 86400000) : 999;
+    const dueNow = lastMonth !== month || daysSince >= 7;
+    if (dom >= billsDay && hhmm >= digestHour && dueNow) {
       const { data: apts } = await db.from("apartments").select("id").eq("active", true);
       const { data: bs } = await db.from("bills").select("paid").eq("month", month + "-01");
       // the list of bill types lives in app_settings, written by the app,
@@ -141,10 +151,11 @@ Deno.serve(async (req) => {
       const paidN = (bs ?? []).filter((b: any) => b.paid).length;
       const unpaid = Math.max(0, need - paidN);
       if (unpaid > 0) {
-        await sendToAll("Bills to pay", `${unpaid} unpaid for ${month}`, "bills",
+        const again = lastMonth === month ? " — still" : "";
+        await sendToAll("Bills to pay", `${unpaid} unpaid for ${label}${again}`, "bills",
           (r) => r.role === "owner" || !!r.see_apts);
       }
-      await db.from("app_settings").upsert({ key: "bills_sent_on", value: month }, { onConflict: "key" });
+      await db.from("app_settings").upsert({ key: "bills_sent_on", value: month + "@" + today }, { onConflict: "key" });
     }
   } catch (e) { console.error("bills reminder", e); }
 
