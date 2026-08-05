@@ -131,3 +131,5 @@ Deno.serve(async (req) => {
     return json({ error: e instanceof Error ? e.message : "Unexpected error" }, 500);
   }
 });
+
+// deployed via CI
