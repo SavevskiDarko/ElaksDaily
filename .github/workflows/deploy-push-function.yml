@@ -20,3 +20,4 @@ jobs:
         run: |
           supabase functions deploy push --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
           supabase functions deploy read-doc --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
+          supabase functions deploy ical --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
