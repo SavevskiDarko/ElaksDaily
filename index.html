@@ -559,7 +559,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260806-061643";
+const BUILD = "20260806-110641";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2701,6 +2701,9 @@ function openSetSheet(kind) {
   } else if (kind === "backup") {
     openSheet(`<h2>Backup</h2>
       <button class="btn" onclick="backupJson()">Download full backup</button>
+      <input type="file" accept="application/json,.json" id="restore-file" style="display:none" onchange="restoreJson(this)">
+      <button class="btn ghost" onclick="$('restore-file').click()">Restore from a backup file…</button>
+      <p class="muted" style="font-size:12.5px">Restoring adds back anything missing and updates anything that changed. It never deletes what is already there, so it is safe to run against a working database.</p>
       <p class="muted" style="font-size:12.5px">Every task, article, offer, guest, bill, purchase and cash entry in one file. Photos are left out so it stays small and reliable. Worth doing once a month — keep it somewhere that is not your phone.</p>`);
   } else if (kind === "aikey") {
     const on = setting("ai_key_set", "") === "yes";
@@ -2730,6 +2733,52 @@ function openSetSheet(kind) {
 
 // The key goes into a table the app can write but never read: there is no
 // select policy on it, so only the server (service role) can fetch it.
+// Putting a backup back. Order matters: a stay needs its apartment to exist
+// first, an offer needs its client, and so on.
+const RESTORE_ORDER = ["app_settings", "user_roles", "clients", "apartments", "articles",
+  "offers", "purchases", "stays", "bills", "tasks", "task_templates", "task_completions",
+  "ical_feeds", "movements", "article_prices", "offer_payments", "elaks_cash"];
+
+function restoreJson(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = async () => {
+    let file;
+    try { file = JSON.parse(fr.result); } catch { return alert("That file is not a Centrala backup."); }
+    const data = file.data || file;              // the export nests tables under "data"
+    const tables = RESTORE_ORDER.filter((t) => Array.isArray(data[t]) && data[t].length);
+    if (!tables.length) return alert("Nothing to restore — the file has no records in it.");
+    const summary = tables.map((t) => `· ${t.replace(/_/g, " ")}: ${data[t].length}`).join("\n");
+    if (!confirm(`Restore this backup?\n\n${summary}\n\nExisting records with the same id are updated; nothing is deleted.`)) return;
+    openSheet('<h2>Restoring…</h2><div class="skel"></div><div class="skel"></div>');
+    const done = [], failed = [];
+    for (const t of tables) {
+      try {
+        // in batches, so one large table cannot time out the whole restore
+        for (let i = 0; i < data[t].length; i += 200) {
+          const chunk = data[t].slice(i, i + 200);
+          const { error } = await db.from(t).upsert(chunk, { onConflict: t === "app_settings" ? "key" : "id" });
+          if (error) throw error;
+        }
+        done.push(`${t.replace(/_/g, " ")}: ${data[t].length}`);
+      } catch (e) {
+        console.error("restore", t, e);
+        failed.push(`${t.replace(/_/g, " ")} — ${e.message || "failed"}`);
+      }
+    }
+    await refreshAll();
+    openSheet(`<h2>Restore finished</h2>
+      ${done.length ? '<div class="sec">Put back</div>' + done.map((d) => `<div class="mov"><span>${esc(d)}</span><span class="hok">✓</span></div>`).join("") : ""}
+      ${failed.length ? '<div class="sec" style="color:var(--danger)">Could not restore</div>'
+        + failed.map((d) => `<div class="mov"><span>${esc(d)}</span></div>`).join("")
+        + '<p class="muted" style="font-size:12.5px">Usually a table that no longer has the same columns. The rest went in.</p>' : ""}
+      <button class="btn" onclick="closeSheet();render()">Done</button>`);
+  };
+  fr.readAsText(f);
+}
+
 async function saveAiKey() {
   const key = ($("ai-key").value || "").trim();
   if (!key) return toast("Paste the key first");
@@ -2793,8 +2842,10 @@ async function backupJson() {
   toast("Preparing backup…");
   // photos are deliberately excluded: they are large, and a backup that fails
   // when you need it is worse than one that leaves images behind
-  const tables = ["tasks", "articles", "movements", "clients", "offers",
-                  "apartments", "stays", "bills", "elaks_cash", "user_roles", "app_settings"];
+  const tables = ["tasks", "task_completions", "task_templates", "articles", "article_prices",
+                  "movements", "clients", "offers", "offer_payments", "purchases",
+                  "apartments", "stays", "bills", "ical_feeds", "elaks_cash",
+                  "user_roles", "app_settings"];
   const out = { app: "Centrala", version: 1, exported_at: new Date().toISOString(), data: {} };
   const missed = [];
   for (const t of tables) {
@@ -3190,9 +3241,31 @@ function openAptSheet(id) {
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
     <label>Notes (opt.)</label><input id="ap-notes" value="${esc(a.notes || "")}">
     <button class="btn" onclick="saveApt('${id || ""}')">Save</button>
+    ${id ? outFeedBlock(a) : ""}
     ${id ? feedBlock(id) : '<p class="muted" style="font-size:12.5px">Save the apartment first, then you can connect Booking.com and Airbnb to it.</p>'}
     ${id ? `<button class="btn danger" onclick="delApt('${id}')">Deactivate</button>` : ""}
   `);
+}
+
+// The other direction: what Centrala publishes, so a booking taken here
+// closes the same nights on the platforms.
+function outFeedBlock(a) {
+  if (!a.feed_token) return `<div class="sec">Your calendar</div>
+    <p class="muted" style="font-size:12.5px">Run feeds-audit-migration.sql to switch this on.</p>`;
+  const base = CONFIG.SUPABASE_URL + "/functions/v1/ical?apt=" + a.feed_token;
+  const link = (label, url, why) => `<div class="card">
+    <div class="row" style="justify-content:space-between"><b>${label}</b>
+      <button class="chip" onclick="copyText('${url}')">Copy link</button></div>
+    <div class="muted" style="font-size:11.5px;word-break:break-all">${esc(url)}</div>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">${why}</div></div>`;
+  return `<div class="sec">Your calendar (give these to the platforms)</div>
+    ${link("For Booking.com", base + "&for=booking", "Paste into Extranet → Calendar sync → Import calendar.")}
+    ${link("For Airbnb", base + "&for=airbnb", "Paste into Calendar → Availability → Import calendar.")}
+    <p class="muted" style="font-size:12.5px">Each link leaves out that platform's own bookings, so nothing bounces back. The feed shows only which nights are busy — never a guest's name or price. Keep the links private.</p>`;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); toast("Link copied"); }
+  catch { prompt("Copy this link", t); }
 }
 
 /* ---------- Booking.com / Airbnb calendar feeds ---------- */
