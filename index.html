@@ -560,7 +560,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260806-112303";
+const BUILD = "20260806-170542";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3795,14 +3795,16 @@ function renderHome() {
         <b class="hflag">${pendingStock.length}</b></div>` : ""}
       ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
         <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.</b></div>
-      <div class="hnote ${billsLate.length ? "warn" : ""}">${billsOpen.length} bill${billsOpen.length > 1 ? "s" : ""}${billsLate.length ? ` · ${billsLate.length} overdue` : ""}</div>` : ""}
+      <div class="hnote ${billsLate.length ? "warn" : ""}">${billsOpen.length} ${T(billsOpen.length > 1 ? "bills" : "bill", "фактури")}${billsLate.length ? ` · ${billsLate.length} ${T("overdue", "задоцнети")}` : ""}</div>` : ""}
     </div>`;
   }
 
   if (state.perm.apts) {
     const occ = new Set(state.stays.filter((s) => s.check_in <= today && s.check_out > today).map((s) => s.apartment_id)).size;
     const curM = today.slice(0, 7);
-    const paidN = state.bills.filter((b) => (b.month || "").slice(0, 7) === curM && b.paid).length;
+    // bills arrive the month after they cover: in August you are chasing July's
+    const billM = prevMonth(curM);
+    const paidN = state.bills.filter((b) => (b.month || "").slice(0, 7) === billM && b.paid).length;
     const need = state.apartments.length * BILL_TYPES.length;
     const unpaid = Math.max(0, need - paidN);
     const inc = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 7) === curM), (s) => s.amount);
@@ -3812,8 +3814,9 @@ function renderHome() {
     html += `<div class="hcard" onclick="state.aptView='stays';tab('apt')">
       <h3>Apartments</h3>
       <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
-      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " in" : ""}${inn && out ? " · " : ""}${out ? out + " out" : ""}</b></div>` : ""}
-      <div class="hrow"><span>Bills this month</span><b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " unpaid" : "all paid"}</b></div>
+      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
+      <div class="hrow"><span>${T("Bills", "Сметки")} · ${monthName(billM)}</span>
+        <b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " " + T("unpaid", "неплатени") : T("all paid", "сите платени")}</b></div>
       <div class="hrow"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
     </div>`;
   }
@@ -4375,10 +4378,32 @@ const MK = {
   "paid": "платено", "part paid": "делумно платено", "unpaid": "неплатено",
   "sent": "испратена", "accepted": "прифатена", "draft": "нацрт", "rejected": "одбиена",
   "arrives today": "пристигнува денес", "checked out today": "се одјави денес",
+  "all paid": "сите платени", "Bills": "Сметки", "in": "доаѓаат", "out": "заминуваат",
+  "Installed equipment": "Вградена опрема", "+ Add installed equipment": "+ Додај вградена опрема",
+  "Nothing recorded yet.": "Сè уште нема ништо.", "Serial number": "Сериски број",
+  "Where": "Каде", "Installed on": "Вградено на", "Warranty (months)": "Гаранција (месеци)",
+  "What is it": "Што е", "Client": "Клиент", "Note": "Белешка",
+  "Recent activity": "Последна активност", "Language / Јазик": "Јазик",
+  "Restore from a backup file…": "Врати од резервна копија…",
+  "Download full backup": "Преземи резервна копија",
   "synced": "синхронизирано", "you": "ти", "none overdue": "нема задоцнети",
   "nothing due": "нема за денес", "due today": "за денес", "no date": "без датум",
 };
 
+const MONTHS_MK = ["јануари", "февруари", "март", "април", "мај", "јуни",
+  "јули", "август", "септември", "октомври", "ноември", "декември"];
+// for sentences assembled from pieces — the dictionary only matches whole strings
+const T = (en, mk) => (langMk() ? mk : en);
+const monthName = (ym) => {
+  const m = Number(String(ym).slice(5, 7)) - 1;
+  return langMk() ? (MONTHS_MK[m] || "")
+    : new Date(String(ym) + "-02T12:00").toLocaleDateString("en-GB", { month: "long" });
+};
+const prevMonth = (ym) => {
+  const d = new Date(String(ym) + "-02T12:00");
+  d.setMonth(d.getMonth() - 1);
+  return d.toLocaleDateString("sv-SE").slice(0, 7);
+};
 const langMk = () => { try { return localStorage.getItem("centrala_lang") === "mk"; } catch { return false; } };
 function setLang(mk) {
   try { localStorage.setItem("centrala_lang", mk ? "mk" : "en"); } catch (e) { console.warn(e); }
