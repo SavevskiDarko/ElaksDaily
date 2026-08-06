@@ -559,7 +559,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260806-044155";
+const BUILD = "20260806-061643";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1213,6 +1213,7 @@ function renderInv() {
   const pv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.purchase_price || 0), 0);
   const sv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.sell_price || 0), 0);
   const lowN = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
+  const dupN = duplicateGroups().length;
   const sum = `<div class="card">
     <div class="row" style="justify-content:space-between"><span class="muted">Stock value (purchase)</span><b class="mono">${fmt(pv)} ден.</b></div>
     <div class="row" style="justify-content:space-between"><span class="muted">Stock value (sell)</span><b class="mono">${fmt(sv)} ден.</b></div>
@@ -1223,6 +1224,8 @@ function renderInv() {
       <span class="muted">Monthly report</span><b>›</b></div>
     <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openOrderSheet()">
       <span class="muted">Order list${lowN ? ` (${lowN})` : ""}</span><b>›</b></div>
+    ${dupN ? `<div class="row" style="justify-content:space-between;margin-top:4px" onclick="openDuplicates()">
+      <span class="muted">Possible duplicates</span><b class="hflag">${dupN} ›</b></div>` : ""}
   </div>`;
   $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
     <div class="card art" onclick="openArticleDetail('${a.id}')">
@@ -1463,9 +1466,12 @@ function openArticleSheet(id) {
     <label>Specs for offers (each line starts with --)</label>
     <textarea id="ar-specs" rows="5" placeholder="-- 40m White Light&#10;-- 2.8 mm објектив">${esc(a.specs || "")}</textarea>
     <button class="btn" onclick="saveArticle('${id || ""}')">Save</button>
-    ${id ? `<button class="btn danger" onclick="delArticle('${id}')">Deactivate</button>` : ""}
+    ${id ? `<div id="ar-hist"></div>
+      <button class="btn ghost" onclick="openMergeSheet('${id}')">Merge with a duplicate…</button>
+      <button class="btn danger" onclick="delArticle('${id}')">Deactivate</button>` : ""}
   `);
   renderArImg();
+  if (id) loadPriceHistory(id);
 }
 function renderArImg() {
   $("ar-img-prev").innerHTML = arImg.thumb ? `<img class="thumb" style="width:64px;height:64px" src="${arImg.thumb}" alt="">` : "";
@@ -1506,6 +1512,96 @@ function imgResize(im, max, q) {
   ctx.drawImage(im, 0, 0, c.width, c.height);
   return c.toDataURL("image/jpeg", q);
 }
+// What this article has cost over time. The figure on the article is the
+// latest; everything before it stays here.
+async function loadPriceHistory(articleId) {
+  const el = $("ar-hist");
+  if (!el) return;
+  const { data, error } = await db.from("article_prices").select("*")
+    .eq("article_id", articleId).order("bought_on", { ascending: false }).limit(12);
+  if (error || !el) return;
+  const rows = data || [];
+  if (!rows.length) return (el.innerHTML = "");
+  const first = parseFloat(rows[rows.length - 1].price) || 0;
+  const last = parseFloat(rows[0].price) || 0;
+  const move = first && last !== first ? Math.round(((last - first) / first) * 100) : 0;
+  el.innerHTML = `<div class="sec">Purchase price history</div>
+    ${rows.length > 1 && move ? `<p class="muted" style="font-size:12.5px">
+      ${move > 0 ? "Up" : "Down"} ${Math.abs(move)}% since ${dmy(rows[rows.length - 1].bought_on)}</p>` : ""}
+    ${rows.map((r, i) => `<div class="mov">
+      <span>${dmy(r.bought_on)}${r.supplier ? " · " + esc(r.supplier) : ""}${r.doc_no ? " · " + esc(r.doc_no) : ""}</span>
+      <span class="mono">${fmt(r.price)}${i === 0 ? " ден. ←" : " ден."}</span></div>`).join("")}`;
+}
+
+/* ---------- merging duplicates ---------- */
+function openMergeSheet(fromId) {
+  const a = state.stock.find((x) => x.id === fromId);
+  if (!a) return;
+  openSheet(`
+    <h2>Merge duplicate</h2>
+    <p class="muted">Everything from <b>${esc(a.name)}</b> — stock movements and price history — moves into the article you pick. This one is then retired.</p>
+    <input id="mg-search" placeholder="Search the article to keep…" oninput="renderMergePicker('${fromId}')">
+    <div id="mg-list"></div>`);
+  renderMergePicker(fromId);
+}
+function renderMergePicker(fromId) {
+  const q = (($("mg-search") || {}).value || "").trim().toLowerCase();
+  const a = state.stock.find((x) => x.id === fromId);
+  const n = normName(a && a.name);
+  const list = state.stock
+    .filter((x) => x.id !== fromId && x.active !== false)
+    .filter((x) => !q ? normName(x.name).includes(n.slice(0, 8)) || (x.code && a.code && x.code === a.code)
+                      : (x.name.toLowerCase().includes(q) || (x.code || "").toLowerCase().includes(q)))
+    .slice(0, 8);
+  $("mg-list").innerHTML = list.length
+    ? list.map((x) => `<div class="card row" onclick="doMerge('${fromId}','${x.id}')">
+        <div style="flex:1"><b>${esc(x.name)}</b>
+          <div class="muted">${esc(x.code || "")}${x.code ? " · " : ""}stock ${fmt(x.stock)} · last cost ${fmt(x.purchase_price)} ден.</div></div>
+        <span class="muted">keep this ›</span></div>`).join("")
+    : '<p class="muted">Nothing similar found — type part of the name above.</p>';
+}
+async function doMerge(fromId, toId) {
+  const a = state.stock.find((x) => x.id === fromId), b = state.stock.find((x) => x.id === toId);
+  if (!confirm(`Merge "${a.name}" into "${b.name}"?\n\nStock becomes ${fmt((a.stock || 0) + (b.stock || 0))}. This cannot be undone from the app.`)) return;
+  try { await dbq(db.rpc("merge_articles", { p_from: fromId, p_to: toId }), "Not merged"); } catch { return; }
+  closeSheet(); await refreshAll(["stock"]); render();
+  toast("Merged into " + b.name);
+}
+
+/* ---------- spotting duplicates in the list ---------- */
+function duplicateGroups() {
+  const seen = {}, out = [];
+  for (const a of state.stock) {
+    if (a.active === false) continue;
+    const keys = [normName(a.name)];
+    if (a.supplier_code) keys.push("sc:" + String(a.supplier_code).toLowerCase());
+    if (a.code) keys.push("c:" + String(a.code).toLowerCase());
+    for (const k of keys) {
+      if (!k || k.length < 4) continue;
+      (seen[k] = seen[k] || []).push(a);
+    }
+  }
+  const used = new Set();
+  for (const k of Object.keys(seen)) {
+    const g = seen[k].filter((a, i, arr) => arr.findIndex((y) => y.id === a.id) === i);
+    if (g.length < 2) continue;
+    const sig = g.map((a) => a.id).sort().join("|");
+    if (used.has(sig)) continue;
+    used.add(sig); out.push(g);
+  }
+  return out;
+}
+function openDuplicates() {
+  const groups = duplicateGroups();
+  openSheet(`<h2>Possible duplicates</h2>
+    ${groups.length ? groups.map((g) => `<div class="card">
+      ${g.map((a) => `<div class="mov"><span><b>${esc(a.name)}</b>
+        <div class="muted">${esc(a.code || a.supplier_code || "")} · stock ${fmt(a.stock)} · ${fmt(a.purchase_price)} ден.</div></span>
+        <button class="chip" onclick="openMergeSheet('${a.id}')">Merge…</button></div>`).join("")}
+    </div>`).join("")
+    : '<p class="muted">None found — every article looks distinct.</p>'}`);
+}
+
 function pickArticleImage(input) {
   const f = input.files && input.files[0];
   if (!f) return;
@@ -3629,6 +3725,34 @@ const purchaseOverdue = (p) => !!p.due_date && purchaseBalance(p) > 0.005 && p.d
 
 let purItems = [];
 
+// Two names are "the same" if they differ only by case, spacing or punctuation.
+const normName = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+// A parsed line often carries the supplier's code in front: "0015 · baterija…"
+function splitCode(name) {
+  const m = String(name || "").match(/^\s*([\p{L}\d][\p{L}\d._/-]{1,14})\s*[·:|-]\s*(.+)$/u);
+  return m ? { code: m[1], rest: m[2].trim() } : { code: null, rest: String(name || "").trim() };
+}
+// Find an article this purchase line already belongs to, before making a new one.
+function matchArticle(line, supplier) {
+  const { code, rest } = splitCode(line.name);
+  const wanted = code || line.code || null;
+  if (wanted) {
+    const bySupplierCode = state.stock.find((a) => a.active !== false && a.supplier_code
+      && a.supplier_code.toLowerCase() === String(wanted).toLowerCase()
+      && (!supplier || !a.supplier || a.supplier === supplier));
+    if (bySupplierCode) return bySupplierCode;
+    const byOwnCode = state.stock.find((a) => a.active !== false && a.code
+      && a.code.toLowerCase() === String(wanted).toLowerCase());
+    if (byOwnCode) return byOwnCode;
+  }
+  const n = normName(rest);
+  if (n.length >= 6) {
+    const byName = state.stock.find((a) => a.active !== false && normName(a.name) === n);
+    if (byName) return byName;
+  }
+  return null;
+}
+
 // Photograph a delivery note; the server reads it and hands back lines to check.
 function readDocPhoto(input) {
   const f = input.files && input.files[0];
@@ -3898,24 +4022,40 @@ async function confirmArrival(id) {
   const arriving = items.map((it, i) => ({ it, i, n: Math.min(Math.max(0, recvQty[i] || 0), linePending(p, it)) }))
     .filter((x) => x.n > 0.0001);
   if (!arriving.length) return toast("Nothing marked as arrived");
+  // link anything that already exists, so a second delivery does not make a twin
+  let matched = 0;
+  for (const x of arriving) {
+    if (x.it.article_id) continue;
+    const hit = matchArticle(x.it, p.supplier);
+    if (hit) { x.it.article_id = hit.id; x.matchedName = hit.name; matched++; }
+  }
   const fresh = arriving.filter((x) => !x.it.article_id && (x.it.name || "").trim());
   const msg = `Book ${arriving.length} line(s) into stock?`
+    + (matched ? `\n\n${matched} line(s) matched to articles you already have.` : "")
     + (fresh.length ? `\n\n${fresh.length} new article(s) will be created:\n· ` + fresh.map((f) => f.it.name).join("\n· ") : "");
   if (!confirm(msg)) return;
   try {
     const lines = JSON.parse(JSON.stringify(items));
     for (const x of arriving) {
       const it = lines[x.i];
+      const paid = parseFloat(it.price) || 0;
       if (!it.article_id) {
+        const parts = splitCode(it.name);
         const made = await dbq(db.from("articles").insert({
-          name: (it.name || "").trim() || "Unnamed", category: "Other", unit: "ком", min_stock: 0,
-          purchase_price: parseFloat(it.price) || 0, sell_price: 0,
-          vat_rate: it.vat ?? 18, supplier: p.supplier, active: true,
+          name: parts.rest || "Unnamed", category: "Other", unit: "ком", min_stock: 0,
+          purchase_price: paid, sell_price: 0,
+          vat_rate: it.vat ?? 18, supplier: p.supplier,
+          supplier_code: parts.code || it.code || null, active: true,
         }).select().single(), "Article not created");
         it.article_id = made.id;
       } else {
-        await dbq(db.from("articles").update({ purchase_price: parseFloat(it.price) || 0 }).eq("id", it.article_id), "Cost not updated");
+        // the article carries the LATEST price paid; earlier ones live in the history
+        await dbq(db.from("articles").update({ purchase_price: paid }).eq("id", it.article_id), "Cost not updated");
       }
+      await db.from("article_prices").insert({
+        article_id: it.article_id, price: paid, qty: x.n, supplier: p.supplier,
+        doc_no: p.doc_no || null, purchase_id: p.id, bought_on: p.doc_date || todayStr(),
+      });
       it.recv = lineRecv(p, x.it) + x.n;
     }
     await dbq(db.from("movements").insert(arriving.map((x) => ({
@@ -3931,8 +4071,11 @@ async function confirmArrival(id) {
   } catch { return; }
   closeSheet(); await refreshAll(["purchases", "stock"]); render();
   const left = purPending(state.purchases.find((x) => x.id === id) || {}).length;
-  toast(left ? `Booked in · ${left} line(s) still to come`
-             : (fresh.length ? `All arrived · ${fresh.length} new article(s) created` : "All arrived and in stock"));
+  const bits = [];
+  if (matched) bits.push(`${matched} matched`);
+  if (fresh.length) bits.push(`${fresh.length} new`);
+  if (left) bits.push(`${left} still to come`);
+  toast("Booked in" + (bits.length ? " · " + bits.join(" · ") : ""));
 }
 
 let purPayMethod = "cash";
