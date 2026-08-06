@@ -309,8 +309,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     </div>
     <div id="el-body-pur" style="display:none">
       <input class="search" id="pur-list-search" placeholder="Search supplier or document…" oninput="renderPurchases()">
-      <input type="file" accept="image/*" capture="environment" id="doc-file" style="display:none" onchange="readDocPhoto(this)">
-      <button class="btn ghost" style="margin-bottom:10px" onclick="$('doc-file').click()">📷 Photograph a supplier note</button>
+      <input type="file" accept="image/*" capture="environment" id="doc-cam" style="display:none" onchange="readDocPhoto(this)">
+      <input type="file" accept="image/*" id="doc-file" style="display:none" onchange="readDocPhoto(this)">
+      <div class="grid2" style="margin-bottom:10px">
+        <button class="btn ghost" style="width:100%" onclick="$('doc-cam').click()">📷 Photograph note</button>
+        <button class="btn ghost" style="width:100%" onclick="$('doc-file').click()">🖼 From gallery</button>
+      </div>
       <div id="pur-summary"></div>
       <div id="pur-list"></div>
     </div>
@@ -555,7 +559,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260805-214734";
+const BUILD = "20260806-044155";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3675,7 +3679,10 @@ async function sendDocForReading(b64) {
     console.error(e);
     openSheet(`<h2>Could not read it</h2>
       <p class="muted">${esc(e.message || "Something went wrong.")}</p>
-      <button class="btn" onclick="$('doc-file').click()">Try another photo</button>
+      <div class="grid2">
+        <button class="btn" style="width:100%" onclick="$('doc-cam').click()">Photograph again</button>
+        <button class="btn ghost" style="width:100%" onclick="$('doc-file').click()">From gallery</button>
+      </div>
       <button class="btn ghost" onclick="closeSheet()">Close</button>`);
   }
 }
@@ -3714,7 +3721,10 @@ function showReadResult(d) {
     </div>
     ${d.notes ? `<p class="muted" style="font-size:12.5px">${esc(d.notes)}</p>` : ""}
     <button class="btn" onclick="openParsedPurchase()">Open as a purchase</button>
-    <button class="btn ghost" onclick="$('doc-file').click()">Photograph again</button>
+    <div class="grid2">
+      <button class="btn ghost" style="width:100%" onclick="$('doc-cam').click()">Photograph again</button>
+      <button class="btn ghost" style="width:100%" onclick="$('doc-file').click()">Pick another</button>
+    </div>
   `);
 }
 let docRead = null;
