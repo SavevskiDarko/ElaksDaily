@@ -559,7 +559,7 @@ async function retryLoad() { await refreshAll(); render(); }
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260806-110641";
+const BUILD = "20260806-111642";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1256,7 +1256,7 @@ async function openArticleDetail(id) {
       <button class="btn sm ghost" style="width:100%" onclick="moveSheet('${id}','out')">− Stock out</button>
     </div>
     <div class="sec">Recent movements</div>
-    ${(movs || []).map((m) => `<div class="mov"><span>${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))} ${unitLbl(a.unit)} ${esc(m.note || m.ref || "")}</span>
+    ${(movs || []).map((m) => `<div class="mov"><span>${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))} ${unitLbl(a.unit)} ${esc(m.note || m.ref || "")}${authorTag(m.created_by)}</span>
       <span class="muted">${dmy(m.created_at)}</span></div>`).join("") || '<p class="muted">No movements.</p>'}
     <button class="btn ghost" onclick="openArticleSheet('${id}')">Edit article</button>
   `);
@@ -1310,6 +1310,14 @@ function mvCashToggle(unitPrice) {
 const cashBal = () => parseFloat(state.cashTotal) || 0;
 // Guests pay on arrival, so a booking is only money in hand once it has begun.
 const stayStarted = (s) => !!s.check_in && s.check_in <= todayStr();
+// Who made this entry. Nothing is shown for your own — on your own screen
+// that would just be noise — so a name always means somebody else.
+const authorTag = (uid) => (!uid || uid === state.uid) ? ""
+  : ` <span class="who" title="${esc(personName(uid))}">${initials(personName(uid))}</span>`;
+const authorLine = (uid, when) => {
+  const who = (!uid || uid === state.uid) ? "you" : personName(uid);
+  return `<div class="muted" style="font-size:12px">Added by ${esc(who)}${when ? " · " + dmyTime(when) : ""}</div>`;
+};
 const personName = (uid) => {
   const p = state.people.find((x) => x.user_id === uid);
   return p ? (p.display_name || "Unnamed") : "";
@@ -1356,7 +1364,7 @@ async function openCashSheet() {
       const v = parseFloat(e.amount) || 0;
       return `<div class="mov tapp" onclick="openCashEntry('${e.id}')">
         <span><b class="mono" style="color:${v >= 0 ? "var(--personal)" : "var(--danger)"}">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v))}</b>
-          ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}${e.offer_id ? ' <span class="muted">· offer</span>' : ""}</span>
+          ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}${e.offer_id ? ' <span class="muted">· offer</span>' : ""}${authorTag(e.created_by)}</span>
         <span class="muted">${new Date(e.created_at).getDate()}. ›</span></div>`;
     }).join("") || (failed ? "" : '<p class="muted">No entries this month.</p>')}
   `);
@@ -1392,6 +1400,7 @@ function openCashEntry(id) {
   openSheet(`
     <h2>Edit cash entry</h2>
     <p class="muted">${dmyTime(e.created_at)}</p>
+    ${authorLine(e.created_by)}
     <label>Type</label>
     <div class="chips" id="ce-dir">
       <button class="chip ${cashDir > 0 ? "on" : ""}" onclick="setCashDir(1)">+ Money in</button>
@@ -1680,7 +1689,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${needsDeduct(o) ? ' · <span style="color:var(--danger)">stock not taken out</span>' : ""}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${needsDeduct(o) ? ' · <span style="color:var(--danger)">stock not taken out</span>' : ""}${authorTag(o.created_by)}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)} ден.</span>
     </div>`).join("") : (state.loading ? SKEL(3) : '<div class="empty">No offers.<br>Create with +</div>');
@@ -2652,6 +2661,7 @@ function renderSettings() {
     + row("&#128274;", "Document reading",
         setting("ai_key_set", "") === "yes" ? "Key saved · reading notes is on" : "Not set up — add your API key",
         "openSetSheet('aikey')")
+    + row("&#128220;", "Activity", "Who added what, across the app", "openSetSheet('activity')")
     + row("&#128101;", "Team", `${(state.team || []).length} ${(state.team || []).length === 1 ? "person" : "people"} with access`, "openSetSheet('team')")
     + row("&#128190;", "Backup", "Download everything as one file", "openSetSheet('backup')");
 
@@ -2694,6 +2704,9 @@ function openSetSheet(kind) {
       <label>Remind me about unpaid bills from day</label>
       <input id="bills-day" type="number" min="1" max="28" value="${setting("bills_day", "5")}">
       <button class="btn" onclick="saveAptSettings()">Save</button>`);
+  } else if (kind === "activity") {
+    openSheet('<h2>Recent activity</h2><div id="act-list"></div>');
+    loadActivity();
   } else if (kind === "team") {
     openSheet(`<h2>Team</h2><div id="team-list"></div>
       <p class="muted" style="font-size:12.5px">Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.</p>`);
@@ -2777,6 +2790,52 @@ function restoreJson(input) {
       <button class="btn" onclick="closeSheet();render()">Done</button>`);
   };
   fr.readAsText(f);
+}
+
+// Pulls the last fortnight from every table that records an author, so you can
+// see what your team has been doing without opening each screen.
+async function loadActivity() {
+  const el = $("act-list");
+  if (!el) return;
+  const since = backDays(14);
+  const q = (t, cols, dateCol) => db.from(t).select(cols).gte(dateCol, since)
+    .order(dateCol, { ascending: false }).limit(60);
+  const [cash, movs, stays, offers, purch, bills] = await Promise.all([
+    q("elaks_cash", "id, amount, note, created_at, created_by", "created_at"),
+    q("movements", "id, type, qty, note, article_id, created_at, created_by", "created_at"),
+    q("stays", "id, guest_name, check_in, apartment_id, created_at, created_by", "created_at"),
+    q("offers", "id, number, title, created_at, created_by", "created_at"),
+    q("purchases", "id, supplier, doc_no, total, created_at, created_by", "created_at"),
+    q("bills", "id, kind, amount, apartment_id, created_at, created_by", "created_at"),
+  ]);
+  const artName = (id) => (state.stock.find((a) => a.id === id) || {}).name || "article";
+  const aptName = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "apartment";
+  const rows = [];
+  for (const r of cash.data || []) rows.push({ at: r.created_at, by: r.created_by,
+    what: `${(parseFloat(r.amount) || 0) >= 0 ? "Cash in" : "Cash out"} ${fmt(Math.abs(r.amount))} ден.${r.note ? " · " + r.note : ""}` });
+  for (const r of movs.data || []) rows.push({ at: r.created_at, by: r.created_by,
+    what: `${r.type === "in" ? "Stock in" : "Stock out"} ${fmt(Math.abs(r.qty))} · ${artName(r.article_id)}` });
+  for (const r of stays.data || []) rows.push({ at: r.created_at, by: r.created_by,
+    what: `Booking · ${r.guest_name} · ${aptName(r.apartment_id)} from ${dmy(r.check_in)}` });
+  for (const r of offers.data || []) rows.push({ at: r.created_at, by: r.created_by,
+    what: `Offer ${r.number}${r.title ? " · " + r.title : ""}` });
+  for (const r of purch.data || []) rows.push({ at: r.created_at, by: r.created_by,
+    what: `Purchase ${r.supplier}${r.doc_no ? " · " + r.doc_no : ""} · ${fmt(r.total)} ден.` });
+  for (const r of bills.data || []) rows.push({ at: r.created_at, by: r.created_by,
+    what: `Bill ${r.kind} · ${aptName(r.apartment_id)} · ${fmt(r.amount)} ден.` });
+
+  rows.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  if (!rows.length) return (el.innerHTML = '<p class="muted">Nothing recorded in the last two weeks.</p>');
+
+  let day = null, html = "";
+  for (const r of rows.slice(0, 120)) {
+    const d = String(r.at).slice(0, 10);
+    if (d !== day) { html += `<div class="sec">${dmy(d)}</div>`; day = d; }
+    const who = (!r.by || r.by === state.uid) ? "you" : (personName(r.by) || "someone");
+    html += `<div class="mov"><span>${esc(r.what)}</span>
+      <span class="muted nw">${esc(who)} · ${String(r.at).slice(11, 16)}</span></div>`;
+  }
+  el.innerHTML = html + '<p class="muted" style="font-size:12.5px">Entries made before this was switched on show no name.</p>';
 }
 
 async function saveAiKey() {
@@ -2951,7 +3010,7 @@ function renderCalendar() {
 function stayRow(s) {
   return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${
+      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${authorTag(s.created_by)}${
         dOnly(s.check_in) === todayStr() ? ' · <span style="color:var(--amber)">arrives today</span>'
         : dOnly(s.check_out) === todayStr()
           ? (stayEnded(s) ? ' · <span class="muted">checked out today</span>'
@@ -4229,7 +4288,7 @@ function renderPurchases() {
       <span class="led ${bal <= 0.005 ? "accepted" : "sent"}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(p.supplier)}</b>
-        <div class="o-num">${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)} · ${state_}${
+        <div class="o-num">${authorTag(p.created_by)}${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)} · ${state_}${
           purFullyArrived(p) ? ""
             : ` · <span style="color:var(--amber)">${purArrivedCount(p) ? `${purArrivedCount(p)}/${(p.items || []).length} arrived` : "on order"}${p.expected_date ? " · exp. " + dmy(p.expected_date) : ""}</span>`}</div>
       </div>
