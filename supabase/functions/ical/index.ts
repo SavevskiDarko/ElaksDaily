@@ -79,3 +79,5 @@ Deno.serve(async (req) => {
     return new Response("Error", { status: 500 });
   }
 });
+
+// deployed via CI
