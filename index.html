@@ -170,6 +170,16 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hnote.warn{color:var(--danger)}
 .htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
+.bank-big{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.05;letter-spacing:-.01em}
+.bank-lbl{font-size:12.5px;color:var(--muted);margin-top:2px}
+.acct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin:14px 0 2px}
+.acct{background:var(--paper);border:1px solid var(--line);border-radius:11px;padding:8px 10px;cursor:pointer}
+.acct:active{opacity:.65}
+.acct span{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct b{display:block;font-family:var(--mono);font-size:14.5px;margin-top:1px}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.stat span{display:block;font-size:11.5px;color:var(--muted)}
+.stat b{font-family:var(--mono);font-size:14px}
 .setrow{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
   border-radius:var(--r);padding:13px 14px;margin-bottom:8px;cursor:pointer}
 .setrow:active{opacity:.65}
@@ -618,7 +628,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-085300";
+const BUILD = "20260807-092107";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3176,19 +3186,29 @@ function renderApt() {
   const t = todayStr();
   const occ = new Set(state.stays.filter((s) => s.check_in <= t && s.check_out > t).map((s) => s.apartment_id)).size;
   const bal = accountBalances();
+  const total = state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll;
   $("apt-bank").innerHTML = `<div class="card">
-    <div class="row" style="justify-content:space-between"><b>Apartments bank</b>
-      <span class="muted">${occ}/${state.apartments.length} occupied tonight</span></div>
-    ${bankRow("This month", incM, bilM)}
-    ${bankRow("This year", incY, bilY)}
-    <div class="row bankrow"><span class="muted nw">${T("Money in hand", "Пари вкупно")}</span>
-      <span class="mono"><b>${fmt(state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll)}</b> ден.</span></div>
-    ${state.accounts.map((a) => `<div class="row bankrow" style="margin-top:2px" role="button" tabindex="0"
-        onclick="event.stopPropagation();openAccountSheet('${a.id}')">
-      <span class="muted nw" style="padding-left:10px">${esc(a.name)} ›</span>
-      <span class="mono">${fmt(bal[a.id] || 0)} ден.</span></div>`).join("")}
-    ${soon ? `<div class="row bankrow"><span class="muted nw">Upcoming bookings</span>
-      <span class="mono">${fmt(soon)} ден.</span></div>` : ""}
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="bank-big">${fmt(total)} <span style="font-size:16px">ден.</span></div>
+        <div class="bank-lbl">${T("money in hand", "пари вкупно")}</div>
+      </div>
+      <span class="muted nw">${occ}/${state.apartments.length} ${T("tonight", "вечерва")}</span>
+    </div>
+
+    ${state.accounts.length ? `<div class="acct-grid">
+      ${state.accounts.map((a) => `<div class="acct" role="button" tabindex="0"
+          onclick="event.stopPropagation();openAccountSheet('${a.id}')">
+        <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>`).join("")}
+    </div>` : ""}
+
+    <div class="stat-row">
+      <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='bills';renderApt()">
+        <span>${T("This month", "Овој месец")}</span><b>${fmt(incM - bilM)}</b></div>
+      <div class="stat"><span>${T("This year", "Оваа година")}</span><b>${fmt(incY - bilY)}</b></div>
+      <div class="stat"><span>${T("Coming in", "Претстојно")}</span>
+        <b class="${soon ? "" : "muted"}">${fmt(soon)}</b></div>
+    </div>
   </div>`;
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
