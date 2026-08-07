@@ -345,6 +345,10 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="pur-summary"></div>
       <div id="pur-list"></div>
     </div>
+    <div id="el-body-sup" style="display:none">
+      <div id="sup-list"></div>
+      <button class="btn ghost" onclick="openSupplierSheet()">+ New supplier</button>
+    </div>
     <div id="el-body-cli" style="display:none">
       <div id="cli-list"></div>
       <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
@@ -468,7 +472,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all",
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
-  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
+  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -564,6 +568,7 @@ const LOADERS = {
   payments:   { need: () => state.perm.elaks,   q: () => db.from("offer_payments").select("*").order("paid_on", { ascending: false }).limit(400) },
   purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
+  suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
@@ -631,7 +636,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-200014";
+const BUILD = "20260807-201517";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1639,7 +1644,8 @@ function openArticleSheet(id) {
       ${VAT_RATES.map((r) => `<button class="chip ${(a.vat_rate ?? 18) == r ? "on" : ""}" onclick="setArVat(${r})">${r}%</button>`).join("")}
     </div>
     <p class="muted" style="font-size:12.5px">Prices are entered with ДДВ included. The base and ДДВ are worked out from them.</p>
-    <label>Supplier</label><input id="ar-sup" value="${esc(a.supplier || "")}">
+    <label>${T("Supplier", "Добавувач")}</label>
+    ${supplierSelect("ar-sup", a.supplier || "")}
     <label>Photo (appears in offers)</label>
     <div class="row" style="align-items:flex-start">
       <div id="ar-img-prev"></div>
@@ -1842,15 +1848,17 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"], ["cli", "Clients"]].map(([v, l]) =>
+  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
   $("el-body-off").style.display = state.elaksView === "off" ? "" : "none";
   $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
   $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
+  const supEl = $("el-body-sup"); if (supEl) supEl.style.display = state.elaksView === "sup" ? "" : "none";
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
   else if (state.elaksView === "pur") renderPurchases();
+  else if (state.elaksView === "sup") renderSuppliers();
   else renderClients();
 }
 function renderOffers() {
@@ -2670,6 +2678,157 @@ async function closeJob(id) {
 /* ============================================================
    CLIENTS + PUSH
 ============================================================ */
+/* ---------- suppliers ---------- */
+// A chosen name rather than a typed one — typing is how "Wizard Systems" and
+// "wizard sistemi" became two suppliers in the first place.
+// A scanned note can name a supplier that is not on the list yet: match it to
+// one we have whatever the spelling, and otherwise keep it rather than lose it.
+function setSupplierValue(id, value) {
+  const sel = $(id);
+  const v = String(value || "").trim();
+  if (!sel || !v) return;
+  const hit = [...sel.options].find((o) => o.value.toLowerCase() === v.toLowerCase());
+  if (hit) { sel.value = hit.value; return; }
+  const opt = document.createElement("option");
+  opt.value = v;
+  opt.textContent = v + " · " + T("new", "нов");
+  sel.appendChild(opt);
+  sel.value = v;
+}
+// Any name that ends up saved joins the list, so it can be picked next time.
+async function ensureSupplier(name) {
+  const v = String(name || "").trim();
+  if (!v) return;
+  if (state.suppliers.some((s) => s.name.toLowerCase() === v.toLowerCase())) return;
+  try { await db.from("suppliers").insert({ name: v }); await refreshAll(["suppliers"]); }
+  catch (e) { console.warn("supplier", e); }
+}
+function supplierSelect(id, current) {
+  const names = state.suppliers.map((s) => s.name);
+  const stray = current && !names.some((n) => n.toLowerCase() === String(current).toLowerCase()) ? [current] : [];
+  return `<select id="${id}">
+    <option value="">${T("No supplier", "Без добавувач")}</option>
+    ${stray.concat(names).map((n) => `<option value="${esc(n)}" ${n === current ? "selected" : ""}>${esc(n)}${
+      stray.includes(n) ? " · " + T("not in the list", "не е во листата") : ""}</option>`).join("")}
+  </select>`;
+}
+const supplierStats = (name) => ({
+  articles: state.stock.filter((a) => a.supplier === name).length,
+  purchases: state.purchases.filter((p) => p.supplier === name).length,
+  spent: sumBy(state.purchases.filter((p) => p.supplier === name), (p) => p.total),
+  owed: sumBy(state.purchases.filter((p) => p.supplier === name && purchaseBalance(p) > 0.005), purchaseBalance),
+});
+
+function renderSuppliers() {
+  const el = $("sup-list");
+  if (!el) return;
+  const known = new Set(state.suppliers.map((s) => s.name.toLowerCase()));
+  const loose = [...new Set(state.stock.map((a) => a.supplier).concat(state.purchases.map((p) => p.supplier))
+    .filter((n) => n && !known.has(String(n).toLowerCase())))];
+
+  el.innerHTML = (loose.length ? `<div class="card" style="border-color:var(--amber)">
+      <b>${loose.length} ${T("name(s) not in the list", "име(ња) не се во листата")}</b>
+      <div class="muted" style="font-size:12.5px">${loose.map(esc).join(" · ")}</div>
+      <button class="btn sm" style="margin-top:8px" onclick="adoptSuppliers()">${T("Add them", "Додај ги")}</button>
+    </div>` : "")
+    + (state.suppliers.length ? state.suppliers.map((s) => {
+      const st = supplierStats(s.name);
+      return `<div class="card row" role="button" tabindex="0" onclick="openSupplierSheet('${s.id}')">
+        <div style="flex:1;min-width:0"><b>${esc(s.name)}</b>
+          <div class="muted">${st.articles} ${T("articles", "артикли")} · ${st.purchases} ${T("purchases", "набавки")}${
+            st.owed > 0.005 ? ` · <span class="hflag">${fmt(st.owed)} ${T("owed", "долг")}</span>` : ""}</div></div>
+        <span class="o-total mono">${fmt(st.spent)}</span>
+      </div>`;
+    }).join("") : `<div class="empty">${T("No suppliers yet.", "Нема добавувачи.")}</div>`);
+}
+
+async function adoptSuppliers() {
+  const known = new Set(state.suppliers.map((s) => s.name.toLowerCase()));
+  const loose = [...new Set(state.stock.map((a) => a.supplier).concat(state.purchases.map((p) => p.supplier))
+    .filter((n) => n && !known.has(String(n).toLowerCase())))];
+  if (!loose.length) return;
+  try { await dbq(db.from("suppliers").insert(loose.map((name) => ({ name }))), T("Not saved", "Не е зачувано")); } catch { return; }
+  await refreshAll(["suppliers"]); renderSuppliers(); toast(T("Added", "Додадено"));
+}
+
+function openSupplierSheet(id) {
+  const s = id ? state.suppliers.find((x) => x.id === id) : {};
+  const st = id ? supplierStats(s.name) : null;
+  openSheet(`
+    <h2>${id ? esc(s.name) : T("New supplier", "Нов добавувач")}</h2>
+    ${st ? `<div class="acct-grid" style="margin-top:4px">
+      <div class="acct" style="cursor:default"><span>${T("Articles", "Артикли")}</span><b>${st.articles}</b></div>
+      <div class="acct" style="cursor:default"><span>${T("Purchases", "Набавки")}</span><b>${st.purchases}</b></div>
+      <div class="acct" style="cursor:default"><span>${T("Owed", "Долг")}</span><b>${fmt(st.owed)}</b></div>
+    </div>` : ""}
+    <label>${T("Name", "Име")}</label><input id="sp-name" value="${esc(s.name || "")}">
+    <div class="grid2">
+      <div><label>${T("Phone", "Телефон")}</label><input id="sp-phone" value="${esc(s.phone || "")}"></div>
+      <div><label>${T("E-mail", "Е-пошта")}</label><input id="sp-email" value="${esc(s.email || "")}"></div>
+    </div>
+    <label>${T("Address", "Адреса")}</label><input id="sp-addr" value="${esc(s.address || "")}">
+    <label>${T("Note", "Белешка")}</label><input id="sp-note" value="${esc(s.note || "")}">
+    <button class="btn" onclick="saveSupplier('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? `<button class="btn ghost" onclick="openSupMerge('${id}')">${T("Merge with a duplicate…", "Спој со дупликат…")}</button>
+      <button class="btn danger" onclick="delSupplier('${id}')">${T("Remove", "Отстрани")}</button>` : ""}
+  `);
+}
+
+async function saveSupplier(id) {
+  const name = $("sp-name").value.trim();
+  if (!name) return toast(T("A supplier needs a name", "Добавувачот треба име"));
+  const row = { phone: $("sp-phone").value.trim() || null, email: $("sp-email").value.trim() || null,
+                address: $("sp-addr").value.trim() || null, note: $("sp-note").value.trim() || null };
+  try {
+    if (id) {
+      const old = state.suppliers.find((x) => x.id === id);
+      if (old && old.name !== name) await dbq(db.rpc("rename_supplier", { p_id: id, p_name: name }), T("Not renamed", "Не е преименувано"));
+      await dbq(db.from("suppliers").update(row).eq("id", id), T("Not saved", "Не е зачувано"));
+    } else {
+      await dbq(db.from("suppliers").insert({ name, ...row }), T("Not saved", "Не е зачувано"));
+    }
+  } catch { return; }
+  closeSheet(); await refreshAll(["suppliers", "stock", "purchases"]); renderElaks(); toast(T("Saved", "Зачувано"));
+}
+
+async function delSupplier(id) {
+  const s = state.suppliers.find((x) => x.id === id);
+  const st = supplierStats(s.name);
+  if (st.articles || st.purchases) {
+    return say(T(s.name + " is used by " + st.articles + " article(s) and " + st.purchases + " purchase(s).\n\nMerge it into another supplier instead of removing it.",
+      s.name + " се користи кај " + st.articles + " артикл(и) и " + st.purchases + " набавка(и).\n\nСпој го со друг добавувач наместо да го отстраниш."));
+  }
+  if (!await ask(T("Remove this supplier?", "Отстрани го овој добавувач?"))) return;
+  try { await dbq(db.from("suppliers").delete().eq("id", id), T("Not removed", "Не е отстрането")); } catch { return; }
+  closeSheet(); await refreshAll(["suppliers"]); renderElaks();
+}
+
+// Scanned invoices spell names differently — "Wizard Systems" and "WIZARD
+// SISTEMI" are one supplier, and merging moves everything onto the survivor.
+function openSupMerge(fromId) {
+  const a = state.suppliers.find((x) => x.id === fromId);
+  openSheet(`
+    <h2>${T("Merge supplier", "Спој добавувач")}</h2>
+    <p class="muted">${T("Everything filed under", "Сè што е под")} <b>${esc(a.name)}</b>
+      ${T("moves to the supplier you pick, and this one is removed.", "се префрла кај избраниот, а овој се брише.")}</p>
+    ${state.suppliers.filter((x) => x.id !== fromId).map((x) => {
+      const st = supplierStats(x.name);
+      return `<div class="card row" role="button" tabindex="0" onclick="doSupMerge('${fromId}','${x.id}')">
+        <div style="flex:1"><b>${esc(x.name)}</b>
+          <div class="muted">${st.articles} ${T("articles", "артикли")} · ${st.purchases} ${T("purchases", "набавки")}</div></div>
+        <span class="muted">${T("keep this ›", "задржи го овој ›")}</span></div>`;
+    }).join("") || `<p class="muted">${T("No other suppliers yet.", "Нема други добавувачи.")}</p>`}
+  `);
+}
+async function doSupMerge(fromId, toId) {
+  const a = state.suppliers.find((x) => x.id === fromId), b = state.suppliers.find((x) => x.id === toId);
+  if (!await ask(T('Merge "' + a.name + '" into "' + b.name + '"?', 'Спој „' + a.name + '" во „' + b.name + '"?'))) return;
+  let moved = "0";
+  try { moved = await dbq(db.rpc("merge_suppliers", { p_from: fromId, p_to: toId }), T("Not merged", "Не е споено")); } catch { return; }
+  closeSheet(); await refreshAll(["suppliers", "stock", "purchases"]); renderElaks();
+  toast(T("Merged · " + moved + " record(s) moved", "Споено · " + moved + " записи преместени"));
+}
+
 function renderClients() {
   $("cli-list").innerHTML = state.clients.map((c) => `
     <div class="card row" role="button" tabindex="0" onclick="openClientSheet('${c.id}')">
@@ -4394,7 +4553,7 @@ function openParsedPurchase() {
     openPurchaseSheet();
     setTimeout(() => {
       purItems = keep;
-      if ($("pu-sup")) $("pu-sup").value = d.supplier || "";
+      setSupplierValue("pu-sup", d.supplier);
       if ($("pu-no")) $("pu-no").value = d.doc_no || "";
       if ($("pu-date")) $("pu-date").value = d.doc_date || todayStr();
       if ($("pu-due")) $("pu-due").value = d.due_date || "";
@@ -4412,10 +4571,8 @@ function openPurchaseSheet(id) {
   openSheet(`
     <h2>${id ? esc(p.supplier) : "New purchase"}</h2>
     ${id ? `<p class="muted">${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)}</p>` : ""}
-    <label>Supplier</label>
-    <input id="pu-sup" list="pu-sups" value="${esc(p.supplier || "")}" placeholder="e.g. Wizard Systems">
-    <datalist id="pu-sups">${[...new Set(state.stock.map((a) => a.supplier).concat(state.purchases.map((x) => x.supplier)).filter(Boolean))]
-      .map((s) => `<option value="${esc(s)}">`).join("")}</datalist>
+    <label>${T("Supplier", "Добавувач")}</label>
+    ${supplierSelect("pu-sup", p.supplier || "")}
     <div class="grid2">
       <div><label>Document no.</label><input id="pu-no" value="${esc(p.doc_no || "")}" placeholder="001-464/2026"></div>
       <div><label>Date</label><input id="pu-date" type="date" value="${p.doc_date || todayStr()}"></div>
@@ -4509,7 +4666,8 @@ async function savePurchase(id) {
     total: purchaseTotals(purItems).gross,
     note: $("pu-note").value.trim() || null,
   };
-  if (!row.supplier) return toast("Enter the supplier");
+  if (!row.supplier) return toast(T("Choose a supplier", "Избери добавувач"));
+  await ensureSupplier(row.supplier);
   try {
     const saved = await dbq(id
       ? db.from("purchases").update(row).eq("id", id).select().single()
