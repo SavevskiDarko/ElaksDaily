@@ -15,6 +15,7 @@
   --navy:#1E3A5F; --navy-deep:#152A46; --amber:#F5B301; --paper:#F7F8FA;
   --card:#FFFFFF; --ink:#23272E; --muted:#6B7280; --line:#E5E8EC;
   --work:#4C6EF5; --elaks:#1E3A5F; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
+  --surface:#FFFFFF; --on-dark:#FFFFFF;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
   --cond:'IBM Plex Sans Condensed',var(--sans);
@@ -26,7 +27,7 @@ body{font-family:var(--sans);background:var(--paper);color:var(--ink);font-size:
   padding-bottom:calc(64px + env(safe-area-inset-bottom))}
 button{font-family:inherit;font-size:inherit;border:0;background:none;cursor:pointer;color:inherit}
 input,select,textarea{font-family:inherit;font-size:16px;border:1px solid var(--line);border-radius:10px;
-  padding:10px 12px;width:100%;background:#fff;color:var(--ink)}
+  padding:10px 12px;width:100%;background:var(--surface);color:var(--ink)}
 input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
 label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
 
@@ -68,7 +69,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chips.wrap{flex-wrap:wrap;overflow:visible}
-.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 13px;font-size:13.5px;font-weight:500;white-space:nowrap}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 13px;font-size:13.5px;font-weight:500;white-space:nowrap}
 .chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .btn{background:var(--navy);color:#fff;border-radius:11px;padding:12px 16px;font-weight:600;width:100%;margin-top:14px}
 .btn.amber{background:var(--amber);color:var(--navy-deep)}
@@ -118,7 +119,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .task .t-time{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
 .task .rec{font-size:11px;color:var(--muted)}
 .who{background:var(--line);color:var(--muted);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700;flex:none}
-.clbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center}
+.clbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;color:var(--on-dark);font-size:14px;display:flex;align-items:center;justify-content:center}
 .clbox.on{background:var(--personal);border-color:var(--personal)}
 
 /* ---- inventory ---- */
@@ -150,7 +151,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 #login .logo{width:64px;height:64px;border-radius:16px;margin-bottom:16px}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);
   background:var(--navy-deep);color:#fff;padding:10px 18px;border-radius:999px;font-size:13.5px;z-index:40;
-  opacity:0;pointer-events:none;transition:opacity .2s}
+  opacity:0;pointer-events:none;transition:opacity .2s;display:flex;align-items:center;gap:12px;max-width:92vw}
+.toast.act{pointer-events:auto}
+.toast button{color:var(--amber);font-weight:700;font-size:13.5px;white-space:nowrap}
 .toast.on{opacity:1}
 .search{margin-bottom:10px}
 #loadbar{background:var(--danger-bg);color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
@@ -177,8 +180,23 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .setrow .txt span{display:block;font-size:12.5px;color:var(--muted);overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .setrow .chev{color:var(--muted);font-size:18px;flex:none}
+.more{margin:6px 0}
+.more .morebody{display:none}
+.more[data-open="1"] .morebody{display:block}
+.more[data-open="1"] .chev{transform:rotate(180deg)}
+.morebtn{display:flex;align-items:center;justify-content:space-between;width:100%;
+  padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--surface);
+  font-weight:600;font-size:14px;color:var(--muted);margin:4px 0 10px}
+.morebtn .chev{transition:transform .18s}
 .setgrp{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--muted);margin:20px 0 8px}
+.dlg{position:fixed;inset:0;z-index:60;background:rgba(21,42,70,.55);display:none;
+  align-items:center;justify-content:center;padding:22px}
+.dlg.on{display:flex}
+.dlg-box{background:var(--card);border-radius:16px;padding:18px 18px 14px;width:100%;max-width:360px;
+  box-shadow:0 12px 34px rgba(0,0,0,.35)}
+.dlg-msg{white-space:pre-line;line-height:1.5;margin-bottom:14px}
+.dlg-box .btn{margin-top:8px}
 .updbar{position:fixed;left:12px;right:12px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:35;
   background:var(--navy);color:#fff;border-radius:12px;padding:11px 14px;display:none;
   align-items:center;justify-content:space-between;gap:10px;box-shadow:0 6px 18px rgba(30,58,95,.4)}
@@ -256,9 +274,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
 @media (prefers-color-scheme: dark){
-  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22}
-  .chip{background:var(--card);color:var(--ink)}
-  input,select,textarea{background:var(--card);color:var(--ink)}
+  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A}
   .btn.ghost{background:var(--card);color:var(--ink)}
   .task .tick{border-color:#39424F}
 }
@@ -336,6 +352,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div id="set-menu"></div>
   </div>
 
+  <div class="dlg" id="dlg"><div class="dlg-box">
+    <div class="dlg-msg" id="dlg-msg"></div>
+    <input id="dlg-input" style="display:none">
+    <button class="btn" id="dlg-ok">OK</button>
+    <button class="btn ghost" id="dlg-cancel">Cancel</button>
+  </div></div>
   <div class="updbar" id="updbar"><span>A newer version is ready</span>
     <button onclick="location.reload()">Reload</button></div>
   <button class="mic" id="mic" onclick="startVoice()" aria-label="New task by voice" title="New task by voice">
@@ -557,10 +579,45 @@ async function refreshAll(only) {
 /* ---------------- NAV ---------------- */
 async function retryLoad() { await refreshAll(); render(); }
 
+/* ---------- asking things, in the app's own language and style ----------
+   Replaces the browser's confirm/alert/prompt, which cannot be translated,
+   carry the site address in their title, and ignore the app's styling. */
+function dialog({ msg, ok, cancel, danger, input }) {
+  return new Promise((resolve) => {
+    const box = $("dlg"), okBtn = $("dlg-ok"), noBtn = $("dlg-cancel"), field = $("dlg-input");
+    $("dlg-msg").textContent = msg;
+    okBtn.textContent = ok || T("OK", "Во ред");
+    okBtn.classList.toggle("danger", !!danger);
+    noBtn.style.display = cancel === false ? "none" : "";
+    noBtn.textContent = T("Cancel", "Откажи");
+    field.style.display = input === undefined ? "none" : "";
+    if (input !== undefined) { field.value = input; }
+    box.classList.add("on");
+    if (input !== undefined) setTimeout(() => field.focus(), 60);
+
+    const done = (val) => {
+      box.classList.remove("on");
+      okBtn.onclick = noBtn.onclick = box.onclick = null;
+      okBtn.classList.remove("danger");
+      resolve(val);
+    };
+    okBtn.onclick = () => done(input === undefined ? true : (field.value || ""));
+    noBtn.onclick = () => done(input === undefined ? false : null);
+    box.onclick = (e) => { if (e.target === box) done(input === undefined ? false : null); };
+  });
+}
+// yes/no. Anything about deleting gets the red button.
+const ask = (msg, ok) => dialog({ msg, ok,
+  danger: /^(delete|remove|undo|stop|merge)/i.test(String(msg).trim()) });
+// just telling you something
+const say = (msg) => dialog({ msg, ok: T("OK", "Во ред"), cancel: false });
+// asking for a word
+const askText = (msg, value) => dialog({ msg, input: value ?? "" });
+
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260806-170542";
+const BUILD = "20260807-034343";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -575,6 +632,14 @@ async function checkForUpdate() {
     $("updbar").classList.add("on");          // mid-edit: let him finish first
   } catch (e) { /* offline — nothing to do */ }
 }
+// a row that behaves like a button should also be usable from a keyboard
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const el = document.activeElement;
+  if (el && el.getAttribute && el.getAttribute("role") === "button" && el.tagName !== "BUTTON") {
+    e.preventDefault(); el.click();
+  }
+});
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   checkForUpdate();
@@ -659,7 +724,42 @@ function render() {
   if (state.tab === "elaks") renderElaks();
   if (state.tab === "apt") renderApt();
 }
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("on"); setTimeout(() => t.classList.remove("on"), 2200); }
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("on"); t.classList.remove("act");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("on"), 2200);
+}
+// A wrong tap should cost seconds, not a trip to the backup file.
+function toastUndo(msg, undo, seconds = 15) {
+  const t = $("toast");
+  t.innerHTML = "";
+  t.append(document.createTextNode(msg));
+  const b = document.createElement("button");
+  b.textContent = T("Undo", "Врати");
+  b.onclick = async () => { t.classList.remove("on", "act"); clearTimeout(t._timer); await undo(); };
+  t.append(b);
+  t.classList.add("on", "act");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("on", "act"), seconds * 1000);
+}
+
+// Delete, but keep the row in hand so it can be put straight back.
+async function deleteUndoable(table, row, label, keys) {
+  try { await dbq(db.from(table).delete().eq("id", row.id), T("Not deleted", "Не е избришано")); }
+  catch { return false; }
+  closeSheet();
+  await refreshAll(keys); render();
+  toastUndo(label, async () => {
+    const copy = { ...row };
+    delete copy.stock;                       // views add columns the table does not have
+    const { error } = await db.from(table).insert(copy);
+    if (error) { console.error(error); return toast(T("Could not undo", "Не може да се врати")); }
+    await refreshAll(keys); render(); toast(T("Restored", "Вратено"));
+  });
+  return true;
+}
 let sheetOpen = false, tabPushed = false, ignorePop = false;
 
 // drag the handle down to dismiss — only on the top bar, so scrolling still works
@@ -827,7 +927,7 @@ const searchRow = (today) => (t) => {
   return `<div class="card task ${done ? "done" : ""}">
     <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
-    <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
+    <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
     <span class="t-time">${when}</span>
   </div>`;
 };
@@ -842,7 +942,7 @@ function renderToday() {
     const open = hits.filter((t) => !isDoneOn(t, today) || t.recurrence);
     const done = hits.filter((t) => !t.recurrence && t.done);
     $("today-list").innerHTML = hits.length
-      ? `<div class="sec tapp" onclick="$('tk-search').value='';renderToday()">
+      ? `<div class="sec tapp" role="button" tabindex="0" onclick="$('tk-search').value='';renderToday()">
            ${hits.length} result${hits.length > 1 ? "s" : ""} <span class="muted" style="font-weight:400">· clear ✕</span></div>`
         + open.map(searchRow(today)).join("")
         + (done.length ? '<div class="sec">Completed</div>' + done.map(searchRow(today)).join("") : "")
@@ -865,7 +965,7 @@ function renderToday() {
     html += missed.map(({ t, dates }) => `<div class="card task">
       <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}')" aria-label="done"></button>
       <span class="led ${t.context}"></span>
-      <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
+      <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
         <span class="rec"> missed ${dmy(dates[0])}${dates.length > 1 ? ` +${dates.length - 1}` : ""}</span></span>
     </div>`).join("");
   }
@@ -877,7 +977,7 @@ function renderToday() {
     html += state.loading ? SKEL() : emptyToday();
   }
   if (B.doneToday.length) {
-    html += `<div class="sec tapp" onclick="state.showDone=!state.showDone;renderToday()">
+    html += `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
       Done today · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`;
     if (state.showDone) html += B.doneToday.map(taskRow(today)).join("");
   }
@@ -897,7 +997,7 @@ function renderToday() {
       list.sort(byPrio).map((t) => `<div class="card task ${isDoneOn(t, ds) ? "done" : ""}">
         <button class="tick" onclick="toggleTask('${t.id}','${ds}')" aria-label="done">${isDoneOn(t, ds) ? "✓" : ""}</button>
         <span class="led ${t.context}"></span>
-        <span class="t-title" onclick="openTaskSheet('${t.id}')">${esc(t.title)}</span>
+        <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${esc(t.title)}</span>
         ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
   }
   // Everything beyond the forward window — a check-in three weeks away used
@@ -910,7 +1010,7 @@ function renderToday() {
     week += `<div class="sec">Later · ${later.length}</div>` + later.slice(0, 40).map((t) => `<div class="card task">
       <button class="tick" onclick="toggleTask('${t.id}','${t.due_date}')" aria-label="done"></button>
       <span class="led ${t.context}"></span>
-      <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
+      <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
       <span class="t-time">${dmy(t.due_date)}</span>
     </div>`).join("");
   }
@@ -922,7 +1022,7 @@ const taskRow = (today) => (t) => {
   return `<div class="card task ${done ? "done" : ""}">
     <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
-    <span class="t-title" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}
+    <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}
       ${t.recurrence ? `<span class="rec"> ↻${t.recurrence === "weekly" && recurDays(t).length > 1
         ? " " + recurDays(t).map((i) => ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][i]).join("") : ""}</span>` : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
     ${t.photo_thumb ? `<img class="thumb" style="width:30px;height:30px" src="${t.photo_thumb}" alt="">` : ""}
@@ -968,6 +1068,10 @@ function openTaskSheet(id) {
       <div><label>Date</label><input id="tk-date" type="date" value="${t.due_date || todayStr()}"></div>
       <div><label>Time (opt.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}"></div>
     </div>
+    <div class="more" id="tk-more" ${(t.recurrence || t.priority || t.client_id || t.apartment_id || t.photo_thumb || (t.checklist || []).length) ? 'data-open="1"' : ""}>
+    <button class="morebtn" role="button" tabindex="0" onclick="toggleMore('tk-more')">
+      <span>${T("More options", "Повеќе опции")}</span><span class="chev">▾</span></button>
+    <div class="morebody">
     <div class="grid2">
       <div><label>Repeat</label>
         <select id="tk-rec" onchange="tkRecChanged()">
@@ -1020,6 +1124,7 @@ function openTaskSheet(id) {
       <option value="">Anyone</option>
       ${state.people.map((p) => `<option value="${p.user_id}" ${t.assigned_to === p.user_id ? "selected" : ""}>${esc(p.display_name || "Unnamed")}</option>`).join("")}
     </select>
+    </div></div>
     <label>Checklist (opt.)</label>
     ${state.templates.length ? `<div class="chips" style="margin-bottom:8px">
       ${state.templates.map((tp) => `<button class="chip" onclick="applyTemplate('${tp.id}')">${esc(tp.name)}</button>`).join("")}
@@ -1071,7 +1176,7 @@ function applyTemplate(tid) {
 async function saveAsTemplate() {
   const items = tkChecklist.filter((c) => (c.text || "").trim());
   if (!items.length) return toast("Add some checklist items first");
-  const name = prompt("Name for this template", $("tk-title").value.trim() || "Checklist");
+  const name = await askText("Name for this template", $("tk-title").value.trim() || "Checklist");
   if (!name) return;
   try {
     await dbq(db.from("task_templates").insert({
@@ -1081,6 +1186,11 @@ async function saveAsTemplate() {
     }), "Template not saved");
   } catch { return; }
   await refreshAll(["templates"]); toast("Template saved");
+}
+function toggleMore(id) {
+  const el = $(id);
+  if (!el) return;
+  el.setAttribute("data-open", el.getAttribute("data-open") === "1" ? "0" : "1");
 }
 function tkRecChanged() {
   const box = $("tk-days");
@@ -1164,9 +1274,9 @@ async function saveTask(id) {
   closeSheet(); await refreshAll(["tasks"]); renderToday(); toast("Saved");
 }
 async function delTask(id) {
-  if (!confirm("Delete this task?")) return;
-  try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(["tasks"]); renderToday();
+  const row = state.tasks.find((x) => x.id === id);
+  if (!row || !await ask("Delete this task?")) return;
+  await deleteUndoable("tasks", row, T("Task deleted", "Задачата е избришана"), ["tasks", "completions"]);
 }
 function openHistory() {
   const rows = [];
@@ -1197,7 +1307,7 @@ async function restoreTask(id) {
   await refreshAll(["tasks"]); openHistory(); renderToday(); updateBadges(); toast("Restored to today");
 }
 async function histDelTask(id) {
-  if (!confirm("Delete this task permanently?")) return;
+  if (!await ask("Delete this task permanently?")) return;
   try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
   await refreshAll(["tasks"]); openHistory(); renderToday();
 }
@@ -1222,19 +1332,19 @@ function renderInv() {
     <div class="row" style="justify-content:space-between"><span class="muted">Stock value (purchase)</span><b class="mono">${fmt(pv)} ден.</b></div>
     <div class="row" style="justify-content:space-between"><span class="muted">Stock value (sell)</span><b class="mono">${fmt(sv)} ден.</b></div>
     <div class="row" style="justify-content:space-between"><span class="muted">${state.stock.length} articles</span><b style="color:${lowN ? "var(--danger)" : "inherit"}">${lowN} low</b></div>
-    <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openCashSheet()">
+    <div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openCashSheet()">
       <span class="muted">Cash register</span><b class="mono">${fmt(cashBal())} ден. ›</b></div>
-    <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openReportSheet()">
+    <div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openReportSheet()">
       <span class="muted">Monthly report</span><b>›</b></div>
-    <div class="row" style="justify-content:space-between;margin-top:4px" onclick="openOrderSheet()">
+    <div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openOrderSheet()">
       <span class="muted">Order list${lowN ? ` (${lowN})` : ""}</span><b>›</b></div>
-    ${warrN ? `<div class="row" style="justify-content:space-between;margin-top:4px" onclick="openWarranties()">
+    ${warrN ? `<div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openWarranties()">
       <span class="muted">Warranties ending</span><b style="color:var(--amber)">${warrN} ›</b></div>` : ""}
-    ${dupN ? `<div class="row" style="justify-content:space-between;margin-top:4px" onclick="openDuplicates()">
+    ${dupN ? `<div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openDuplicates()">
       <span class="muted">Possible duplicates</span><b class="hflag">${dupN} ›</b></div>` : ""}
   </div>`;
   $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
-    <div class="card art" onclick="openArticleDetail('${a.id}')">
+    <div class="card art" role="button" tabindex="0" onclick="openArticleDetail('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
       ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
       <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
@@ -1368,7 +1478,7 @@ async function openCashSheet() {
     ${failed ? '<p class="muted">Could not load this month — check your connection.</p>' : ""}
     ${rows.map((e) => {
       const v = parseFloat(e.amount) || 0;
-      return `<div class="mov tapp" onclick="openCashEntry('${e.id}')">
+      return `<div class="mov tapp" role="button" tabindex="0" onclick="openCashEntry('${e.id}')">
         <span><b class="mono" style="color:${v >= 0 ? "var(--personal)" : "var(--danger)"}">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v))}</b>
           ${esc(e.note || "")}${e.movement_id ? ' <span class="muted">· stock</span>' : ""}${e.offer_id ? ' <span class="muted">· offer</span>' : ""}${authorTag(e.created_by)}</span>
         <span class="muted">${new Date(e.created_at).getDate()}. ›</span></div>`;
@@ -1433,8 +1543,10 @@ async function saveCashEntry(id) {
   setTimeout(openCashSheet, 240); toast("Entry updated");
 }
 async function delCashEntry(id, linked) {
+  const row = state.cash.find((x) => x.id === id);
   const extra = linked ? "\n\nThe stock movement it came from will stay — remove that separately if it was also wrong." : "";
-  if (!confirm("Delete this cash entry?" + extra)) return;
+  if (!await ask("Delete this cash entry?" + extra)) return;
+  if (row) return void await deleteUndoable("elaks_cash", row, T("Entry deleted", "Ставката е избришана"), ["cash", "cashTotal"]);
   try { await dbq(db.from("elaks_cash").delete().eq("id", id), "Not deleted"); } catch { return; }
   closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
   setTimeout(openCashSheet, 240); toast("Entry deleted");
@@ -1569,7 +1681,7 @@ function renderMergePicker(fromId) {
                       : (x.name.toLowerCase().includes(q) || (x.code || "").toLowerCase().includes(q)))
     .slice(0, 8);
   $("mg-list").innerHTML = list.length
-    ? list.map((x) => `<div class="card row" onclick="doMerge('${fromId}','${x.id}')">
+    ? list.map((x) => `<div class="card row" role="button" tabindex="0" onclick="doMerge('${fromId}','${x.id}')">
         <div style="flex:1"><b>${esc(x.name)}</b>
           <div class="muted">${esc(x.code || "")}${x.code ? " · " : ""}stock ${fmt(x.stock)} · last cost ${fmt(x.purchase_price)} ден.</div></div>
         <span class="muted">keep this ›</span></div>`).join("")
@@ -1577,7 +1689,7 @@ function renderMergePicker(fromId) {
 }
 async function doMerge(fromId, toId) {
   const a = state.stock.find((x) => x.id === fromId), b = state.stock.find((x) => x.id === toId);
-  if (!confirm(`Merge "${a.name}" into "${b.name}"?\n\nStock becomes ${fmt((a.stock || 0) + (b.stock || 0))}. This cannot be undone from the app.`)) return;
+  if (!await ask(`Merge "${a.name}" into "${b.name}"?\n\nStock becomes ${fmt((a.stock || 0) + (b.stock || 0))}. This cannot be undone from the app.`)) return;
   try { await dbq(db.rpc("merge_articles", { p_from: fromId, p_to: toId }), "Not merged"); } catch { return; }
   closeSheet(); await refreshAll(["stock"]); render();
   toast("Merged into " + b.name);
@@ -1662,7 +1774,7 @@ async function saveArticle(id) {
   closeSheet(); await refreshAll(["stock"]); renderInv(); toast("Saved");
 }
 async function delArticle(id) {
-  if (!confirm("Deactivate this article?")) return;
+  if (!await ask("Deactivate this article?")) return;
   try { await dbq(db.from("articles").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
   closeSheet(); await refreshAll(["stock"]); renderInv();
 }
@@ -1691,7 +1803,7 @@ function renderOffers() {
     (state.offStatus === "all" || o.status === state.offStatus) &&
     (!q || o.number.toLowerCase().includes(q) || o.title.toLowerCase().includes(q) || (o.clients?.name || "").toLowerCase().includes(q)));
   $("off-list").innerHTML = list.length ? list.map((o) => `
-    <div class="card offer row" onclick="openOfferSheet('${o.id}')">
+    <div class="card offer row" role="button" tabindex="0" onclick="openOfferSheet('${o.id}')">
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
@@ -1766,7 +1878,7 @@ function renderPicker() {
   if (!q) { $("of-picker").innerHTML = ""; return; }
   const list = state.stock.filter((a) => a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)).slice(0, 5);
   $("of-picker").innerHTML = list.map((a) => `
-    <div class="card art" onclick="addOfferItem('${a.id}')">
+    <div class="card art" role="button" tabindex="0" onclick="addOfferItem('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
       ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
       <div class="a-name"><b>${esc(a.name)}</b><span>stock: ${fmt(a.stock)} ${unitLbl(a.unit)} · ${fmt(a.sell_price)} ден.</span></div>
@@ -1963,7 +2075,7 @@ async function printOffer(o) {
     toast("Choose \"Save as PDF\" in the print dialog");
   } catch (e) {
     console.error(e);
-    alert("Could not build the PDF view: " + e.message);
+    say("Could not build the PDF view: " + e.message);
   }
 }
 // Puts real pictures where the template left «IMG:n» markers.
@@ -2080,7 +2192,7 @@ async function openReportSheet(month) {
     ${top.length ? top.map((t) => `<div class="mov"><span>${esc(t.name)}</span>
         <span class="mono">${fmt(t.qty)} ${t.unit}</span></div>`).join("") : '<p class="muted">Nothing left stock this month.</p>'}
     <div class="sec">Outstanding (all time)</div>
-    ${owed.length ? owed.map((o) => `<div class="mov tapp" onclick="openOfferSheet('${o.id}')">
+    ${owed.length ? owed.map((o) => `<div class="mov tapp" role="button" tabindex="0" onclick="openOfferSheet('${o.id}')">
         <span>${o.number} · ${esc((state.clients.find((c) => c.id === o.client_id) || {}).name || "no client")}</span>
         <span class="mono" style="color:var(--amber)">${fmt(offerBalance(o))} ден. ›</span></div>`).join("")
       : '<p class="muted">Everything accepted has been paid.</p>'}
@@ -2166,7 +2278,7 @@ async function copyOrder(gi) {
   try {
     await navigator.clipboard.writeText(text);
     toast("Order copied — paste it into Viber or e-mail");
-  } catch { alert(text); }
+  } catch { say(text); }
 }
 async function printOrder(gi) {
   const g = orderGroups[gi], lines = orderLines(gi);
@@ -2195,7 +2307,7 @@ async function printDoc(inner) {
     window.print();
     setTimeout(() => { $("printroot").innerHTML = ""; }, 1500);
     toast('Choose "Save as PDF" in the print dialog');
-  } catch (e) { console.error(e); alert("Could not build the document: " + e.message); }
+  } catch (e) { console.error(e); say("Could not build the document: " + e.message); }
 }
 function imgDims(src) {
   return new Promise((res) => {
@@ -2264,7 +2376,7 @@ async function generateDocx(o) {
     const det = (e.properties && e.properties.errors)
       ? e.properties.errors.map((x) => x.properties && x.properties.explanation).filter(Boolean).join("\n")
       : e.message;
-    alert("Could not generate the offer document:\n\n" + det);
+    say("Could not generate the offer document:\n\n" + det);
     return false;
   }
 }
@@ -2279,14 +2391,14 @@ async function promptDeduct(id) {
   const o = state.offers.find((x) => x.id === id);
   if (!o || !needsDeduct(o)) return;
   const list = deductLines(o).map((it) => `· ${it.name} × ${fmt(it.qty)}`).join("\n");
-  if (!confirm(`Take these off the shelf now?\n\n${list}`)) return;
+  if (!await ask(`Take these off the shelf now?\n\n${list}`)) return;
   await deductStock(id, true);
 }
 async function deductStock(id, silent) {
   const o = state.offers.find((x) => x.id === id);
   if (!o) return;
   if (o.stock_deducted) return toast("Already taken out of stock");
-  if (!silent && !confirm("Take this offer's items out of stock?")) return;
+  if (!silent && !await ask("Take this offer's items out of stock?")) return;
   const rows = deductLines(o)
     .map((it) => ({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number }));
   try {
@@ -2297,9 +2409,9 @@ async function deductStock(id, silent) {
   toast(`Taken out of stock · ${rows.length} article(s)`);
 }
 async function delOffer(id) {
-  if (!confirm("Delete this offer?")) return;
-  try { await dbq(db.from("offers").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(["offers"]); renderOffers();
+  const row = state.offers.find((x) => x.id === id);
+  if (!row || !await ask("Delete this offer?")) return;
+  await deleteUndoable("offers", row, T("Offer deleted", "Понудата е избришана"), ["offers", "payments"]);
 }
 async function createJobTask(id) {
   const o = state.offers.find((x) => x.id === id);
@@ -2333,7 +2445,7 @@ function paymentsBlock(o) {
       <div class="row bankrow"><span class="muted nw">${label}</span>
         <span class="mono"><b style="color:${colour}">${fmt(Math.abs(bal))}</b> ден.</span></div>
       ${rows.length ? `<div class="sec" style="margin-top:10px">Entries <span class="muted" style="font-weight:400">· tap to remove</span></div>` : ""}
-      ${rows.map((p) => `<div class="mov tapp" onclick="delPayment('${p.id}')">
+      ${rows.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="delPayment('${p.id}')">
         <span><b class="mono" style="color:${(parseFloat(p.amount) || 0) < 0 ? "var(--danger)" : "var(--personal)"}">${fmt(p.amount)}</b>
           ${p.method === "cash" ? "cash" : (p.method === "bank" ? "bank" : esc(p.method))}${p.note ? " · " + esc(p.note) : ""}</span>
         <span class="muted">${dmy(p.paid_on)} ›</span></div>`).join("")}
@@ -2401,7 +2513,7 @@ async function savePayment(id) {
 async function delPayment(pid) {
   const p = state.payments.find((x) => x.id === pid);
   if (!p) return;
-  if (!confirm(`Remove this payment of ${fmt(p.amount)} ден.?${p.method === "cash" ? "\n\nIts cash register entry goes with it." : ""}`)) return;
+  if (!await ask(`Remove this payment of ${fmt(p.amount)} ден.?${p.method === "cash" ? "\n\nIts cash register entry goes with it." : ""}`)) return;
   try {
     await dbq(db.from("elaks_cash").delete().eq("payment_id", pid), "Cash entry not removed");
     await dbq(db.from("offer_payments").delete().eq("id", pid), "Not removed");
@@ -2502,14 +2614,14 @@ async function closeJob(id) {
 ============================================================ */
 function renderClients() {
   $("cli-list").innerHTML = state.clients.map((c) => `
-    <div class="card row" onclick="openClientSheet('${c.id}')">
+    <div class="card row" role="button" tabindex="0" onclick="openClientSheet('${c.id}')">
       <div style="flex:1"><b>${esc(c.name)}</b><div class="muted">${esc(c.contact || "")}</div></div>
     </div>`).join("") || '<p class="muted">No clients.</p>';
 }
 function relatedTasks(field, id) {
   const list = state.tasks.filter((t) => t[field] === id && !t.done);
   if (!list.length) return "";
-  return '<div class="sec">Open tasks</div>' + list.map((t) => `<div class="mov tapp" onclick="openTaskSheet('${t.id}')">
+  return '<div class="sec">Open tasks</div>' + list.map((t) => `<div class="mov tapp" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">
     <span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
     <span class="muted">${t.due_date ? dmy(t.due_date) : ""} ›</span></div>`).join("");
 }
@@ -2560,7 +2672,7 @@ function renderTeam() {
   const el = $("team-list");                  // only exists while the Team sheet is open
   if (!el) return;
   el.innerHTML = state.team.map((r) => `
-    <div class="card row" ${r.role === "owner" ? "" : `onclick="openPermSheet('${r.user_id}')"`}>
+    <div class="card row" ${r.role === "owner" ? "" : `role="button" tabindex="0" onclick="openPermSheet('${r.user_id}')"`}>
       <div style="flex:1"><b>${esc(r.display_name || "Unnamed")}</b>
         <div class="muted">${permSummary(r)}</div></div>
     </div>`).join("") || '<p class="muted">Only you so far.</p>';
@@ -2604,7 +2716,7 @@ async function savePerm(uid) {
   closeSheet(); await loadTeam(); toast("Permissions saved");
 }
 async function removePerm(uid) {
-  if (!confirm("Remove all access for this person? Their login stays but they will see nothing.")) return;
+  if (!await ask("Remove all access for this person? Their login stays but they will see nothing.")) return;
   try { await dbq(db.from("user_roles").update({ task_contexts: [], see_elaks: false, see_apts: false }).eq("user_id", uid), "Not saved"); } catch { return; }
   closeSheet(); await loadTeam();
 }
@@ -2648,7 +2760,7 @@ function renderSettings() {
   const el = $("set-menu");
   if (!el) return;
   const row = (icon, title, sub, action) =>
-    `<div class="setrow" onclick="${action}"><span class="ico">${icon}</span>
+    `<div class="setrow" role="button" tabindex="0" onclick="${action}"><span class="ico">${icon}</span>
       <span class="txt"><b>${title}</b><span>${sub}</span></span><span class="chev">›</span></div>`;
 
   const pushSub = state.pushOn === true ? `On · daily summary ${setting("digest_hour", "07:30")}`
@@ -2675,7 +2787,7 @@ function renderSettings() {
   html += '<div class="setgrp">App</div>'
     + row("&#127760;", "Language / Јазик", langMk() ? "Македонски" : "English", "openSetSheet('lang')")
     + row("&#8505;", "About Centrala", "Version " + String(BUILD).slice(0, 8), "openSetSheet('about')")
-    + `<div class="setrow" onclick="logout()" style="border-color:var(--danger)">
+    + `<div class="setrow" role="button" tabindex="0" onclick="logout()" style="border-color:var(--danger)">
         <span class="ico" style="background:var(--danger-bg)">&#9211;</span>
         <span class="txt"><b style="color:var(--danger)">Sign out</b><span>${esc(state.email || "")}</span></span></div>`;
   el.innerHTML = html;
@@ -2774,12 +2886,12 @@ function restoreJson(input) {
   const fr = new FileReader();
   fr.onload = async () => {
     let file;
-    try { file = JSON.parse(fr.result); } catch { return alert("That file is not a Centrala backup."); }
+    try { file = JSON.parse(fr.result); } catch { return say("That file is not a Centrala backup."); }
     const data = file.data || file;              // the export nests tables under "data"
     const tables = RESTORE_ORDER.filter((t) => Array.isArray(data[t]) && data[t].length);
-    if (!tables.length) return alert("Nothing to restore — the file has no records in it.");
+    if (!tables.length) return say("Nothing to restore — the file has no records in it.");
     const summary = tables.map((t) => `· ${t.replace(/_/g, " ")}: ${data[t].length}`).join("\n");
-    if (!confirm(`Restore this backup?\n\n${summary}\n\nExisting records with the same id are updated; nothing is deleted.`)) return;
+    if (!await ask(`Restore this backup?\n\n${summary}\n\nExisting records with the same id are updated; nothing is deleted.`)) return;
     openSheet('<h2>Restoring…</h2><div class="skel"></div><div class="skel"></div>');
     const done = [], failed = [];
     for (const t of tables) {
@@ -2857,7 +2969,7 @@ async function saveAiKey() {
   const key = ($("ai-key").value || "").trim();
   if (!key) return toast("Paste the key first");
   if (!/^sk-ant-/.test(key)) {
-    if (!confirm("That does not look like an Anthropic key (they start with sk-ant-).\n\nSave it anyway?")) return;
+    if (!await ask("That does not look like an Anthropic key (they start with sk-ant-).\n\nSave it anyway?")) return;
   }
   // goes through a function that runs with the database's own rights, so the
   // key can be written to a table nothing signed in is allowed to read
@@ -2866,7 +2978,7 @@ async function saveAiKey() {
   closeSheet(); await refreshAll(["settings"]); render(); toast("Key saved");
 }
 async function removeAiKey() {
-  if (!confirm("Remove the saved key? Reading photographed notes will stop working.")) return;
+  if (!await ask("Remove the saved key? Reading photographed notes will stop working.")) return;
   try { await dbq(db.rpc("clear_secret", { p_name: "anthropic_api_key" }), "Not removed"); }
   catch { return; }
   closeSheet(); await refreshAll(["settings"]); render(); toast("Key removed");
@@ -2893,7 +3005,7 @@ function renderTemplates() {
     : '<p class="muted">No templates yet.</p>';
 }
 async function delTemplate(id) {
-  if (!confirm("Delete this template?")) return;
+  if (!await ask("Delete this template?")) return;
   try { await dbq(db.from("task_templates").delete().eq("id", id), "Not deleted"); } catch { return; }
   await refreshAll(["templates"]); renderTemplates();
 }
@@ -3023,7 +3135,7 @@ function renderCalendar() {
   $("apt-body").innerHTML = html;
 }
 function stayRow(s) {
-  return `<div class="card offer row" onclick="openStaySheet('${s.id}')">
+  return `<div class="card offer row" role="button" tabindex="0" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
       <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${authorTag(s.created_by)}${
         dOnly(s.check_in) === todayStr() ? ' · <span style="color:var(--amber)">arrives today</span>'
@@ -3068,8 +3180,8 @@ function renderStays() {
     <b style="color:var(--danger)">${dupes.length} overlapping booking(s)</b>
     <div class="muted">Two records cover the same nights in one apartment — open each and delete the one you don't want.</div>
     ${dupes.slice(0, 5).map(([a, b]) => `<div class="mov">
-      <span class="tapp" onclick="openStaySheet('${a.id}')">${esc(a.guest_name)} ${dm(a.check_in)}→${dm(a.check_out)}${a.external_uid ? " · synced" : " · typed"} ›</span>
-      <span class="tapp" onclick="openStaySheet('${b.id}')">${esc(b.guest_name)} ${dm(b.check_in)}→${dm(b.check_out)}${b.external_uid ? " · synced" : " · typed"} ›</span>
+      <span class="tapp" role="button" tabindex="0" onclick="openStaySheet('${a.id}')">${esc(a.guest_name)} ${dm(a.check_in)}→${dm(a.check_out)}${a.external_uid ? " · synced" : " · typed"} ›</span>
+      <span class="tapp" role="button" tabindex="0" onclick="openStaySheet('${b.id}')">${esc(b.guest_name)} ${dm(b.check_in)}→${dm(b.check_out)}${b.external_uid ? " · synced" : " · typed"} ›</span>
     </div>`).join("")}
   </div>`;
   if (cur.length) html += '<div class="sec">Currently staying</div>' + cur.map((s) => stayRow(s)).join("");
@@ -3176,7 +3288,7 @@ async function saveStay(id) {
   if (!row.check_in || !row.check_out || row.check_out <= row.check_in) return toast("Check-out must be after check-in");
   const clash = state.stays.find((x) => x.id !== id && x.apartment_id === row.apartment_id
     && x.check_in < row.check_out && row.check_in < x.check_out);
-  if (clash) return alert(`Those dates overlap an existing booking:\n\n${clash.guest_name} · ${clash.check_in} → ${clash.check_out}`);
+  if (clash) return say(`Those dates overlap an existing booking:\n\n${clash.guest_name} · ${clash.check_in} → ${clash.check_out}`);
   const wantTask = $("st-task").classList.contains("on");
   let saved;
   try {
@@ -3184,20 +3296,20 @@ async function saveStay(id) {
       ? db.from("stays").update(row).eq("id", id).select().single()
       : db.from("stays").insert(row).select().single(), "Stay not saved");
   } catch (e) {
-    if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) alert("Those dates are already booked for this apartment.");
+    if (e && (e.code === "23P01" || String(e.message || "").includes("stays_no_overlap"))) say("Those dates are already booked for this apartment.");
     return;
   }
   const res = await syncStayTask(saved, wantTask);
   closeSheet(); await refreshAll(["stays", "tasks", "aptCash"]); renderApt();
   if (res && res.ok) toast("Saved · reminder on " + dmy(res.on));
-  else if (res && res.msg) alert("The stay was saved, but its reminder task could not be created:\n\n" + res.msg
+  else if (res && res.msg) say("The stay was saved, but its reminder task could not be created:\n\n" + res.msg
     + "\n\nIf this mentions a missing column, the tasks migration has not been run yet.");
   else toast("Saved");
 }
 async function delStay(id) {
-  if (!confirm("Delete this stay?")) return;
-  try { await dbq(db.from("stays").delete().eq("id", id), "Not deleted"); } catch { return; }
-  closeSheet(); await refreshAll(["stays", "tasks", "aptCash"]); renderApt();
+  const row = state.stays.find((x) => x.id === id);
+  if (!row || !await ask("Delete this stay?")) return;
+  await deleteUndoable("stays", row, T("Booking deleted", "Резервацијата е избришана"), ["stays", "tasks", "aptCash"]);
 }
 
 function shiftAptMonth(dir) {
@@ -3253,7 +3365,7 @@ async function setBill(aptId, type, field, value) {
 
 function renderAptList() {
   $("apt-body").innerHTML = state.apartments.length ? state.apartments.map((a) => `
-    <div class="card row" onclick="openAptStatement('${a.id}')">
+    <div class="card row" role="button" tabindex="0" onclick="openAptStatement('${a.id}')">
       <div style="flex:1"><b>${esc(a.name)}</b>
         <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}${a.nightly_rate ? " · " + fmt(a.nightly_rate) + " ден./night" : ""}</div></div>
     </div>`).join("") : (state.loading ? SKEL(2) : '<div class="empty">No apartments.<br>Add with +</div>');
@@ -3339,7 +3451,7 @@ function outFeedBlock(a) {
 }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast("Link copied"); }
-  catch { prompt("Copy this link", t); }
+  catch { await askText("Copy this link", t); }
 }
 
 /* ---------- Booking.com / Airbnb calendar feeds ---------- */
@@ -3379,7 +3491,7 @@ async function addFeed(aptId) {
 }
 async function delFeed(id) {
   const f = state.feeds.find((x) => x.id === id);
-  if (!confirm("Stop syncing this calendar?\n\nBookings already imported stay where they are.")) return;
+  if (!await ask("Stop syncing this calendar?\n\nBookings already imported stay where they are.")) return;
   try { await dbq(db.from("ical_feeds").delete().eq("id", id), "Not removed"); } catch { return; }
   await refreshAll(["feeds"]);
   closeSheet(); setTimeout(() => openAptSheet(f.apartment_id), 240);
@@ -3395,7 +3507,7 @@ async function saveApt(id) {
   closeSheet(); await refreshAll(["apartments", "aptCash"]); renderApt(); toast("Saved");
 }
 async function delApt(id) {
-  if (!confirm("Deactivate this apartment?")) return;
+  if (!await ask("Deactivate this apartment?")) return;
   try { await dbq(db.from("apartments").update({ active: false }).eq("id", id), "Not deactivated"); } catch { return; }
   closeSheet(); await refreshAll(["apartments", "aptCash"]); renderApt();
 }
@@ -3541,7 +3653,7 @@ const VOICE_SILENCE_MS = 4000;   // how long a pause may last before it counts a
 const VOICE_MAX_MS = 90000;      // hard ceiling
 
 function startVoice() {
-  if (!SR) return alert("This phone's browser cannot listen.\n\nUse the microphone on your keyboard instead: tap +, then the mic key while typing the title.");
+  if (!SR) return say("This phone's browser cannot listen.\n\nUse the microphone on your keyboard instead: tap +, then the mic key while typing the title.");
   voiceText = ""; voiceFinal = ""; voiceSession = ""; voiceParsed = null; voiceStopping = false; voiceErr = "";
   voiceStart = Date.now();
   openSheet(voiceSheetHtml("listening"));
@@ -3745,7 +3857,7 @@ function renderHome() {
     (b.priority ? 1 : 0) - (a.priority ? 1 : 0)
     || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
   const areas = myCtx().filter((c) => byCtx(c) > 0);
-  let html = `<div class="hcard" onclick="tab('today')">
+  let html = `<div class="hcard" role="button" tabindex="0" onclick="tab('today')">
     <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
     <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
       <span class="hbig">${B.todays.length}</span>
@@ -3780,7 +3892,7 @@ function renderHome() {
     const billsSum = sumBy(billsOpen, purchaseBalance);
     const pendingStock = state.offers.filter(needsDeduct);
     const waiting = state.purchases.filter((p) => (p.items || []).length && !purFullyArrived(p));
-    html += `<div class="hcard" onclick="state.elaksView='inv';tab('elaks')">
+    html += `<div class="hcard" role="button" tabindex="0" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
       <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
@@ -3811,7 +3923,7 @@ function renderHome() {
     const bil = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 7) === curM), (b) => b.amount);
     const out = state.stays.filter((s) => s.check_out === today).length;
     const inn = state.stays.filter((s) => s.check_in === today).length;
-    html += `<div class="hcard" onclick="state.aptView='stays';tab('apt')">
+    html += `<div class="hcard" role="button" tabindex="0" onclick="state.aptView='stays';tab('apt')">
       <h3>Apartments</h3>
       <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
       ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
@@ -3909,7 +4021,7 @@ function readDocPhoto(input) {
   input.value = "";
   if (!f) return;
   if (setting("ai_key_set", "") !== "yes")
-    return alert("Add your API key first: Settings → Document reading.");
+    return say("Add your API key first: Settings → Document reading.");
   const fr = new FileReader();
   fr.onload = () => {
     const im = new Image();
@@ -4081,7 +4193,7 @@ function renderPurPicker() {
   if (!q) return ($("pu-picker").innerHTML = "");
   $("pu-picker").innerHTML = state.stock.filter((a) =>
     a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)).slice(0, 6)
-    .map((a) => `<div class="card row" onclick="addPurLine('${a.id}')">
+    .map((a) => `<div class="card row" role="button" tabindex="0" onclick="addPurLine('${a.id}')">
       <div style="flex:1"><b>${esc(a.name)}</b>
         <div class="muted">${esc(a.code || "")} · last cost ${fmt(a.purchase_price)} ден. · stock ${fmt(a.stock)}</div></div>
     </div>`).join("") || '<p class="muted">Nothing found — add it by hand and it will be created on receipt.</p>';
@@ -4136,7 +4248,7 @@ async function savePurchase(id) {
 }
 async function delPurchase(id) {
   const p = state.purchases.find((x) => x.id === id);
-  if (!confirm("Delete this purchase?" + (p.received_at ? "\n\nThe stock it added stays — remove those movements from the articles if they were wrong." : ""))) return;
+  if (!await ask("Delete this purchase?" + (p.received_at ? "\n\nThe stock it added stays — remove those movements from the articles if they were wrong." : ""))) return;
   try { await dbq(db.from("purchases").delete().eq("id", id), "Not deleted"); } catch { return; }
   closeSheet(); await refreshAll(["purchases"]); renderPurchases(); toast("Deleted");
 }
@@ -4183,7 +4295,7 @@ async function confirmArrival(id) {
   const msg = `Book ${arriving.length} line(s) into stock?`
     + (matched ? `\n\n${matched} line(s) matched to articles you already have.` : "")
     + (fresh.length ? `\n\n${fresh.length} new article(s) will be created:\n· ` + fresh.map((f) => f.it.name).join("\n· ") : "");
-  if (!confirm(msg)) return;
+  if (!await ask(msg)) return;
   try {
     const lines = JSON.parse(JSON.stringify(items));
     for (const x of arriving) {
@@ -4274,7 +4386,7 @@ async function savePurchasePayment(id) {
   toast(purPayMethod === "cash" ? "Paid — taken from the register" : "Marked as paid");
 }
 async function undoPurchasePayment(id) {
-  if (!confirm("Undo this payment? Any cash register entry for it will be removed too.")) return;
+  if (!await ask("Undo this payment? Any cash register entry for it will be removed too.")) return;
   try {
     await dbq(db.from("elaks_cash").delete().eq("purchase_id", id), "Cash entry not removed");
     await dbq(db.from("purchases").update({ paid_at: null, paid_method: null, paid_amount: null }).eq("id", id), "Not saved");
@@ -4302,7 +4414,7 @@ function renderPurchases() {
     const state_ = bal <= 0.005 ? '<span style="color:var(--personal)">paid</span>'
       : purchaseOverdue(p) ? '<span style="color:var(--danger)">overdue</span>'
       : (p.due_date ? "due " + dmy(p.due_date) : "unpaid");
-    return `<div class="card offer row" onclick="openPurchaseSheet('${p.id}')">
+    return `<div class="card offer row" role="button" tabindex="0" onclick="openPurchaseSheet('${p.id}')">
       <span class="led ${bal <= 0.005 ? "accepted" : "sent"}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(p.supplier)}</b>
@@ -4378,7 +4490,76 @@ const MK = {
   "paid": "платено", "part paid": "делумно платено", "unpaid": "неплатено",
   "sent": "испратена", "accepted": "прифатена", "draft": "нацрт", "rejected": "одбиена",
   "arrives today": "пристигнува денес", "checked out today": "се одјави денес",
-  "all paid": "сите платени", "Bills": "Сметки", "in": "доаѓаат", "out": "заминуваат",
+  "all paid": "сите платени", "Bills": "Сметки",
+  // sheets and forms
+  "Amount (ден.)": "Износ (ден.)", "Amount received (ден.)": "Примено (ден.)",
+  "Amount paid (ден.)": "Платено (ден.)", "Address": "Адреса", "Phone": "Телефон",
+  "E-mail": "Е-пошта", "Name": "Име", "Apartment": "Стан", "Guest": "Гостин",
+  "Check-in": "Пријава", "Check-out date": "Датум на одјава", "Nights": "Ноќевања",
+  "Add with +": "Додај со +", "Add with + or the microphone": "Додај со + или микрофон",
+  "Add an apartment first.": "Прво додај стан.", "No offers.": "Нема понуди.",
+  "No articles.": "Нема артикли.", "No guests yet.": "Сè уште нема гости.",
+  "No apartments.": "Нема станови.", "No purchases yet.": "Нема набавки.",
+  "No entries this month.": "Нема ставки овој месец.", "No movements.": "Нема движења.",
+  "Nothing found.": "Ништо не е најдено.", "Show everything": "Прикажи сè",
+  "Clear search": "Исчисти пребарување", "Try another photo": "Друга слика",
+  "Paid by": "Платено со", "Cash": "Кеш", "Bank": "Банка", "Date": "Датум",
+  "Already paid": "Веќе платено", "Still owed": "Останува", "Settled": "Затворено",
+  "Offer total": "Вкупно понуда", "Received": "Примено", "Overpaid": "Преплатено",
+  "Record a payment": "Внеси плаќање", "Save payment": "Зачувај плаќање",
+  "Confirm payment": "Потврди плаќање", "Undo payment": "Врати плаќање",
+  "Pay supplier bill": "Плати фактура", "Supplier": "Добавувач",
+  "Document no.": "Документ бр.", "Payment due": "Рок на плаќање",
+  "Expected arrival": "Очекувана испорака", "Receive into stock": "Прими во магацин",
+  "Everything has arrived": "Сè е пристигнато", "Ordered": "Нарачано", "Arrived": "Пристигнато",
+  "What arrived?": "Што пристигна?", "Book what arrived into stock": "Внеси во магацин",
+  "+ Add a line by hand": "+ Додај ставка рачно", "Search an article you already have…": "Барај постоечки артикл…",
+  "New purchase": "Нова набавка", "Photograph note": "Сликај испратница",
+  "From gallery": "Од галерија", "Check the note": "Провери ја испратницата",
+  "Open as a purchase": "Отвори како набавка", "Reading the note…": "Ја читам испратницата…",
+  "Merge duplicate": "Спој дупликат", "Merge with a duplicate…": "Спој со дупликат…",
+  "Minimum stock": "Минимална залиха", "Unit": "Мерка", "Photo (opt.)": "Слика (опц.)",
+  "Remove photo": "Отстрани слика", "Title": "Наслов", "Context": "Област",
+  "Time (opt.)": "Време (опц.)", "Reminder": "Потсетник", "No": "Не",
+  "Push at the time": "Известување во тоа време", "More options": "Повеќе опции",
+  "Checklist (opt.)": "Листа (опц.)", "+ Add item": "+ Додај ставка",
+  "Important — keep it at the top": "Важно — задржи на врв",
+  "Edit task": "Уреди задача", "Restore": "Врати", "Undo": "Врати",
+  "Task deleted": "Задачата е избришана", "Restored": "Вратено",
+  "Monthly report": "Месечен извештај", "Save as PDF": "Зачувај како PDF",
+  "Money received": "Примени пари", "Cash register": "Каса", "Month result": "Резултат за месецот",
+  "Most used articles": "Најкористени артикли", "Outstanding (all time)": "Неплатено (вкупно)",
+  "Bought this month": "Купено овој месец", "Supplier bills": "Фактури", "Value": "Вредност",
+  "OK": "Во ред", "Cancel": "Откажи", "Save": "Зачувај",
+  // second pass
+  "API key": "API клуч", "Access": "Пристап", "Add a calendar": "Додај календар",
+  "Article": "Артикл", "Article name": "Име на артикл", "Articles and stock": "Артикли и залиха",
+  "Booked via": "Резервирано преку", "By month": "По месец", "Cash amount (ден.)": "Износ во кеш (ден.)",
+  "Clear search and filters": "Исчисти сè", "Completed": "Завршени", "Completed tasks": "Завршени задачи",
+  "Confirm": "Потврди", "Connect": "Поврзи", "Contact person": "Лице за контакт",
+  "Could not read it": "Не можев да прочитам", "Create with +": "Креирај со +",
+  "Daily summary at": "Дневен преглед во", "Days": "Денови", "Delete entry": "Избриши ставка",
+  "Delete purchase": "Избриши набавка", "Display name": "Име за приказ",
+  "Duplicate as new offer": "Копирај како нова понуда", "Edit apartment": "Уреди стан",
+  "Edit cash entry": "Уреди ставка", "Elaks cash register": "Каса Елакс",
+  "Elaks — monthly report": "Елакс — месечен извештај", "Entries": "Ставки", "Every": "Секои",
+  "Export as CSV": "Извези како CSV", "Full balance": "Цел остаток", "Guest name": "Име на гостин",
+  "Guests leave by (check-out)": "Гостите заминуваат до (одјава)", "Half (аванс)": "Половина (аванс)",
+  "In this month": "Влез овој месец", "Out this month": "Излез овој месец", "Income": "Приход",
+  "Income by source": "Приход по извор", "Lines add up to": "Ставките се собираат на",
+  "Min. stock": "Мин. залиха", "Months (that date)": "Месеци (тој датум)",
+  "Name / company": "Име / фирма", "New total": "Нов вкупен износ",
+  "Nightly rate (ден.)": "Цена по ноќ (ден.)", "Nights booked": "Резервирани ноќи",
+  "No apartment": "Без стан", "No client": "Без клиент", "No clients.": "Нема клиенти.",
+  "No offers yet.": "Сè уште нема понуди.", "No past stays.": "Нема изминати гости.",
+  "No stays this year.": "Нема гости оваа година.", "Printed on the note": "Испишано на документот",
+  "Stock movements": "Движења на залиха", "Weeks — pick days": "Недели — избери денови",
+  "Where": "Каде", "Your calendar (give these to the platforms)": "Твој календар (дај им го на платформите)",
+  "for Booking.com": "за Booking.com", "For Booking.com": "За Booking.com", "For Airbnb": "За Airbnb",
+  "Remove key": "Отстрани клуч", "Replace key": "Замени клуч", "Save key": "Зачувај клуч",
+  "Key saved": "Клучот е зачуван", "No key yet": "Сè уште нема клуч",
+  "Photograph a supplier note": "Сликај испратница", "Check the note": "Провери го документот",
+  "Possible duplicates": "Можни дупликати", "keep this ›": "задржи го овој ›", "in": "доаѓаат", "out": "заминуваат",
   "Installed equipment": "Вградена опрема", "+ Add installed equipment": "+ Додај вградена опрема",
   "Nothing recorded yet.": "Сè уште нема ништо.", "Serial number": "Сериски број",
   "Where": "Каде", "Installed on": "Вградено на", "Warranty (months)": "Гаранција (месеци)",
@@ -4409,6 +4590,7 @@ function setLang(mk) {
   try { localStorage.setItem("centrala_lang", mk ? "mk" : "en"); } catch (e) { console.warn(e); }
   location.reload();
 }
+document.documentElement.lang = langMk() ? "mk" : "en";
 
 // Walk the finished page and swap whole strings we know. Inputs and
 // textareas are left alone — those hold real data, not labels.
@@ -4451,7 +4633,7 @@ const expiringSoon = () => state.installs.filter((i) => {
 function installsBlock(clientId) {
   const list = state.installs.filter((i) => i.client_id === clientId);
   return `<div class="sec">Installed equipment</div>
-    ${list.map((i) => `<div class="card row tapp" onclick="openInstallSheet('${i.id}')">
+    ${list.map((i) => `<div class="card row tapp" role="button" tabindex="0" onclick="openInstallSheet('${i.id}')">
       <div style="flex:1;min-width:0"><b>${esc(i.name)}</b>
         <div class="muted">${i.serial ? "SN " + esc(i.serial) + " · " : ""}${i.location ? esc(i.location) + " · " : ""}${dmy(i.installed_on)}</div>
         <div style="font-size:12.5px">${warrantyLabel(i)}</div></div>
@@ -4505,9 +4687,10 @@ async function saveInstall(id) {
   if (row.client_id) setTimeout(() => openClientSheet(row.client_id), 240);
 }
 async function delInstall(id) {
-  if (!confirm("Remove this equipment record?")) return;
-  try { await dbq(db.from("installations").delete().eq("id", id), "Not removed"); } catch { return; }
-  closeSheet(); await refreshAll(["installs"]); render();
+  const row = state.installs.find((x) => x.id === id);
+  if (!row || !await ask("Remove this equipment record?")) return;
+  const copy = { ...row }; delete copy.warranty_until;   // worked out by the database
+  await deleteUndoable("installations", copy, T("Equipment removed", "Опремата е отстранета"), ["installs"]);
 }
 
 // Everything whose warranty is running out, so it becomes service work
@@ -4517,7 +4700,7 @@ function openWarranties() {
   const clientName = (id) => (state.clients.find((c) => c.id === id) || {}).name || "no client";
   openSheet(`<h2>Warranties ending</h2>
     <p class="muted">The next 90 days. A good moment to offer a service visit.</p>
-    ${list.length ? list.map((i) => `<div class="card row tapp" onclick="openInstallSheet('${i.id}')">
+    ${list.length ? list.map((i) => `<div class="card row tapp" role="button" tabindex="0" onclick="openInstallSheet('${i.id}')">
       <div style="flex:1;min-width:0"><b>${esc(i.name)}</b>
         <div class="muted">${esc(clientName(i.client_id))}${i.serial ? " · SN " + esc(i.serial) : ""}</div>
         <div style="font-size:12.5px">${warrantyLabel(i)}</div></div>
