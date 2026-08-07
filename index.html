@@ -453,7 +453,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  loading: true, mineOnly: false, showDone: false, people: [], cashMonth: null, repMonth: null,
+  loading: true, mineOnly: false, showDone: false, billAccount: null, people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -554,6 +554,7 @@ const LOADERS = {
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
+  accounts:   { need: () => true,               q: () => db.from("accounts").select("*").eq("active", true).order("sort") },
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
   stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
   bills:      { need: () => state.perm.apts,    q: () => db.from("bills").select("*").gte("month", backMonths(24)) },
@@ -617,7 +618,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-034343";
+const BUILD = "20260807-070246";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3067,6 +3068,40 @@ function bankRow(label, inc, bil) {
     <span class="mono" style="text-align:right"><b>${fmt(inc - bil)}</b> ден.
       <small class="calc">${fmt(inc)} − ${fmt(bil)}</small></span></div>`;
 }
+// Money sits in three places. A booking that has not been filed by hand is
+// filed by where it came from — Airbnb pays into Payoneer, so it lands there.
+function accountMap() {
+  const raw = setting("account_by_source", "");
+  if (!raw) return {};
+  try { return typeof raw === "object" ? raw : JSON.parse(raw); } catch { return {}; }
+}
+const accountName = (id) => (state.accounts.find((a) => a.id === id) || {}).name || "";
+function accountFor(row) {
+  if (row.account_id) return row.account_id;
+  const bySource = accountMap()[row.source || "Direct"];
+  if (bySource) return bySource;
+  const cash = state.accounts.find((a) => /cash|кеш/i.test(a.name));
+  return cash ? cash.id : null;
+}
+// What is in each account: money already received, less what has been paid out.
+function accountBalances() {
+  const bal = {};
+  for (const a of state.accounts) bal[a.id] = parseFloat(a.opening_balance) || 0;
+  for (const s of state.stays) {
+    if (!stayStarted(s)) continue;
+    const id = accountFor(s);
+    if (id) bal[id] = (bal[id] || 0) + (parseFloat(s.amount) || 0);
+  }
+  for (const b of state.bills) {
+    const id = accountFor(b);
+    if (id) bal[id] = (bal[id] || 0) - (parseFloat(b.amount) || 0);
+  }
+  // apartment starting amounts are cash on hand
+  const cash = state.accounts.find((a) => /cash|кеш/i.test(a.name));
+  if (cash) bal[cash.id] = (bal[cash.id] || 0) + sumBy(state.apartments, (a) => a.opening_balance);
+  return bal;
+}
+
 function renderApt() {
   const curM = new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0");
   const yr = String(new Date().getFullYear());
@@ -3083,13 +3118,17 @@ function renderApt() {
   const bilY = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
   const t = todayStr();
   const occ = new Set(state.stays.filter((s) => s.check_in <= t && s.check_out > t).map((s) => s.apartment_id)).size;
+  const bal = accountBalances();
   $("apt-bank").innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between"><b>Apartments bank</b>
       <span class="muted">${occ}/${state.apartments.length} occupied tonight</span></div>
     ${bankRow("This month", incM, bilM)}
     ${bankRow("This year", incY, bilY)}
-    <div class="row bankrow"><span class="muted nw">Cash in hand</span>
-      <span class="mono"><b>${fmt(cashAll)}</b> ден.</span></div>
+    <div class="row bankrow"><span class="muted nw">${T("Money in hand", "Пари вкупно")}</span>
+      <span class="mono"><b>${fmt(state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll)}</b> ден.</span></div>
+    ${state.accounts.map((a) => `<div class="row bankrow" style="margin-top:2px">
+      <span class="muted nw" style="padding-left:10px">${esc(a.name)}</span>
+      <span class="mono">${fmt(bal[a.id] || 0)} ден.</span></div>`).join("")}
     ${soon ? `<div class="row bankrow"><span class="muted nw">Upcoming bookings</span>
       <span class="mono">${fmt(soon)} ден.</span></div>` : ""}
   </div>`;
@@ -3146,6 +3185,31 @@ function stayRow(s) {
     <span class="o-total mono">${fmt(s.amount)} ден.</span>
   </div>`;
 }
+// The codes, one tap from the guest you are dealing with — that is where
+// you need them, not buried in the apartment settings.
+function openCodes(aptId) {
+  const a = state.apartments.find((x) => x.id === aptId);
+  if (!a) return;
+  const row = (label, val) => val
+    ? `<div class="mov" role="button" tabindex="0" onclick="copyText('${String(val).replace(/'/g, "\\'")}')">
+         <span class="muted">${label}</span>
+         <span><b class="mono">${esc(val)}</b> <span class="muted">${T("copy", "копирај")}</span></span></div>`
+    : "";
+  const any = a.keybox_code || a.alarm_code || a.wifi_name || a.wifi_pass || a.access_note;
+  openSheet(`<h2>${esc(a.name)}</h2>
+    ${any ? `<div class="card">
+      ${row(T("Keybox", "Сеф за клуч"), a.keybox_code)}
+      ${row(T("Alarm", "Аларм"), a.alarm_code)}
+      ${row("Wi-Fi", a.wifi_name)}
+      ${row(T("Wi-Fi password", "Wi-Fi лозинка"), a.wifi_pass)}
+    </div>
+    ${a.access_note ? `<p class="muted">${esc(a.access_note)}</p>` : ""}
+    <button class="btn ghost" onclick="copyText(\`${T("Wi-Fi", "Wi-Fi")}: ${esc(a.wifi_name || "")} / ${esc(a.wifi_pass || "")}\`)">
+      ${T("Copy Wi-Fi for the guest", "Копирај Wi-Fi за гостинот")}</button>`
+    : `<p class="muted">${T("No codes saved yet.", "Сè уште нема зачувани кодови.")}</p>`}
+    <button class="btn ghost" onclick="closeSheet();openAptSheet('${a.id}')">${T("Edit apartment", "Уреди стан")}</button>`);
+}
+
 function renderStays() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first (Apartments tab above).</div>'; return; }
   const t = todayStr();
@@ -3204,12 +3268,17 @@ function openStaySheet(id, pre) {
       <div><label>Check-out</label><input id="st-out" type="date" value="${s.check_out || ""}" onchange="stayCalc()"></div>
     </div>
     <div class="grid2">
-      <div><label>Booked via</label><select id="st-src">
+      <div><label>Booked via</label><select id="st-src" onchange="stayAcct()">
         ${["Direct", "Booking.com", "Airbnb", "Other"].map((x) => `<option ${((s.source || "Direct") === x) ? "selected" : ""}>${x}</option>`).join("")}
       </select></div>
       <div><label>Amount paid (ден.)</label><input id="st-amt" type="number" inputmode="decimal" value="${s.amount ?? ""}" oninput="this.dataset.touched=1"></div>
     </div>
+    <label>${T("Money went to", "Парите одат во")}</label>
+    <select id="st-acct" onchange="this.dataset.touched=1">
+      ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
+    </select>
     <div class="muted" id="st-nights" style="margin-top:4px"></div>
+    ${id && s.apartment_id ? `<button class="btn sm ghost" onclick="closeSheet();setTimeout(()=>openCodes('${s.apartment_id}'),240)">${T("Codes and Wi-Fi", "Кодови и Wi-Fi")}</button>` : ""}
     <div class="row" style="margin-top:12px">
       <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${stayHasTask(id) ? "\u2713" : ""}</button>
@@ -3229,6 +3298,13 @@ function openStaySheet(id, pre) {
 function nightsBetween(ci, co) {
   if (!ci || !co) return 0;
   return Math.round((Date.parse(co) - Date.parse(ci)) / 86400000);
+}
+// changing the platform moves the money with it, unless it was set by hand
+function stayAcct() {
+  const sel = $("st-acct");
+  if (!sel || sel.dataset.touched) return;
+  const id = accountFor({ source: $("st-src").value });
+  if (id) sel.value = id;
 }
 function stayCalc() {
   const n = nightsBetween($("st-in").value, $("st-out").value);
@@ -3325,9 +3401,15 @@ function renderBills() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
   const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
   let grand = 0;
+  const payFrom = state.billAccount || accountFor({});
   let html = `<div class="row" style="justify-content:center;gap:18px;margin-bottom:10px">
     <button class="chip" onclick="shiftAptMonth(-1)">‹</button><b>${label}</b>
-    <button class="chip" onclick="shiftAptMonth(1)">›</button></div>`;
+    <button class="chip" onclick="shiftAptMonth(1)">›</button></div>
+    ${state.accounts.length > 1 ? `<div class="row" style="align-items:center;gap:8px;margin-bottom:10px">
+      <span class="muted nw">${T("Paid from", "Платено од")}</span>
+      <div class="chips">${state.accounts.map((x) =>
+        `<button class="chip ${payFrom === x.id ? "on" : ""}" onclick="setBillAccount('${x.id}')">${esc(x.name)}</button>`).join("")}</div>
+    </div>` : ""}`;
   for (const a of state.apartments) {
     const rows = BILL_TYPES.map((tp) => ({ tp, b: billOf(a.id, tp) }));
     const total = sumBy(rows, (r) => r.b?.amount);
@@ -3351,11 +3433,13 @@ function renderBills() {
   html += `<div class="totalbar"><span>All bills · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
   $("apt-body").innerHTML = html;
 }
+function setBillAccount(id) { state.billAccount = id; renderApt(); }
 async function setBill(aptId, type, field, value) {
   const b = billOf(aptId, type);
   const row = {
     apartment_id: aptId, month: state.aptMonth + "-01", type,
     amount: b ? b.amount : 0, paid: b ? b.paid : false,
+    account_id: (b && b.account_id) || state.billAccount || accountFor({}),
   };
   row[field] = value;
   if (field === "paid") row.paid_on = value ? todayStr() : null;
@@ -3422,6 +3506,17 @@ function openAptSheet(id) {
       <div><label>Size (m²)</label><input id="ap-size" type="number" inputmode="decimal" value="${a.size_m2 ?? ""}"></div>
       <div><label>Nightly rate (ден.)</label><input id="ap-rate" type="number" inputmode="decimal" value="${a.nightly_rate ?? ""}"></div>
     </div>
+    <div class="sec">Access</div>
+    <div class="grid2">
+      <div><label>Keybox code</label><input id="ap-keybox" value="${esc(a.keybox_code || "")}"></div>
+      <div><label>Alarm code</label><input id="ap-alarm" value="${esc(a.alarm_code || "")}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Wi-Fi name</label><input id="ap-wifiname" value="${esc(a.wifi_name || "")}"></div>
+      <div><label>Wi-Fi password</label><input id="ap-wifipass" value="${esc(a.wifi_pass || "")}"></div>
+    </div>
+    <label>Anything else worth remembering</label>
+    <input id="ap-access" value="${esc(a.access_note || "")}" placeholder="bins on Tuesday · parking spot 4">
     <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
     <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
@@ -3501,6 +3596,11 @@ async function saveApt(id) {
     size_m2: parseFloat($("ap-size").value) || null, nightly_rate: parseFloat($("ap-rate").value) || null,
     opening_balance: parseFloat($("ap-open").value) || 0,
     checkout_time: $("ap-checkout").value || null,
+    keybox_code: $("ap-keybox").value.trim() || null,
+    alarm_code: $("ap-alarm").value.trim() || null,
+    wifi_name: $("ap-wifiname").value.trim() || null,
+    wifi_pass: $("ap-wifipass").value.trim() || null,
+    access_note: $("ap-access").value.trim() || null,
     notes: $("ap-notes").value.trim() || null };
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
