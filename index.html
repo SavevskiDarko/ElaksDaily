@@ -463,7 +463,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  loading: true, mineOnly: false, showDone: false, billAccount: null, people: [], cashMonth: null, repMonth: null,
+  loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all",
+  people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -628,7 +629,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-191715";
+const BUILD = "20260807-193338";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3212,11 +3213,24 @@ function renderApt() {
   </div>`;
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
+  // With more than a couple of apartments, stacking every one makes the page
+  // unreadable — so choose which you are looking at.
+  const showFilter = state.apartments.length > 1 && state.aptView !== "apartments";
+  $("apt-filter").innerHTML = !showFilter ? "" :
+    [["all", T("All", "Сите")]].concat(state.apartments.map((a) => [a.id, a.name]))
+      .map(([v, l]) => `<button class="chip ${state.aptFilter === v ? "on" : ""}"
+        onclick="state.aptFilter='${v}';renderApt()">${esc(l)}</button>`).join("");
   if (state.aptView === "stays") renderStays();
   else if (state.aptView === "calendar") renderCalendar();
   else if (state.aptView === "bills") renderBills();
   else renderAptList();
 }
+
+// which apartments the three lists should show
+const shownApartments = () => state.aptFilter === "all"
+  ? state.apartments
+  : state.apartments.filter((a) => a.id === state.aptFilter);
+const inAptFilter = (row) => state.aptFilter === "all" || row.apartment_id === state.aptFilter;
 
 function renderCalendar() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
@@ -3232,7 +3246,7 @@ function renderCalendar() {
   const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
   const headRow = `<div class="cal-head">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
     .map((d, i) => `<span class="${i > 4 ? "we" : ""}">${d}</span>`).join("")}</div>`;
-  for (const a of state.apartments) {
+  for (const a of shownApartments()) {
     const mine = state.stays.filter((s) => s.apartment_id === a.id);
     let cells = '<button class="cal-d pad"></button>'.repeat(lead);
     let nights = 0;
@@ -3321,7 +3335,7 @@ function renderStays() {
   // A guest is "currently staying" until the end of their check-out day —
   // one pass, so a booking can only ever land in a single section.
   const cur = [], up = [], past = [];
-  for (const s of state.stays) {
+  for (const s of state.stays.filter(inAptFilter)) {
     const ci = dOnly(s.check_in), co = dOnly(s.check_out);
     if (!ci || !co) { up.push(s); continue; }
     if (ci > t) up.push(s);
@@ -3335,7 +3349,7 @@ function renderStays() {
   // The only way one guest can show twice is two records for the same booking —
   // typically one typed by hand and the same one synced in from a platform.
   const dupes = [];
-  const live = state.stays.filter((s) => dOnly(s.check_out) >= t);
+  const live = state.stays.filter((s) => dOnly(s.check_out) >= t && inAptFilter(s));
   for (let i = 0; i < live.length; i++) {
     for (let j = i + 1; j < live.length; j++) {
       const a = live[i], b = live[j];
@@ -3521,7 +3535,7 @@ function renderBills() {
       <div class="chips">${state.accounts.map((x) =>
         `<button class="chip ${payFrom === x.id ? "on" : ""}" onclick="setBillAccount('${x.id}')">${esc(x.name)}</button>`).join("")}</div>
     </div>` : ""}`;
-  for (const a of state.apartments) {
+  for (const a of shownApartments()) {
     const rows = BILL_TYPES.map((tp) => ({ tp, b: billOf(a.id, tp) }));
     const total = sumBy(rows, (r) => r.b?.amount);
     const paidN = rows.filter((r) => r.b && r.b.paid).length;
