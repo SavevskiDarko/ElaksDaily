@@ -628,7 +628,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-092107";
+const BUILD = "20260807-191715";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3251,17 +3251,44 @@ function renderCalendar() {
   }
   $("apt-body").innerHTML = html;
 }
+// Once a guest is in, saying "arrives today" all day is just noise — so the
+// row carries the button that clears it.
+const arrivingToday = (s) => dOnly(s.check_in) === todayStr() && !s.arrived_at;
 function stayRow(s) {
+  const mark = arrivingToday(s)
+    ? ` · <span style="color:var(--amber)">${T("arrives today", "пристигнува денес")}</span>`
+    : s.arrived_at && dOnly(s.check_in) === todayStr()
+      ? ` · <span class="muted">${T("arrived", "пристигна")} ${dmyTime(s.arrived_at).slice(-5)}</span>`
+      : dOnly(s.check_out) === todayStr()
+        ? (stayEnded(s) ? ` · <span class="muted">${T("checked out today", "се одјави денес")}</span>`
+           : ` · <span style="color:var(--amber)">${T("leaves today by", "заминува денес до")} ${checkoutTimeFor(s.apartment_id)}</span>`)
+        : "";
   return `<div class="card offer row" role="button" tabindex="0" onclick="openStaySheet('${s.id}')">
     <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${authorTag(s.created_by)}${
-        dOnly(s.check_in) === todayStr() ? ' · <span style="color:var(--amber)">arrives today</span>'
-        : dOnly(s.check_out) === todayStr()
-          ? (stayEnded(s) ? ' · <span class="muted">checked out today</span>'
-             : ` · <span style="color:var(--amber)">leaves today by ${checkoutTimeFor(s.apartment_id)}</span>`)
-          : ""}</div></div>
-    <span class="o-total mono">${fmt(s.amount)} ден.</span>
+      <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${authorTag(s.created_by)}${mark}</div></div>
+    ${arrivingToday(s)
+      ? `<button class="chip on" style="flex:none" onclick="event.stopPropagation();markArrived('${s.id}')">${T("Arrived", "Пристигна")}</button>`
+      : `<span class="o-total mono">${fmt(s.amount)} ден.</span>`}
   </div>`;
+}
+
+async function unmarkArrived(id) {
+  try { await dbq(db.from("stays").update({ arrived_at: null }).eq("id", id), T("Not saved", "Не е зачувано")); } catch { return; }
+  closeSheet(); await refreshAll(["stays"]); render();
+}
+async function markArrived(id) {
+  const s = state.stays.find((x) => x.id === id);
+  if (!s) return;
+  try { await dbq(db.from("stays").update({ arrived_at: new Date().toISOString() }).eq("id", id), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  // the reminder has done its job
+  const task = state.tasks.find((t) => t.stay_id === id && !t.done);
+  if (task) await db.from("tasks").update({ done: true, last_done: todayStr() }).eq("id", task.id);
+  await refreshAll(["stays", "tasks"]); render();
+  toastUndo(T("Arrived", "Пристигна") + " · " + s.guest_name, async () => {
+    await db.from("stays").update({ arrived_at: null }).eq("id", id);
+    await refreshAll(["stays"]); render();
+  });
 }
 // The codes, one tap from the guest you are dealing with — that is where
 // you need them, not buried in the apartment settings.
@@ -3356,6 +3383,12 @@ function openStaySheet(id, pre) {
       ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
     </select>
     <div class="muted" id="st-nights" style="margin-top:4px"></div>
+    ${id && arrivingToday(s)
+      ? `<button class="btn amber" onclick="markArrived('${id}');closeSheet()">${T("Guest has arrived", "Гостинот пристигна")}</button>`
+      : id && s.arrived_at
+        ? `<p class="muted">${T("Arrived", "Пристигна")} ${dmyTime(s.arrived_at)} ·
+             <span role="button" tabindex="0" style="text-decoration:underline"
+               onclick="unmarkArrived('${id}')">${T("undo", "врати")}</span></p>` : ""}
     ${id && s.apartment_id ? `<button class="btn sm ghost" onclick="closeSheet();setTimeout(()=>openCodes('${s.apartment_id}'),240)">${T("Codes and Wi-Fi", "Кодови и Wi-Fi")}</button>` : ""}
     <div class="row" style="margin-top:12px">
       <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
@@ -4100,7 +4133,7 @@ function renderHome() {
     const inc = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 7) === curM), (s) => s.amount);
     const bil = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 7) === curM), (b) => b.amount);
     const out = state.stays.filter((s) => s.check_out === today).length;
-    const inn = state.stays.filter((s) => s.check_in === today).length;
+    const inn = state.stays.filter((s) => s.check_in === today && !s.arrived_at).length;
     html += `<div class="hcard" role="button" tabindex="0" onclick="state.aptView='stays';tab('apt')">
       <h3>Apartments</h3>
       <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
