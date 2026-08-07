@@ -353,7 +353,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   <!-- APARTMENTS -->
   <div class="view" id="v-apt">
     <div id="apt-bank"></div>
-    <div class="chips" id="apt-tabs" style="margin-bottom:12px"></div>
+    <div class="chips" id="apt-tabs" style="margin-bottom:8px"></div>
+    <div class="chips" id="apt-filter" style="margin-bottom:12px"></div>
     <div id="apt-body"></div>
   </div>
 
@@ -629,7 +630,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-193338";
+const BUILD = "20260807-193842";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3216,7 +3217,8 @@ function renderApt() {
   // With more than a couple of apartments, stacking every one makes the page
   // unreadable — so choose which you are looking at.
   const showFilter = state.apartments.length > 1 && state.aptView !== "apartments";
-  $("apt-filter").innerHTML = !showFilter ? "" :
+  const filterEl = $("apt-filter");
+  if (filterEl) filterEl.innerHTML = !showFilter ? "" :
     [["all", T("All", "Сите")]].concat(state.apartments.map((a) => [a.id, a.name]))
       .map(([v, l]) => `<button class="chip ${state.aptFilter === v ? "on" : ""}"
         onclick="state.aptFilter='${v}';renderApt()">${esc(l)}</button>`).join("");
