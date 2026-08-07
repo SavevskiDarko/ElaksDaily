@@ -618,7 +618,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-070246";
+const BUILD = "20260807-085300";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3070,6 +3070,48 @@ function bankRow(label, inc, bil) {
 }
 // Money sits in three places. A booking that has not been filed by hand is
 // filed by where it came from — Airbnb pays into Payoneer, so it lands there.
+// Set an account to what it actually holds. Rather than making you work out a
+// starting figure, you type the real balance and the difference is stored.
+function openAccountSheet(id) {
+  const a = state.accounts.find((x) => x.id === id);
+  if (!a) return;
+  const shown = accountBalances()[id] || 0;
+  const fromOpening = parseFloat(a.opening_balance) || 0;
+  const fromMovements = shown - fromOpening;
+  openSheet(`
+    <h2>${esc(a.name)}</h2>
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("From bookings and bills", "Од резервации и сметки")}</span>
+        <span class="mono">${fmt(fromMovements)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Starting amount", "Почетна состојба")}</span>
+        <span class="mono">${fmt(fromOpening)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Shown now", "Прикажано сега")}</span>
+        <span class="mono"><b>${fmt(shown)}</b> ден.</span></div>
+    </div>
+    <label>${T("What is actually in it right now (ден.)", "Колку има навистина сега (ден.)")}</label>
+    <input id="ac-real" type="number" inputmode="decimal" step="any" value="${Math.round(shown * 100) / 100}">
+    <p class="muted" style="font-size:12.5px">${T(
+      "Type the real balance. The starting amount is worked out from it, so bookings and bills keep adding on top correctly.",
+      "Внеси ја вистинската состојба. Почетната состојба се пресметува сама, па резервациите и сметките продолжуваат да се собираат правилно.")}</p>
+    <label>${T("Money arrives this many days after check-in", "Парите стигнуваат вака многу дена по пријавата")}</label>
+    <input id="ac-delay" type="number" min="0" max="30" value="${parseInt(a.payout_delay_days) || 0}">
+    <p class="muted" style="font-size:12.5px">${T(
+      "0 for cash in your hand. Airbnb usually pays out the day after the guest arrives, so 1 suits Payoneer.",
+      "0 за кеш в рака. Airbnb обично исплаќа ден по пристигнувањето на гостинот, па 1 одговара за Payoneer.")}</p>
+    <button class="btn" onclick="saveAccount('${id}')">${T("Save", "Зачувај")}</button>
+  `);
+}
+async function saveAccount(id) {
+  const a = state.accounts.find((x) => x.id === id);
+  const shown = accountBalances()[id] || 0;
+  const fromMovements = shown - (parseFloat(a.opening_balance) || 0);
+  const real = parseFloat($("ac-real").value);
+  const row = { payout_delay_days: Math.max(0, parseInt($("ac-delay").value) || 0) };
+  if (Number.isFinite(real)) row.opening_balance = Math.round((real - fromMovements) * 100) / 100;
+  try { await dbq(db.from("accounts").update(row).eq("id", id), "Not saved"); } catch { return; }
+  closeSheet(); await refreshAll(["accounts"]); render(); toast(T("Saved", "Зачувано"));
+}
+
 function accountMap() {
   const raw = setting("account_by_source", "");
   if (!raw) return {};
@@ -3084,12 +3126,24 @@ function accountFor(row) {
   return cash ? cash.id : null;
 }
 // What is in each account: money already received, less what has been paid out.
+// Airbnb pays out the day after arrival, so an account can hold money later
+// than the guest turns up. Delay is per account, 0 for cash in the hand.
+function moneyArrived(s, acct) {
+  const delay = parseInt((acct || {}).payout_delay_days) || 0;
+  if (!delay) return stayStarted(s);
+  const ci = dOnly(s.check_in);
+  if (!ci) return false;
+  const d = new Date(ci + "T12:00");
+  d.setDate(d.getDate() + delay);
+  return d.toLocaleDateString("sv-SE") <= todayStr();
+}
 function accountBalances() {
   const bal = {};
   for (const a of state.accounts) bal[a.id] = parseFloat(a.opening_balance) || 0;
   for (const s of state.stays) {
-    if (!stayStarted(s)) continue;
     const id = accountFor(s);
+    const acct = state.accounts.find((a) => a.id === id);
+    if (!moneyArrived(s, acct)) continue;
     if (id) bal[id] = (bal[id] || 0) + (parseFloat(s.amount) || 0);
   }
   for (const b of state.bills) {
@@ -3113,7 +3167,10 @@ function renderApt() {
   const bilAll = sumBy(state.bills, (b) => b.amount);
   // the view sums the full history; the local figure is the fallback if it is missing
   const cashAll = state.aptCash === null ? (recAll + openAll - bilAll) : state.aptCash;
-  const soon = sumBy(state.stays.filter((s) => !stayStarted(s)), (s) => s.amount);
+  const soon = sumBy(state.stays.filter((s) => {
+    const acct = state.accounts.find((a) => a.id === accountFor(s));
+    return !moneyArrived(s, acct);
+  }), (s) => s.amount);
   const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
   const bilY = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
   const t = todayStr();
@@ -3126,8 +3183,9 @@ function renderApt() {
     ${bankRow("This year", incY, bilY)}
     <div class="row bankrow"><span class="muted nw">${T("Money in hand", "Пари вкупно")}</span>
       <span class="mono"><b>${fmt(state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll)}</b> ден.</span></div>
-    ${state.accounts.map((a) => `<div class="row bankrow" style="margin-top:2px">
-      <span class="muted nw" style="padding-left:10px">${esc(a.name)}</span>
+    ${state.accounts.map((a) => `<div class="row bankrow" style="margin-top:2px" role="button" tabindex="0"
+        onclick="event.stopPropagation();openAccountSheet('${a.id}')">
+      <span class="muted nw" style="padding-left:10px">${esc(a.name)} ›</span>
       <span class="mono">${fmt(bal[a.id] || 0)} ден.</span></div>`).join("")}
     ${soon ? `<div class="row bankrow"><span class="muted nw">Upcoming bookings</span>
       <span class="mono">${fmt(soon)} ден.</span></div>` : ""}
