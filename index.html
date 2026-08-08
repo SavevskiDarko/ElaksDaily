@@ -650,7 +650,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-173147";
+const BUILD = "20260808-175536";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2698,7 +2698,7 @@ async function closeJob(id) {
    CLIENTS + PUSH
 ============================================================ */
 /* ---------- insurance policies ---------- */
-const POLICY_KINDS = ["Автомобил", "Имот", "Патничко", "Живот", "Друго"];
+const POLICY_KINDS = ["Автомобил", "Зелен картон", "Имот", "Патничко", "Живот", "Друго"];
 
 const polPaid = (p) => sumBy(state.polPays.filter((x) => x.policy_id === p.id), (x) => x.amount);
 const polBalance = (p) => (parseFloat(p.amount) || 0) - polPaid(p);
@@ -2751,6 +2751,7 @@ function renderPolicies() {
   $("pol-list").innerHTML = list.length ? list.map((p) => {
     const st = polStatus(p), bal = polBalance(p);
     return `<div class="card offer row" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
+      ${p.photo_thumb ? `<img class="thumb" src="${p.photo_thumb}" alt="">` : ""}
       <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
         <div class="o-num">${p.kind ? esc(p.kind) + " · " : ""}${p.policy_no ? esc(p.policy_no) + " · " : ""}<span style="color:${st.colour}">${st.label}</span>${
           p.end_date ? " · " + dmy(p.end_date) : ""}</div></div>
@@ -2765,9 +2766,61 @@ function renderPolicies() {
       : T("No policies here.<br>Add with +", "Нема полиси.<br>Додај со +")}</div>`);
 }
 
-function openPolicySheet(id) {
+let polImg = { mode: "keep", thumb: null, full: null };
+let polOpenId = null;
+function renderPolImg() {
+  const el = $("po-img");
+  if (!el) return;
+  el.innerHTML = polImg.thumb
+    ? `<img src="${polImg.full || polImg.thumb}" alt="" class="thumb-lg" style="max-height:190px"
+         role="button" tabindex="0" onclick="viewPolicyPhoto()">`
+    : "";
+}
+function pickPolicyImage(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (f.size > 12 * 1024 * 1024) return toast(T("Photo too large", "Сликата е преголема"));
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      // big enough to read the small print on a policy, small enough to sync
+      polImg = { mode: "new", thumb: imgResize(im, 90, 0.6), full: imgResize(im, 1400, 0.8) };
+      renderPolImg();
+    };
+    im.onerror = () => toast(T("Could not read that image", "Не можев да ја прочитам сликата"));
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+function removePolicyImage() {
+  polImg = { mode: "remove", thumb: null, full: null };
+  const f = $("po-file"); if (f) f.value = "";
+  renderPolImg();
+}
+function viewPolicyPhoto() {
+  if (!polImg.full && !polImg.thumb) return;
+  const src = polImg.full || polImg.thumb;
+  const back = polOpenId;
+  openSheet(`<h2>${T("Policy photo", "Слика од полисата")}</h2>
+    <img src="${src}" alt="" style="width:100%;border-radius:11px;background:#ECECEC">
+    <p class="muted" style="font-size:12.5px">${T("Open it in a new tab to zoom in on the small print.",
+      "Отвори ја во нов таб за да го зумираш ситниот текст.")}</p>
+    <button class="btn ghost" onclick="window.open('${src}','_blank')">${T("Open full size", "Отвори во полна големина")}</button>
+    ${back ? `<button class="btn ghost" onclick="openPolicySheet('${back}')">${T("Back to the policy", "Назад кон полисата")}</button>` : ""}`);
+}
+
+async function openPolicySheet(id) {
   const p = id ? state.policies.find((x) => x.id === id) : { start_date: todayStr(), amount: 0 };
   if (id && !p) return;
+  polImg = { mode: "keep", thumb: p.photo_thumb || null, full: null };
+  polOpenId = id || null;
+  if (id && p.photo_thumb) {
+    try {
+      const { data } = await db.from("policy_photos").select("data").eq("policy_id", id).maybeSingle();
+      if (data && data.data) polImg.full = data.data;
+    } catch (e) { console.warn("policy photo", e); }
+  }
   openSheet(`
     <h2>${id ? esc(p.holder_name) : T("New policy", "Нова полиса")}</h2>
     <label>${T("Person insured", "Осигуреник")}</label>
@@ -2790,12 +2843,20 @@ function openPolicySheet(id) {
     <label>${T("Price (ден.)", "Цена (ден.)")}</label>
     <input id="po-amount" type="number" inputmode="decimal" step="any" value="${p.amount ?? 0}">
     <label>${T("Note", "Белешка")}</label><input id="po-note" value="${esc(p.note || "")}">
+    <label>${T("Photo of the policy", "Слика од полисата")}</label>
+    <div id="po-img"></div>
+    <div class="row" style="gap:8px;margin-top:6px">
+      <input type="file" accept="image/*" id="po-file" style="display:none" onchange="pickPolicyImage(this)">
+      <button class="btn sm ghost" style="flex:1" onclick="$('po-file').click()">${T("Choose or photograph", "Избери или сликај")}</button>
+      <button class="btn sm ghost" style="flex:1" onclick="removePolicyImage()">${T("Remove photo", "Отстрани слика")}</button>
+    </div>
     <button class="btn" onclick="savePolicy('${id || ""}')">${T("Save", "Зачувај")}</button>
     ${id ? polPaymentsBlock(p) : `<p class="muted" style="font-size:12.5px">${T(
       "Save it first, then you can record what has been paid — in one go or in instalments.",
       "Прво зачувај ја, потоа можеш да внесуваш уплати — одеднаш или на рати.")}</p>`}
     ${id ? `<button class="btn danger" onclick="delPolicy('${id}')">${T("Remove policy", "Отстрани полиса")}</button>` : ""}
   `);
+  renderPolImg();
 }
 function pickKind(btn) {
   [...$("po-kind").querySelectorAll(".chip")].forEach((b) => b.classList.toggle("on", b === btn));
@@ -2863,11 +2924,18 @@ async function savePolicy(id) {
     note: $("po-note").value.trim() || null,
   };
   if (!row.holder_name) return toast(T("Whose policy is it?", "Чија е полисата?"));
+  if (polImg.mode === "new") row.photo_thumb = polImg.thumb;
+  if (polImg.mode === "remove") row.photo_thumb = null;
   if (row.end_date && row.end_date < row.start_date) return toast(T("It cannot end before it starts", "Не може да заврши пред да почне"));
   let saved;
   try {
     saved = await dbq(id ? db.from("policies").update(row).eq("id", id).select().single()
                          : db.from("policies").insert(row).select().single(), T("Not saved", "Не е зачувано"));
+    if (polImg.mode === "new") {
+      await dbq(db.from("policy_photos").upsert({ policy_id: saved.id, data: polImg.full }, { onConflict: "policy_id" }),
+        T("Photo not saved", "Сликата не е зачувана"));
+    }
+    if (polImg.mode === "remove") await db.from("policy_photos").delete().eq("policy_id", saved.id);
   } catch { return; }
   closeSheet(); await refreshAll(["policies"]); render(); toast(T("Saved", "Зачувано"));
   if (!id) setTimeout(() => openPolicySheet(saved.id), 240);
