@@ -108,7 +108,10 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   background:var(--line);color:var(--muted);font-size:13px;font-weight:700;
   display:flex;align-items:center;justify-content:center}
 .sheet-x:active{opacity:.6}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+.grid2 > div{display:flex;flex-direction:column;justify-content:flex-end;min-width:0}
+.grid2 > div > label{margin-top:12px}
+.grid2 > div > label:first-child{margin-top:0}
 
 /* ---- tasks ---- */
 .task{display:flex;align-items:center;gap:11px}
@@ -650,7 +653,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-231419";
+const BUILD = "20260808-232348";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2852,7 +2855,7 @@ async function openPolicySheet(id) {
       <div><label>${T("Price (ден.)", "Цена (ден.)")}</label>
         <input id="po-amount" type="number" inputmode="decimal" step="any" value="${p.amount ?? 0}"
           oninput="polCommHint()"></div>
-      <div><label>${T("Your commission (ден.)", "Твоја провизија (ден.)")}</label>
+      <div><label>${T("Commission (ден.)", "Провизија (ден.)")}</label>
         <input id="po-comm" type="number" inputmode="decimal" step="any" value="${p.commission ?? 0}"
           oninput="polCommHint()"></div>
     </div>
