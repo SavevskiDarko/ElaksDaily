@@ -650,7 +650,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-175928";
+const BUILD = "20260808-231419";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2706,6 +2706,12 @@ const polSettled = (p) => polBalance(p) <= 0.005;
 const polDaysLeft = (p) => !p.end_date ? null
   : Math.round((Date.parse(p.end_date + "T12:00") - Date.parse(todayStr() + "T12:00")) / 86400000);
 
+// a green card runs out long before the policy does
+const gcSoon = (p) => {
+  if (!p.has_green_card || !p.green_card_end) return false;
+  const d = Math.round((Date.parse(p.green_card_end + "T12:00") - Date.parse(todayStr() + "T12:00")) / 86400000);
+  return d >= 0 && d <= 14;
+};
 function polStatus(p) {
   const d = polDaysLeft(p);
   if (d !== null && d < 0) return { key: "expired", label: T("expired", "истечена"), colour: "var(--muted)" };
@@ -2733,9 +2739,10 @@ function renderPolicies() {
       <span class="muted nw">${all.length} ${T("policies", "полиси")}</span>
     </div>
     <div class="stat-row">
-      <div class="stat"><span>${T("This month", "Овој месец")}</span>
+      <div class="stat"><span>${T("Collected this month", "Наплатено овој месец")}</span>
         <b>${fmt(sumBy(state.polPays.filter((x) => (x.paid_on || "").slice(0, 7) === todayStr().slice(0, 7)), (x) => x.amount))}</b></div>
-      <div class="stat"><span>${T("Not paid up", "Недоплатени")}</span><b>${counts.open}</b></div>
+      <div class="stat"><span>${T("Commission this month", "Провизија овој месец")}</span>
+        <b style="color:var(--personal)">${fmt(sumBy(all.filter((p) => (p.start_date || "").slice(0, 7) === todayStr().slice(0, 7)), (p) => p.commission))}</b></div>
       <div class="stat"><span>${T("Ending soon", "Истекуваат")}</span>
         <b class="${counts.expiring ? "hflag" : ""}">${counts.expiring}</b></div>
     </div>
@@ -2752,14 +2759,15 @@ function renderPolicies() {
     const st = polStatus(p), bal = polBalance(p);
     return `<div class="card offer row" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
       ${p.photo_thumb ? `<img class="thumb" src="${p.photo_thumb}" alt="">` : ""}
-      <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
+      <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>${
+          p.has_green_card ? ` <span class="pill" style="padding:1px 7px;font-size:10.5px">ЗК</span>` : ""}
         <div class="o-num">${p.kind ? esc(p.kind) + " · " : ""}${p.policy_no ? esc(p.policy_no) + " · " : ""}<span style="color:${st.colour}">${st.label}</span>${
-          p.end_date ? " · " + dmy(p.end_date) : ""}</div></div>
+          p.end_date ? " · " + dmy(p.end_date) : ""}${gcSoon(p) ? ` · <span style="color:var(--amber)">ЗК ${dmy(p.green_card_end)}</span>` : ""}</div></div>
       <div style="text-align:right;flex:none">
         <div class="mono"><b>${fmt(p.amount)}</b></div>
         <div class="muted" style="font-size:12px">${bal > 0.005
           ? `<span class="hflag">${fmt(bal)} ${T("left", "останува")}</span>`
-          : T("paid", "платено")}</div></div>
+          : (p.commission ? `+${fmt(p.commission)}` : T("paid", "платено"))}</div></div>
     </div>`;
   }).join("") : (state.loading ? SKEL(3) : `<div class="empty">${q
       ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
@@ -2840,8 +2848,35 @@ async function openPolicySheet(id) {
       <div><label>${T("Starts", "Почнува")}</label><input id="po-start" type="date" value="${p.start_date || todayStr()}"></div>
       <div><label>${T("Ends", "Завршува")}</label><input id="po-end" type="date" value="${p.end_date || ""}"></div>
     </div>
-    <label>${T("Price (ден.)", "Цена (ден.)")}</label>
-    <input id="po-amount" type="number" inputmode="decimal" step="any" value="${p.amount ?? 0}">
+    <div class="grid2">
+      <div><label>${T("Price (ден.)", "Цена (ден.)")}</label>
+        <input id="po-amount" type="number" inputmode="decimal" step="any" value="${p.amount ?? 0}"
+          oninput="polCommHint()"></div>
+      <div><label>${T("Your commission (ден.)", "Твоја провизија (ден.)")}</label>
+        <input id="po-comm" type="number" inputmode="decimal" step="any" value="${p.commission ?? 0}"
+          oninput="polCommHint()"></div>
+    </div>
+    <div class="chips" style="margin-top:6px">
+      ${[5, 10, 15, 20].map((pct) => `<button class="chip" onclick="setComm(${pct})">${pct}%</button>`).join("")}
+      <span class="muted nw" id="po-comm-hint" style="align-self:center;font-size:12.5px"></span>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <button class="clbox ${p.has_green_card ? "on" : ""}" id="po-gc"
+        onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':'';gcToggle()">${p.has_green_card ? "\u2713" : ""}</button>
+      <span>${T("Includes a green card", "Вклучува зелен картон")}</span>
+    </div>
+    <div id="po-gc-fields" style="display:${p.has_green_card ? "block" : "none"}">
+      <div class="grid2">
+        <div><label>${T("Green card number", "Број на зелен картон")}</label>
+          <input id="po-gcno" value="${esc(p.green_card_no || "")}"></div>
+        <div><label>${T("Green card ends", "Зелен картон завршува")}</label>
+          <input id="po-gcend" type="date" value="${p.green_card_end || ""}"></div>
+      </div>
+      <p class="muted" style="font-size:12.5px">${T(
+        "A green card usually runs a month while the policy runs a year, so it is watched separately.",
+        "Зелениот картон обично трае месец, а полисата година — затоа се следи одделно.")}</p>
+    </div>
     <label>${T("Note", "Белешка")}</label><input id="po-note" value="${esc(p.note || "")}">
     <label>${T("Photo of the policy", "Слика од полисата")}</label>
     <div id="po-img"></div>
@@ -2854,9 +2889,32 @@ async function openPolicySheet(id) {
     ${id ? polPaymentsBlock(p) : `<p class="muted" style="font-size:12.5px">${T(
       "Save it first, then you can record what has been paid — in one go or in instalments.",
       "Прво зачувај ја, потоа можеш да внесуваш уплати — одеднаш или на рати.")}</p>`}
-    ${id ? `<button class="btn danger" onclick="delPolicy('${id}')">${T("Remove policy", "Отстрани полиса")}</button>` : ""}
+    ${id ? `<button class="btn amber" onclick="renewPolicy('${id}')">${T("Renew for another term", "Обнови за нов период")}</button>
+      <button class="btn danger" onclick="delPolicy('${id}')">${T("Remove policy", "Отстрани полиса")}</button>` : ""}
   `);
   renderPolImg();
+}
+function setComm(pct) {
+  const amt = parseFloat($("po-amount").value) || 0;
+  $("po-comm").value = Math.round(amt * pct) / 100;
+  polCommHint();
+}
+function polCommHint() {
+  const amt = parseFloat($("po-amount").value) || 0;
+  const c = parseFloat($("po-comm").value) || 0;
+  const el = $("po-comm-hint");
+  if (el) el.textContent = amt && c ? `= ${Math.round((c / amt) * 1000) / 10}%` : "";
+}
+function gcToggle() {
+  const on = $("po-gc").classList.contains("on");
+  $("po-gc-fields").style.display = on ? "block" : "none";
+  // a green card is usually a month — offer that rather than leave it blank
+  if (on && !$("po-gcend").value) {
+    const start = $("po-start").value || todayStr();
+    const d = new Date(start + "T12:00");
+    d.setMonth(d.getMonth() + 1);
+    $("po-gcend").value = d.toLocaleDateString("sv-SE");
+  }
 }
 function pickKind(btn) {
   [...$("po-kind").querySelectorAll(".chip")].forEach((b) => b.classList.toggle("on", b === btn));
@@ -2921,6 +2979,10 @@ async function savePolicy(id) {
     start_date: $("po-start").value || todayStr(),
     end_date: $("po-end").value || null,
     amount: parseFloat($("po-amount").value) || 0,
+    commission: parseFloat($("po-comm").value) || 0,
+    has_green_card: $("po-gc").classList.contains("on"),
+    green_card_no: $("po-gcno").value.trim() || null,
+    green_card_end: $("po-gcend").value || null,
     note: $("po-note").value.trim() || null,
   };
   if (!row.holder_name) return toast(T("Whose policy is it?", "Чија е полисата?"));
@@ -2961,6 +3023,43 @@ async function delPolPayment(id) {
   try { await dbq(db.from("policy_payments").delete().eq("id", id), T("Not removed", "Не е отстрането")); } catch { return; }
   closeSheet(); await refreshAll(["polPays"]); render();
   setTimeout(() => openPolicySheet(r.policy_id), 240);
+}
+
+// A policy ending is next month's sale, not a dead record. Renewing copies
+// everything forward for the same length of time and keeps the two linked.
+async function renewPolicy(id) {
+  const p = state.policies.find((x) => x.id === id);
+  if (!p) return;
+  const start = p.end_date && p.end_date > todayStr() ? p.end_date : todayStr();
+  const lenDays = p.end_date && p.start_date
+    ? Math.round((Date.parse(p.end_date) - Date.parse(p.start_date)) / 86400000)
+    : 365;
+  const endD = new Date(start + "T12:00");
+  endD.setDate(endD.getDate() + Math.max(1, lenDays));
+  const end = endD.toLocaleDateString("sv-SE");
+
+  if (!await ask(T(
+    `Renew ${p.holder_name}?\n\nNew term ${dmy(start)} → ${dmy(end)}, same price and commission. Nothing is paid on it yet.`,
+    `Обнови за ${p.holder_name}?\n\nНов период ${dmy(start)} → ${dmy(end)}, иста цена и провизија. Сè уште нема уплати.`),
+    T("Renew", "Обнови"))) return;
+
+  const row = {
+    holder_name: p.holder_name, policy_no: null, phone: p.phone, kind: p.kind,
+    insurer: p.insurer, client_id: p.client_id, start_date: start, end_date: end,
+    amount: p.amount, commission: p.commission, note: p.note,
+    has_green_card: p.has_green_card, green_card_no: null,
+    green_card_end: p.has_green_card ? (() => {
+      const g = new Date(start + "T12:00"); g.setMonth(g.getMonth() + 1);
+      return g.toLocaleDateString("sv-SE");
+    })() : null,
+    renewed_from: p.id,
+  };
+  let made;
+  try { made = await dbq(db.from("policies").insert(row).select().single(), T("Not renewed", "Не е обновено")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["policies"]); render();
+  setTimeout(() => openPolicySheet(made.id), 240);
+  toast(T("Renewed — check the number and price", "Обновено — провери број и цена"));
 }
 
 async function delPolicy(id) {
