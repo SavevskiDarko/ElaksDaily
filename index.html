@@ -650,7 +650,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-172514";
+const BUILD = "20260808-173147";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -731,9 +731,11 @@ function tab(name, fromBack) {
   else if (name === "home" && tabPushed && !fromBack) { tabPushed = false; goBackSilently(); }
   state.tab = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
-  $("v-" + { home: "home", today: "today", elaks: "elaks", apt: "apt", set: "set" }[name]).classList.add("on");
+  const viewEl = $("v-" + ({ home: "home", today: "today", elaks: "elaks", apt: "apt", ins: "ins", set: "set" }[name] || "home"));
+  if (viewEl) viewEl.classList.add("on");
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-  $("bar-title").textContent = { home: "Home", today: "Tasks", elaks: "Elaks", apt: "Apartments", set: "Settings" }[name];
+  $("bar-title").textContent = { home: "Home", today: "Tasks", elaks: "Elaks", apt: "Apartments",
+    ins: "Insurance", set: "Settings" }[name] || "Home";
   const fabOn = ["today", "elaks", "apt", "ins"].includes(name);
   const micOn = ["home", "today"].includes(name);
   $("fab").classList.toggle("on", fabOn);
@@ -5215,6 +5217,14 @@ const MK = {
   "sent": "испратена", "accepted": "прифатена", "draft": "нацрт", "rejected": "одбиена",
   "arrives today": "пристигнува денес", "checked out today": "се одјави денес",
   "all paid": "сите платени", "Bills": "Сметки",
+  "Insurance": "Осигурување", "New policy": "Нова полиса", "Policies": "Полиси",
+  "Person insured": "Осигуреник", "Policy number": "Број на полиса", "Type": "Вид",
+  "Insurance company": "Осигурителна компанија", "Starts": "Почнува", "Ends": "Завршува",
+  "Price (ден.)": "Цена (ден.)", "Payments": "Уплати", "Instalments": "Рати",
+  "Price": "Цена", "Paid so far": "Уплатено", "Left to pay": "Останува",
+  "+ Record a payment": "+ Внеси уплата", "Save payment": "Зачувај уплата",
+  "Remove policy": "Отстрани полиса", "Not paid up": "Недоплатени",
+  "Ending soon": "Истекуваат", "still to collect": "останува да се наплати",
   // sheets and forms
   "Amount (ден.)": "Износ (ден.)", "Amount received (ден.)": "Примено (ден.)",
   "Amount paid (ден.)": "Платено (ден.)", "Address": "Адреса", "Phone": "Телефон",
