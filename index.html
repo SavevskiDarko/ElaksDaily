@@ -517,7 +517,7 @@ async function startApp() {
       let { data: r, error: rerr } = await db.from("user_roles").select("*").eq("user_id", user.id).maybeSingle();
       if (!rerr && !r) {  // first sign-in: register with zero access; owner grants from Team
         await db.from("user_roles").insert({ user_id: user.id, role: "employee" });
-        r = { role: "employee", task_contexts: [], see_elaks: false, see_apts: false };
+        r = { role: "employee", task_contexts: [], see_elaks: false, see_apts: false, see_insurance: false };
       }
       if (!rerr && r) {
         state.role = r.role;
@@ -650,7 +650,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-175536";
+const BUILD = "20260808-175928";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3247,6 +3247,7 @@ function permSummary(r) {
   if ((r.task_contexts || []).length) parts.push("Tasks: " + r.task_contexts.map((c) => CTX[c]).join(", "));
   if (r.see_elaks) parts.push("Elaks");
   if (r.see_apts) parts.push("Apts");
+  if (r.see_insurance) parts.push(T("Insurance", "Осигурување"));
   return parts.join(" · ") || "No access yet";
 }
 function renderTeam() {
@@ -3261,7 +3262,7 @@ function renderTeam() {
 let permDraft = null;
 function openPermSheet(uid) {
   const r = state.team.find((x) => x.user_id === uid);
-  permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts };
+  permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance };
   openSheet(`
     <h2>${esc(r.display_name || "Team member")}</h2>
     <label>Display name</label><input id="pm-name" value="${esc(r.display_name || "")}">
@@ -3279,7 +3280,11 @@ function renderPermBoxes() {
     <div class="row" style="margin-bottom:6px">
       <button class="clbox ${permDraft.ctx.includes(c) ? "on" : ""}" onclick="permToggleCtx('${c}')">${permDraft.ctx.includes(c) ? "✓" : ""}</button>
       <span>${CTX[c]} tasks</span></div>`).join("");
-  $("pm-biz").innerHTML = [["elaks", "Elaks (stock, offers, clients)"], ["apts", "Apartments (stays, bills)"]].map(([k, l]) => `
+  $("pm-biz").innerHTML = [
+    ["elaks", T("Elaks (stock, offers, clients)", "Елакс (магацин, понуди, клиенти)")],
+    ["apts", T("Apartments (stays, bills)", "Станови (гости, сметки)")],
+    ["ins", T("Insurance (policies, payments)", "Осигурување (полиси, уплати)")],
+  ].map(([k, l]) => `
     <div class="row" style="margin-bottom:6px">
       <button class="clbox ${permDraft[k] ? "on" : ""}" onclick="permToggleBiz('${k}')">${permDraft[k] ? "✓" : ""}</button>
       <span>${l}</span></div>`).join("");
@@ -3292,7 +3297,7 @@ function permToggleCtx(c) {
 function permToggleBiz(k) { permDraft[k] = !permDraft[k]; renderPermBoxes(); }
 async function savePerm(uid) {
   const row = { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
-    see_elaks: permDraft.elaks, see_apts: permDraft.apts };
+    see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins };
   try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), "Not saved"); } catch { return; }
   closeSheet(); await loadTeam(); toast("Permissions saved");
 }
