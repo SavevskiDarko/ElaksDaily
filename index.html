@@ -357,6 +357,14 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     </div>
   </div>
 
+  <!-- INSURANCE -->
+  <div class="view" id="v-ins">
+    <div id="pol-summary"></div>
+    <input class="search" id="pol-search" placeholder="Search name, policy number or phone…" oninput="renderPolicies()">
+    <div class="chips" id="pol-filter" style="margin-bottom:12px"></div>
+    <div id="pol-list"></div>
+  </div>
+
   <!-- APARTMENTS -->
   <div class="view" id="v-apt">
     <div id="apt-bank"></div>
@@ -391,6 +399,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <button data-tab="today" onclick="tab('today')"><span class="led"></span>Tasks<span class="bdg" id="bdg-today"></span></button>
     <button data-tab="elaks" onclick="tab('elaks')"><span class="led"></span>Elaks<span class="bdg" id="bdg-elaks"></span></button>
     <button data-tab="apt" onclick="tab('apt')"><span class="led"></span>Apts</button>
+    <button data-tab="ins" onclick="tab('ins')"><span class="led"></span>Insurance</button>
     <button data-tab="set" onclick="tab('set')"><span class="led"></span>Settings</button>
   </div>
 </div>
@@ -474,7 +483,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
-  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], apartments: [], stays: [], bills: [], cash: [],
+  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], policies: [], polPays: [], polFilter: "open", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -513,8 +522,8 @@ async function startApp() {
       if (!rerr && r) {
         state.role = r.role;
         state.perm = r.role === "owner"
-          ? { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true }
-          : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts };
+          ? { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true }
+          : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance };
       }
     }
     if (!state.perm.elaks) {
@@ -522,6 +531,7 @@ async function startApp() {
       const bs = $("biz-settings"); if (bs) bs.style.display = "none";
     }
     if (!state.perm.apts) { const b = document.querySelector('[data-tab="apt"]'); if (b) b.style.display = "none"; }
+    if (!state.perm.ins) { const b = document.querySelector('[data-tab="ins"]'); if (b) b.style.display = "none"; }
     if (state.perm.owner) loadTeam();
     if (state.perm.owner && $("apts-settings")) $("apts-settings").style.display = "";
     if (state.perm.owner && $("data-settings")) $("data-settings").style.display = "";
@@ -571,6 +581,8 @@ const LOADERS = {
   purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
+  policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
+  polPays:    { need: () => state.perm.ins,     q: () => db.from("policy_payments").select("*").order("paid_on", { ascending: false }).limit(500) },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
@@ -638,7 +650,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-064705";
+const BUILD = "20260808-172514";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -722,7 +734,7 @@ function tab(name, fromBack) {
   $("v-" + { home: "home", today: "today", elaks: "elaks", apt: "apt", set: "set" }[name]).classList.add("on");
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("bar-title").textContent = { home: "Home", today: "Tasks", elaks: "Elaks", apt: "Apartments", set: "Settings" }[name];
-  const fabOn = ["today", "elaks", "apt"].includes(name);
+  const fabOn = ["today", "elaks", "apt", "ins"].includes(name);
   const micOn = ["home", "today"].includes(name);
   $("fab").classList.toggle("on", fabOn);
   $("mic").classList.toggle("on", micOn);
@@ -731,6 +743,7 @@ function tab(name, fromBack) {
 }
 function fabClick() {
   if (state.tab === "today") openTaskSheet();
+  else if (state.tab === "ins") openPolicySheet();
   else if (state.tab === "elaks") (state.elaksView === "off" ? openOfferSheet()
     : state.elaksView === "pur" ? openPurchaseSheet()
     : state.elaksView === "cli" ? openClientSheet() : openArticleSheet());
@@ -744,6 +757,7 @@ function render() {
   if (state.tab === "today") renderToday();
   if (state.tab === "elaks") renderElaks();
   if (state.tab === "apt") renderApt();
+  if (state.tab === "ins") renderPolicies();
 }
 function toast(msg) {
   const t = $("toast");
@@ -2681,6 +2695,212 @@ async function closeJob(id) {
 /* ============================================================
    CLIENTS + PUSH
 ============================================================ */
+/* ---------- insurance policies ---------- */
+const POLICY_KINDS = ["Автомобил", "Имот", "Патничко", "Живот", "Друго"];
+
+const polPaid = (p) => sumBy(state.polPays.filter((x) => x.policy_id === p.id), (x) => x.amount);
+const polBalance = (p) => (parseFloat(p.amount) || 0) - polPaid(p);
+const polSettled = (p) => polBalance(p) <= 0.005;
+const polDaysLeft = (p) => !p.end_date ? null
+  : Math.round((Date.parse(p.end_date + "T12:00") - Date.parse(todayStr() + "T12:00")) / 86400000);
+
+function polStatus(p) {
+  const d = polDaysLeft(p);
+  if (d !== null && d < 0) return { key: "expired", label: T("expired", "истечена"), colour: "var(--muted)" };
+  if (d !== null && d <= 30) return { key: "expiring", label: T("ends in", "истекува за") + " " + d + "d", colour: "var(--amber)" };
+  return { key: "live", label: T("running", "активна"), colour: "var(--personal)" };
+}
+
+function renderPolicies() {
+  const q = (($("pol-search") || {}).value || "").trim().toLowerCase();
+  const all = state.policies;
+  const counts = {
+    open: all.filter((p) => !polSettled(p)).length,
+    expiring: all.filter((p) => { const d = polDaysLeft(p); return d !== null && d >= 0 && d <= 30; }).length,
+    all: all.length,
+  };
+  $("pol-filter").innerHTML = [["open", T("Not paid up", "Недоплатени")], ["expiring", T("Ending soon", "Истекуваат")], ["all", T("All", "Сите")]]
+    .map(([v, l]) => `<button class="chip ${state.polFilter === v ? "on" : ""}"
+      onclick="state.polFilter='${v}';renderPolicies()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
+
+  const owed = all.filter((p) => !polSettled(p));
+  $("pol-summary").innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><div class="bank-big">${fmt(sumBy(owed, polBalance))} <span style="font-size:16px">ден.</span></div>
+        <div class="bank-lbl">${T("still to collect", "останува да се наплати")}</div></div>
+      <span class="muted nw">${all.length} ${T("policies", "полиси")}</span>
+    </div>
+    <div class="stat-row">
+      <div class="stat"><span>${T("This month", "Овој месец")}</span>
+        <b>${fmt(sumBy(state.polPays.filter((x) => (x.paid_on || "").slice(0, 7) === todayStr().slice(0, 7)), (x) => x.amount))}</b></div>
+      <div class="stat"><span>${T("Not paid up", "Недоплатени")}</span><b>${counts.open}</b></div>
+      <div class="stat"><span>${T("Ending soon", "Истекуваат")}</span>
+        <b class="${counts.expiring ? "hflag" : ""}">${counts.expiring}</b></div>
+    </div>
+  </div>`;
+
+  let list = all;
+  if (state.polFilter === "open") list = all.filter((p) => !polSettled(p));
+  else if (state.polFilter === "expiring") list = all.filter((p) => { const d = polDaysLeft(p); return d !== null && d >= 0 && d <= 30; });
+  if (q) list = list.filter((p) => [p.holder_name, p.policy_no, p.phone, p.insurer, p.kind, p.note]
+    .some((v) => String(v || "").toLowerCase().includes(q)));
+  list = list.slice().sort((a, b) => (a.end_date || "9999").localeCompare(b.end_date || "9999"));
+
+  $("pol-list").innerHTML = list.length ? list.map((p) => {
+    const st = polStatus(p), bal = polBalance(p);
+    return `<div class="card offer row" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
+      <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
+        <div class="o-num">${p.kind ? esc(p.kind) + " · " : ""}${p.policy_no ? esc(p.policy_no) + " · " : ""}<span style="color:${st.colour}">${st.label}</span>${
+          p.end_date ? " · " + dmy(p.end_date) : ""}</div></div>
+      <div style="text-align:right;flex:none">
+        <div class="mono"><b>${fmt(p.amount)}</b></div>
+        <div class="muted" style="font-size:12px">${bal > 0.005
+          ? `<span class="hflag">${fmt(bal)} ${T("left", "останува")}</span>`
+          : T("paid", "платено")}</div></div>
+    </div>`;
+  }).join("") : (state.loading ? SKEL(3) : `<div class="empty">${q
+      ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
+      : T("No policies here.<br>Add with +", "Нема полиси.<br>Додај со +")}</div>`);
+}
+
+function openPolicySheet(id) {
+  const p = id ? state.policies.find((x) => x.id === id) : { start_date: todayStr(), amount: 0 };
+  if (id && !p) return;
+  openSheet(`
+    <h2>${id ? esc(p.holder_name) : T("New policy", "Нова полиса")}</h2>
+    <label>${T("Person insured", "Осигуреник")}</label>
+    <input id="po-name" value="${esc(p.holder_name || "")}" placeholder="${T("Full name", "Име и презиме")}">
+    <div class="grid2">
+      <div><label>${T("Policy number", "Број на полиса")}</label><input id="po-no" value="${esc(p.policy_no || "")}"></div>
+      <div><label>${T("Phone", "Телефон")}</label><input id="po-phone" value="${esc(p.phone || "")}"></div>
+    </div>
+    <label>${T("Type", "Вид")}</label>
+    <div class="chips" id="po-kind">
+      ${POLICY_KINDS.map((k) => `<button class="chip ${(p.kind || POLICY_KINDS[0]) === k ? "on" : ""}"
+        onclick="pickKind(this)" data-k="${k}">${k}</button>`).join("")}
+    </div>
+    <label>${T("Insurance company", "Осигурителна компанија")}</label>
+    <input id="po-insurer" value="${esc(p.insurer || "")}">
+    <div class="grid2">
+      <div><label>${T("Starts", "Почнува")}</label><input id="po-start" type="date" value="${p.start_date || todayStr()}"></div>
+      <div><label>${T("Ends", "Завршува")}</label><input id="po-end" type="date" value="${p.end_date || ""}"></div>
+    </div>
+    <label>${T("Price (ден.)", "Цена (ден.)")}</label>
+    <input id="po-amount" type="number" inputmode="decimal" step="any" value="${p.amount ?? 0}">
+    <label>${T("Note", "Белешка")}</label><input id="po-note" value="${esc(p.note || "")}">
+    <button class="btn" onclick="savePolicy('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? polPaymentsBlock(p) : `<p class="muted" style="font-size:12.5px">${T(
+      "Save it first, then you can record what has been paid — in one go or in instalments.",
+      "Прво зачувај ја, потоа можеш да внесуваш уплати — одеднаш или на рати.")}</p>`}
+    ${id ? `<button class="btn danger" onclick="delPolicy('${id}')">${T("Remove policy", "Отстрани полиса")}</button>` : ""}
+  `);
+}
+function pickKind(btn) {
+  [...$("po-kind").querySelectorAll(".chip")].forEach((b) => b.classList.toggle("on", b === btn));
+}
+
+// The instalments: what has been paid, what is left, and when each part came in.
+function polPaymentsBlock(p) {
+  const rows = state.polPays.filter((x) => x.policy_id === p.id)
+    .slice().sort((a, b) => (b.paid_on || "").localeCompare(a.paid_on || ""));
+  const paid = polPaid(p), bal = polBalance(p);
+  return `<div class="sec">${T("Payments", "Уплати")}</div>
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Price", "Цена")}</span>
+        <span class="mono">${fmt(p.amount)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Paid so far", "Уплатено")}</span>
+        <span class="mono" style="color:var(--personal)">${fmt(paid)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${bal > 0.005 ? T("Left to pay", "Останува") : T("Settled", "Затворено")}</span>
+        <span class="mono"><b style="color:${bal > 0.005 ? "var(--amber)" : "var(--personal)"}">${fmt(Math.abs(bal))}</b> ден.</span></div>
+      ${rows.length ? `<div class="sec" style="margin-top:10px">${T("Instalments", "Рати")}
+        <span class="muted" style="font-weight:400">· ${T("tap to remove", "допри за бришење")}</span></div>` : ""}
+      ${rows.map((r, i) => `<div class="mov tapp" role="button" tabindex="0" onclick="delPolPayment('${r.id}')">
+        <span><b class="mono" style="color:${(parseFloat(r.amount) || 0) < 0 ? "var(--danger)" : "var(--personal)"}">${fmt(r.amount)}</b>
+          ${T("instalment", "рата")} ${rows.length - i}${r.note ? " · " + esc(r.note) : ""} · ${esc(r.method)}</span>
+        <span class="muted">${dmy(r.paid_on)} ›</span></div>`).join("")}
+      <button class="btn sm ghost" style="margin-top:10px" onclick="polPaySheet('${p.id}')">
+        ${rows.length ? T("+ Another instalment", "+ Уште една рата") : T("+ Record a payment", "+ Внеси уплата")}</button>
+    </div>`;
+}
+
+let polMethod = "cash";
+function polPaySheet(policyId) {
+  const p = state.policies.find((x) => x.id === policyId);
+  const bal = polBalance(p);
+  polMethod = "cash";
+  openSheet(`
+    <h2>${T("Payment", "Уплата")}</h2>
+    <p class="muted">${esc(p.holder_name)} · ${T("left to pay", "останува")} ${fmt(bal)} ден.</p>
+    <label>${T("Paid by", "Платено со")}</label>
+    <div class="chips" id="pp-m2">
+      ${[["cash", T("Cash", "Кеш")], ["bank", T("Bank", "Банка")], ["card", T("Card", "Картичка")]].map(([v, l], i) =>
+        `<button class="chip ${i === 0 ? "on" : ""}" onclick="polMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this))">${l}</button>`).join("")}
+    </div>
+    <label>${T("Amount (ден.)", "Износ (ден.)")}</label>
+    <input id="pp-amt2" type="number" inputmode="decimal" step="any" value="${Math.max(0, Math.round(bal * 100) / 100)}">
+    <div class="chips" style="margin-top:8px">
+      <button class="chip" onclick="$('pp-amt2').value=${Math.max(0, Math.round(bal * 50) / 100)}">${T("Half", "Половина")}</button>
+      <button class="chip" onclick="$('pp-amt2').value=${Math.max(0, Math.round(bal * 100) / 100)}">${T("All of it", "Целиот остаток")}</button>
+    </div>
+    <label>${T("Date", "Датум")}</label><input id="pp-date2" type="date" value="${todayStr()}">
+    <label>${T("Note", "Белешка")}</label><input id="pp-note2" placeholder="${T("e.g. first instalment", "на пр. прва рата")}">
+    <button class="btn" onclick="savePolPayment('${policyId}')">${T("Save payment", "Зачувај уплата")}</button>
+  `);
+}
+
+async function savePolicy(id) {
+  const row = {
+    holder_name: $("po-name").value.trim(),
+    policy_no: $("po-no").value.trim() || null,
+    phone: $("po-phone").value.trim() || null,
+    kind: ($("po-kind").querySelector(".chip.on") || {}).dataset?.k || null,
+    insurer: $("po-insurer").value.trim() || null,
+    start_date: $("po-start").value || todayStr(),
+    end_date: $("po-end").value || null,
+    amount: parseFloat($("po-amount").value) || 0,
+    note: $("po-note").value.trim() || null,
+  };
+  if (!row.holder_name) return toast(T("Whose policy is it?", "Чија е полисата?"));
+  if (row.end_date && row.end_date < row.start_date) return toast(T("It cannot end before it starts", "Не може да заврши пред да почне"));
+  let saved;
+  try {
+    saved = await dbq(id ? db.from("policies").update(row).eq("id", id).select().single()
+                         : db.from("policies").insert(row).select().single(), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["policies"]); render(); toast(T("Saved", "Зачувано"));
+  if (!id) setTimeout(() => openPolicySheet(saved.id), 240);
+}
+
+async function savePolPayment(policyId) {
+  const amt = parseFloat($("pp-amt2").value);
+  if (!amt) return toast(T("Enter the amount", "Внеси износ"));
+  try {
+    await dbq(db.from("policy_payments").insert({
+      policy_id: policyId, amount: amt, method: polMethod,
+      paid_on: $("pp-date2").value || todayStr(), note: $("pp-note2").value.trim() || null,
+    }), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["polPays"]); render();
+  setTimeout(() => openPolicySheet(policyId), 240);
+  toast(T("Payment recorded", "Уплатата е зачувана"));
+}
+
+async function delPolPayment(id) {
+  const r = state.polPays.find((x) => x.id === id);
+  if (!r || !await ask(T("Remove this instalment of " + fmt(r.amount) + " ден.?", "Отстрани ја оваа рата од " + fmt(r.amount) + " ден.?"))) return;
+  try { await dbq(db.from("policy_payments").delete().eq("id", id), T("Not removed", "Не е отстрането")); } catch { return; }
+  closeSheet(); await refreshAll(["polPays"]); render();
+  setTimeout(() => openPolicySheet(r.policy_id), 240);
+}
+
+async function delPolicy(id) {
+  const p = state.policies.find((x) => x.id === id);
+  const pays = state.polPays.filter((x) => x.policy_id === id).length;
+  if (!await ask(T(`Remove this policy?${pays ? `\n\nIts ${pays} recorded payment(s) go too.` : ""}`,
+    `Отстрани ја полисата?${pays ? `\n\nЌе се избришат и ${pays} уплати.` : ""}`))) return;
+  await deleteUndoable("policies", p, T("Policy removed", "Полисата е отстранета"), ["policies", "polPays"]);
+}
+
 /* ---------- suppliers ---------- */
 // A chosen name rather than a typed one — typing is how "Wizard Systems" and
 // "wizard sistemi" became two suppliers in the first place.
