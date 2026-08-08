@@ -306,28 +306,48 @@ Deno.serve(async (req) => {
   // the real number of days left rather than the missed one.
   try {
     if (hhmm >= digestHour) {
-      const MARKS = [30, 20, 10, 7];
+      // Warnings scale to how long the cover runs: a year-long policy is worth
+      // a month's notice, a one-month green card is not.
+      const marksFor = (fromDate: string, toDate: string) => {
+        const len = Math.round((Date.parse(toDate + "T12:00Z") - Date.parse(fromDate + "T12:00Z")) / 86400000);
+        if (len >= 180) return [30, 20, 10, 7];
+        if (len >= 45) return [14, 7, 3];
+        return [7, 3, 1];
+      };
+      const wording = (days: number) => days === 0 ? "истекува денес"
+        : days === 1 ? "истекува утре" : `истекува за ${days} дена`;
+
       const { data: pols } = await db.from("policies")
-        .select("id, holder_name, policy_no, end_date, amount, reminded_days")
-        .eq("active", true).not("end_date", "is", null).gte("end_date", today);
+        .select("id, holder_name, policy_no, start_date, end_date, amount, reminded_days, has_green_card, green_card_no, green_card_end, gc_reminded_days")
+        .eq("active", true);
 
       for (const p of pols ?? []) {
-        const days = Math.round((Date.parse(p.end_date + "T12:00Z") - Date.parse(today + "T12:00Z")) / 86400000);
-        if (days < 0) continue;
-        const done: number[] = p.reminded_days ?? [];
-        const passed = MARKS.filter((m) => days <= m && !done.includes(m));
-        if (!passed.length) continue;
-
-        const left = days === 0 ? "истекува денес"
-          : days === 1 ? "истекува утре"
-          : `истекува за ${days} дена`;
-        await sendToAll(
-          "Полиса " + left,
-          `${p.holder_name}${p.policy_no ? " · " + p.policy_no : ""} · ${p.end_date}`,
-          `policy-${p.id}`,
-          (r) => r.role === "owner" || !!r.see_insurance,
-        );
-        await db.from("policies").update({ reminded_days: done.concat(passed) }).eq("id", p.id);
+        // the policy itself
+        if (p.end_date && p.end_date >= today) {
+          const days = Math.round((Date.parse(p.end_date + "T12:00Z") - Date.parse(today + "T12:00Z")) / 86400000);
+          const marks = marksFor(p.start_date ?? today, p.end_date);
+          const done: number[] = p.reminded_days ?? [];
+          const passed = marks.filter((m) => days <= m && !done.includes(m));
+          if (passed.length) {
+            await sendToAll("Полиса " + wording(days),
+              `${p.holder_name}${p.policy_no ? " · " + p.policy_no : ""} · ${p.end_date}`,
+              `policy-${p.id}`, (r) => r.role === "owner" || !!r.see_insurance);
+            await db.from("policies").update({ reminded_days: done.concat(passed) }).eq("id", p.id);
+          }
+        }
+        // the green card on it, which runs out much sooner
+        if (p.has_green_card && p.green_card_end && p.green_card_end >= today) {
+          const gdays = Math.round((Date.parse(p.green_card_end + "T12:00Z") - Date.parse(today + "T12:00Z")) / 86400000);
+          const gmarks = marksFor(p.start_date ?? today, p.green_card_end);
+          const gdone: number[] = p.gc_reminded_days ?? [];
+          const gpassed = gmarks.filter((m) => gdays <= m && !gdone.includes(m));
+          if (gpassed.length) {
+            await sendToAll("Зелен картон " + wording(gdays),
+              `${p.holder_name}${p.green_card_no ? " · " + p.green_card_no : ""} · ${p.green_card_end}`,
+              `gc-${p.id}`, (r) => r.role === "owner" || !!r.see_insurance);
+            await db.from("policies").update({ gc_reminded_days: gdone.concat(gpassed) }).eq("id", p.id);
+          }
+        }
       }
     }
   } catch (e) { console.error("policy reminders", e); }
