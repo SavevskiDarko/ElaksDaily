@@ -391,3 +391,5 @@ function cleanGuest(summary: string, source: string, blocked: boolean) {
   if (!s || /^(reserved|booking|airbnb|closed|busy)$/i.test(s)) return `${source} guest`;
   return s.slice(0, 80);
 }
+
+// redeploy
