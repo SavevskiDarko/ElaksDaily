@@ -469,7 +469,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all",
+  loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], apartments: [], stays: [], bills: [], cash: [],
@@ -636,7 +636,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260807-201517";
+const BUILD = "20260808-061259";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1903,7 +1903,8 @@ async function openOfferSheet(id) {
     <div class="grid2">
       <div><label>Client</label><select id="of-client">
         <option value="">— select —</option>
-        ${state.clients.map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        ${state.clients.filter((c) => c.active !== false || o.client_id === c.id)
+        .map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}${c.active === false ? " · " + T("hidden", "скриен") : ""}</option>`).join("")}
       </select></div>
       <div><label>Date</label><input id="of-date" type="date" value="${o.offer_date}"></div>
     </div>
@@ -2829,11 +2830,21 @@ async function doSupMerge(fromId, toId) {
   toast(T("Merged · " + moved + " record(s) moved", "Споено · " + moved + " записи преместени"));
 }
 
+// hidden clients keep their history but drop out of lists and new offers
+const activeClients = () => state.clients.filter((c) => c.active !== false);
+
 function renderClients() {
-  $("cli-list").innerHTML = state.clients.map((c) => `
-    <div class="card row" role="button" tabindex="0" onclick="openClientSheet('${c.id}')">
-      <div style="flex:1"><b>${esc(c.name)}</b><div class="muted">${esc(c.contact || "")}</div></div>
-    </div>`).join("") || '<p class="muted">No clients.</p>';
+  const hidden = state.clients.filter((c) => c.active === false);
+  const list = state.showHiddenClients ? state.clients : activeClients();
+  $("cli-list").innerHTML = (list.map((c) => `
+    <div class="card row" role="button" tabindex="0" onclick="openClientSheet('${c.id}')"
+         style="${c.active === false ? "opacity:.55" : ""}">
+      <div style="flex:1"><b>${esc(c.name)}</b>${c.active === false ? ` <span class="muted">· ${T("hidden", "скриен")}</span>` : ""}
+        <div class="muted">${esc(c.contact || "")}</div></div>
+    </div>`).join("") || `<p class="muted">${T("No clients.", "Нема клиенти.")}</p>`)
+    + (hidden.length ? `<button class="btn sm ghost" style="margin-top:10px"
+        onclick="state.showHiddenClients=!state.showHiddenClients;renderClients()">
+        ${state.showHiddenClients ? T("Hide the hidden", "Скриј ги скриените") : `${T("Show hidden", "Прикажи скриени")} (${hidden.length})`}</button>` : "");
 }
 function relatedTasks(field, id) {
   const list = state.tasks.filter((t) => t[field] === id && !t.done);
@@ -2854,13 +2865,49 @@ function openClientSheet(id) {
     </div>
     <label>Address</label><input id="cl-address" value="${esc(c.address || "")}">
     <label>Note</label><input id="cl-note" value="${esc(c.note || "")}">
-    <button class="btn" onclick="saveClient('${id || ""}')">Save</button>
+    <button class="btn" onclick="saveClient('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id && c.active === false
+      ? `<button class="btn ghost" onclick="unhideClient('${id}')">${T("Bring back into the list", "Врати во листата")}</button>`
+      : id ? `<button class="btn danger" onclick="delClient('${id}')">${T("Remove client", "Отстрани клиент")}</button>` : ""}
     ${id ? installsBlock(id) : ""}
     ${id ? relatedTasks("client_id", id) : ""}
     ${id ? '<div class="sec">Offers</div>' + (state.offers.filter((o) => o.client_id === id).map((o) =>
       `<div class="mov"><span>${o.number} · ${esc(o.title)} · ${STATUS[o.status]}</span><span class="mono">${fmt(o.grand_total)} ден.</span></div>`).join("") || '<p class="muted">No offers yet.</p>') : ""}
   `);
 }
+// A client with history is hidden rather than deleted — deleting would take
+// their offers with it, and those are the record of work you actually did.
+async function unhideClient(id) {
+  try { await dbq(db.from("clients").update({ active: true }).eq("id", id), T("Not saved", "Не е зачувано")); } catch { return; }
+  closeSheet(); await refreshAll(["clients"]); renderElaks(); toast(T("Back in the list", "Вратен во листата"));
+}
+async function delClient(id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const offers = state.offers.filter((o) => o.client_id === id).length;
+  const kit = state.installs.filter((i) => i.client_id === id).length;
+  const tasks = state.tasks.filter((t) => t.client_id === id && !t.done).length;
+
+  if (offers || kit) {
+    const msg = T(
+      `${c.name} has ${offers} offer(s) and ${kit} piece(s) of installed equipment.\n\nHide the client instead? Their history stays, and they disappear from the list and from new offers.`,
+      `${c.name} има ${offers} понуда(и) и ${kit} вградена опрема.\n\nДа го скриеме наместо да го избришеме? Историјата останува, а исчезнува од листата и од новите понуди.`);
+    if (!await ask(msg, T("Hide client", "Скриј клиент"))) return;
+    try { await dbq(db.from("clients").update({ active: false }).eq("id", id), T("Not saved", "Не е зачувано")); } catch { return; }
+    closeSheet(); await refreshAll(["clients"]); renderElaks();
+    toastUndo(T("Client hidden", "Клиентот е скриен"), async () => {
+      await db.from("clients").update({ active: true }).eq("id", id);
+      await refreshAll(["clients"]); renderElaks(); toast(T("Restored", "Вратено"));
+    });
+    return;
+  }
+
+  if (tasks && !await ask(T(`${c.name} has ${tasks} open task(s), which will lose their link.\n\nRemove anyway?`,
+    `${c.name} има ${tasks} отворени задачи, кои ќе ја изгубат врската.\n\nСепак да го отстранам?`))) return;
+  if (!tasks && !await ask(T("Remove this client?", "Отстрани го овој клиент?"))) return;
+  await deleteUndoable("clients", c, T("Client removed", "Клиентот е отстранет"), ["clients"]);
+}
+
 async function saveClient(id) {
   const row = { name: $("cl-name").value.trim(), contact: $("cl-contact").value.trim() || null,
     phone: $("cl-phone").value.trim() || null, email: $("cl-email").value.trim() || null,
