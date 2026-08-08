@@ -299,6 +299,39 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error("overdue nudge", e); }
 
+  // ---- 8. insurance policies coming to an end ----
+  // Told four times: a month out, then 20, 10 and 7 days before. Each mark is
+  // recorded once, so a policy is never announced twice for the same one — and
+  // if the app was quiet when a mark passed, the next run still says it, using
+  // the real number of days left rather than the missed one.
+  try {
+    if (hhmm >= digestHour) {
+      const MARKS = [30, 20, 10, 7];
+      const { data: pols } = await db.from("policies")
+        .select("id, holder_name, policy_no, end_date, amount, reminded_days")
+        .eq("active", true).not("end_date", "is", null).gte("end_date", today);
+
+      for (const p of pols ?? []) {
+        const days = Math.round((Date.parse(p.end_date + "T12:00Z") - Date.parse(today + "T12:00Z")) / 86400000);
+        if (days < 0) continue;
+        const done: number[] = p.reminded_days ?? [];
+        const passed = MARKS.filter((m) => days <= m && !done.includes(m));
+        if (!passed.length) continue;
+
+        const left = days === 0 ? "истекува денес"
+          : days === 1 ? "истекува утре"
+          : `истекува за ${days} дена`;
+        await sendToAll(
+          "Полиса " + left,
+          `${p.holder_name}${p.policy_no ? " · " + p.policy_no : ""} · ${p.end_date}`,
+          `policy-${p.id}`,
+          (r) => r.role === "owner" || !!r.see_insurance,
+        );
+        await db.from("policies").update({ reminded_days: done.concat(passed) }).eq("id", p.id);
+      }
+    }
+  } catch (e) { console.error("policy reminders", e); }
+
   return new Response("ok");
 });
 
