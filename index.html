@@ -346,10 +346,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="pur-list"></div>
     </div>
     <div id="el-body-sup" style="display:none">
+      <input class="search" id="sup-search" placeholder="Search suppliers…" style="display:none" oninput="renderSuppliers()">
       <div id="sup-list"></div>
       <button class="btn ghost" onclick="openSupplierSheet()">+ New supplier</button>
     </div>
     <div id="el-body-cli" style="display:none">
+      <input class="search" id="cli-search" placeholder="Search clients…" style="display:none" oninput="renderClients()">
       <div id="cli-list"></div>
       <button class="btn ghost" onclick="openClientSheet()">+ New client</button>
     </div>
@@ -636,7 +638,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-061259";
+const BUILD = "20260808-064705";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2727,12 +2729,15 @@ function renderSuppliers() {
   const loose = [...new Set(state.stock.map((a) => a.supplier).concat(state.purchases.map((p) => p.supplier))
     .filter((n) => n && !known.has(String(n).toLowerCase())))];
 
-  el.innerHTML = (loose.length ? `<div class="card" style="border-color:var(--amber)">
+  const q = searchBox("sup-search", state.suppliers.length);
+  el.innerHTML = (loose.length && !q ? `<div class="card" style="border-color:var(--amber)">
       <b>${loose.length} ${T("name(s) not in the list", "име(ња) не се во листата")}</b>
       <div class="muted" style="font-size:12.5px">${loose.map(esc).join(" · ")}</div>
       <button class="btn sm" style="margin-top:8px" onclick="adoptSuppliers()">${T("Add them", "Додај ги")}</button>
     </div>` : "")
-    + (state.suppliers.length ? state.suppliers.map((s) => {
+    + (() => {
+      const list = state.suppliers.filter((s) => matchesQuery(s, q));
+      return list.length ? list.map((s) => {
       const st = supplierStats(s.name);
       return `<div class="card row" role="button" tabindex="0" onclick="openSupplierSheet('${s.id}')">
         <div style="flex:1;min-width:0"><b>${esc(s.name)}</b>
@@ -2740,7 +2745,10 @@ function renderSuppliers() {
             st.owed > 0.005 ? ` · <span class="hflag">${fmt(st.owed)} ${T("owed", "долг")}</span>` : ""}</div></div>
         <span class="o-total mono">${fmt(st.spent)}</span>
       </div>`;
-    }).join("") : `<div class="empty">${T("No suppliers yet.", "Нема добавувачи.")}</div>`);
+    }).join("") : `<div class="empty">${q
+        ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
+        : T("No suppliers yet.", "Нема добавувачи.")}</div>`;
+    })();
 }
 
 async function adoptSuppliers() {
@@ -2832,16 +2840,35 @@ async function doSupMerge(fromId, toId) {
 
 // hidden clients keep their history but drop out of lists and new offers
 const activeClients = () => state.clients.filter((c) => c.active !== false);
+// You rarely remember the company name — often it is the phone, the contact
+// person or the street. Match against all of it.
+const SEARCH_FROM = 7;      // below this a search box is clutter, not help
+function matchesQuery(row, q) {
+  if (!q) return true;
+  return ["name", "contact", "phone", "email", "address", "note"]
+    .some((k) => String(row[k] || "").toLowerCase().includes(q));
+}
+function searchBox(id, count) {
+  const el = $(id);
+  if (!el) return "";
+  el.style.display = count >= SEARCH_FROM ? "" : "none";
+  if (count < SEARCH_FROM) el.value = "";
+  return (el.value || "").trim().toLowerCase();
+}
 
 function renderClients() {
   const hidden = state.clients.filter((c) => c.active === false);
-  const list = state.showHiddenClients ? state.clients : activeClients();
+  const pool = state.showHiddenClients ? state.clients : activeClients();
+  const q = searchBox("cli-search", pool.length);
+  const list = pool.filter((c) => matchesQuery(c, q));
   $("cli-list").innerHTML = (list.map((c) => `
     <div class="card row" role="button" tabindex="0" onclick="openClientSheet('${c.id}')"
          style="${c.active === false ? "opacity:.55" : ""}">
       <div style="flex:1"><b>${esc(c.name)}</b>${c.active === false ? ` <span class="muted">· ${T("hidden", "скриен")}</span>` : ""}
         <div class="muted">${esc(c.contact || "")}</div></div>
-    </div>`).join("") || `<p class="muted">${T("No clients.", "Нема клиенти.")}</p>`)
+    </div>`).join("") || `<p class="muted">${q
+      ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
+      : T("No clients.", "Нема клиенти.")}</p>`)
     + (hidden.length ? `<button class="btn sm ghost" style="margin-top:10px"
         onclick="state.showHiddenClients=!state.showHiddenClients;renderClients()">
         ${state.showHiddenClients ? T("Hide the hidden", "Скриј ги скриените") : `${T("Show hidden", "Прикажи скриени")} (${hidden.length})`}</button>` : "");
