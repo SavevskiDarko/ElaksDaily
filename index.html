@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-124141";
+const BUILD = "20260809-125318";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2964,13 +2964,18 @@ function openSettleSheet(insurer) {
           polPaidDirect(p) ? `<span class="muted">${polPaidCash(p) ? " · " : ""}${T("paid them directly", "платено директно")} ${fmt(polPaidDirect(p))}</span>` : ""}${
           policyDue(p) - polPaidCash(p) > 0.005 ? `<span style="color:var(--amber)">${(polPaidCash(p) || polPaidDirect(p)) ? " · " : ""}${T("not collected", "ненаплатено")} ${fmt(policyDue(p) - polPaidCash(p))}</span>` : ""}</div>
       </div>
-      <span class="mono" style="width:78px;text-align:right">${fmt(policyDue(p))}</span>
+      <span class="mono" style="width:78px;text-align:right">${fmt(policyDue(p))}${
+        polPaidDirect(p) ? `<div class="muted" style="font-size:11px">${T("of", "од")} ${fmt(policyTotal(p))}</div>` : ""}</span>
       <span class="mono" style="width:70px;text-align:right;color:var(--personal)">${fmt(policyCommission(p))}</span>
     </div>`).join("")
       : `<p class="muted">${T("Nothing outstanding with this company.", "Ништо неподмирено кај оваа компанија.")}</p>`}
 
     <div class="card" style="margin-top:12px">
-      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Premiums to hand over", "Премии за предавање")}</span>
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("All policies, full price", "Сите полиси, полна цена")}</span>
+        <span class="mono" id="se-full"><b>0</b></span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Already paid to them directly", "Веќе платено директно кај нив")}</span>
+        <span class="mono" id="se-direct">0</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Premiums to hand over", "Премии за предавање")}</span>
         <span class="mono" id="se-prem">0</span></div>
       <div class="row bankrow"><span class="muted nw">${T("Commission earned", "Заработена провизија")}</span>
         <span class="mono" id="se-comm" style="color:var(--personal)">0</span></div>
@@ -2995,10 +3000,14 @@ function settleToggle(id, btn) {
 }
 function settleTotals() {
   const picked = state.policies.filter((p) => settleDraft.picked.includes(p.id));
+  const full = sumBy(picked, policyTotal);
+  const direct = sumBy(picked, polPaidDirect);
   const prem = sumBy(picked, policyDue);
   const comm = sumBy(picked, policyCommission);
   const net = prem - comm;
   const notCollected = sumBy(picked, (p) => Math.max(0, policyDue(p) - polPaidCash(p)));
+  $("se-full").innerHTML = `<b>${fmt(full)}</b> ден.`;
+  $("se-direct").textContent = "−" + fmt(direct) + " ден.";
   $("se-prem").textContent = fmt(prem) + " ден.";
   $("se-comm").textContent = "−" + fmt(comm) + " ден.";
   $("se-net").textContent = fmt(Math.abs(net)) + " ден.";
