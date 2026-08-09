@@ -653,7 +653,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260808-232348";
+const BUILD = "20260809-065729";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2703,8 +2703,12 @@ async function closeJob(id) {
 /* ---------- insurance policies ---------- */
 const POLICY_KINDS = ["Автомобил", "Зелен картон", "Имот", "Патничко", "Живот", "Друго"];
 
+// A car policy can carry a green card the client also pays for, so what is
+// owed is the two together.
+const gcPrice = (p) => p.has_green_card ? (parseFloat(p.green_card_price) || 0) : 0;
+const policyTotal = (p) => (parseFloat(p.amount) || 0) + gcPrice(p);
 const polPaid = (p) => sumBy(state.polPays.filter((x) => x.policy_id === p.id), (x) => x.amount);
-const polBalance = (p) => (parseFloat(p.amount) || 0) - polPaid(p);
+const polBalance = (p) => policyTotal(p) - polPaid(p);
 const polSettled = (p) => polBalance(p) <= 0.005;
 const polDaysLeft = (p) => !p.end_date ? null
   : Math.round((Date.parse(p.end_date + "T12:00") - Date.parse(todayStr() + "T12:00")) / 86400000);
@@ -2767,7 +2771,7 @@ function renderPolicies() {
         <div class="o-num">${p.kind ? esc(p.kind) + " · " : ""}${p.policy_no ? esc(p.policy_no) + " · " : ""}<span style="color:${st.colour}">${st.label}</span>${
           p.end_date ? " · " + dmy(p.end_date) : ""}${gcSoon(p) ? ` · <span style="color:var(--amber)">ЗК ${dmy(p.green_card_end)}</span>` : ""}</div></div>
       <div style="text-align:right;flex:none">
-        <div class="mono"><b>${fmt(p.amount)}</b></div>
+        <div class="mono"><b>${fmt(policyTotal(p))}</b></div>
         <div class="muted" style="font-size:12px">${bal > 0.005
           ? `<span class="hflag">${fmt(bal)} ${T("left", "останува")}</span>`
           : (p.commission ? `+${fmt(p.commission)}` : T("paid", "платено"))}</div></div>
@@ -2876,6 +2880,9 @@ async function openPolicySheet(id) {
         <div><label>${T("Green card ends", "Зелен картон завршува")}</label>
           <input id="po-gcend" type="date" value="${p.green_card_end || ""}"></div>
       </div>
+      <label>${T("Green card price (ден.)", "Цена на зелен картон (ден.)")}</label>
+      <input id="po-gcprice" type="number" inputmode="decimal" step="any"
+        value="${p.green_card_price ?? 0}" oninput="polCommHint()">
       <p class="muted" style="font-size:12.5px">${T(
         "A green card usually runs a month while the policy runs a year, so it is watched separately.",
         "Зелениот картон обично трае месец, а полисата година — затоа се следи одделно.")}</p>
@@ -2898,19 +2905,29 @@ async function openPolicySheet(id) {
   renderPolImg();
 }
 function setComm(pct) {
-  const amt = parseFloat($("po-amount").value) || 0;
-  $("po-comm").value = Math.round(amt * pct) / 100;
+  $("po-comm").value = Math.round(sheetTotal() * pct) / 100;   // on the whole sale
   polCommHint();
 }
+// what the client pays in total: the policy plus the green card on it
+function sheetTotal() {
+  const amt = parseFloat(($("po-amount") || {}).value) || 0;
+  const gc = ($("po-gc") && $("po-gc").classList.contains("on"))
+    ? (parseFloat(($("po-gcprice") || {}).value) || 0) : 0;
+  return amt + gc;
+}
 function polCommHint() {
-  const amt = parseFloat($("po-amount").value) || 0;
+  const total = sheetTotal();
   const c = parseFloat($("po-comm").value) || 0;
   const el = $("po-comm-hint");
-  if (el) el.textContent = amt && c ? `= ${Math.round((c / amt) * 1000) / 10}%` : "";
+  if (!el) return;
+  const gc = total - (parseFloat($("po-amount").value) || 0);
+  el.textContent = (gc ? `${T("total", "вкупно")} ${fmt(total)} ден.` : "")
+    + (total && c ? `${gc ? " · " : ""}= ${Math.round((c / total) * 1000) / 10}%` : "");
 }
 function gcToggle() {
   const on = $("po-gc").classList.contains("on");
   $("po-gc-fields").style.display = on ? "block" : "none";
+  polCommHint();
   // a green card is usually a month — offer that rather than leave it blank
   if (on && !$("po-gcend").value) {
     const start = $("po-start").value || todayStr();
@@ -2930,8 +2947,14 @@ function polPaymentsBlock(p) {
   const paid = polPaid(p), bal = polBalance(p);
   return `<div class="sec">${T("Payments", "Уплати")}</div>
     <div class="card">
-      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Price", "Цена")}</span>
-        <span class="mono">${fmt(p.amount)} ден.</span></div>
+      ${gcPrice(p) ? `<div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Policy", "Полиса")}</span>
+          <span class="mono">${fmt(p.amount)} ден.</span></div>
+        <div class="row bankrow"><span class="muted nw">${T("Green card", "Зелен картон")}</span>
+          <span class="mono">${fmt(gcPrice(p))} ден.</span></div>
+        <div class="row bankrow"><span class="muted nw">${T("Together", "Вкупно")}</span>
+          <span class="mono"><b>${fmt(policyTotal(p))}</b> ден.</span></div>`
+        : `<div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Price", "Цена")}</span>
+          <span class="mono">${fmt(p.amount)} ден.</span></div>`}
       <div class="row bankrow"><span class="muted nw">${T("Paid so far", "Уплатено")}</span>
         <span class="mono" style="color:var(--personal)">${fmt(paid)} ден.</span></div>
       <div class="row bankrow"><span class="muted nw">${bal > 0.005 ? T("Left to pay", "Останува") : T("Settled", "Затворено")}</span>
@@ -2984,6 +3007,7 @@ async function savePolicy(id) {
     amount: parseFloat($("po-amount").value) || 0,
     commission: parseFloat($("po-comm").value) || 0,
     has_green_card: $("po-gc").classList.contains("on"),
+    green_card_price: parseFloat($("po-gcprice").value) || 0,
     green_card_no: $("po-gcno").value.trim() || null,
     green_card_end: $("po-gcend").value || null,
     note: $("po-note").value.trim() || null,
@@ -3050,7 +3074,7 @@ async function renewPolicy(id) {
     holder_name: p.holder_name, policy_no: null, phone: p.phone, kind: p.kind,
     insurer: p.insurer, client_id: p.client_id, start_date: start, end_date: end,
     amount: p.amount, commission: p.commission, note: p.note,
-    has_green_card: p.has_green_card, green_card_no: null,
+    has_green_card: p.has_green_card, green_card_price: p.green_card_price, green_card_no: null,
     green_card_end: p.has_green_card ? (() => {
       const g = new Date(start + "T12:00"); g.setMonth(g.getMonth() + 1);
       return g.toLocaleDateString("sv-SE");
