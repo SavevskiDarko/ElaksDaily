@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-081141";
+const BUILD = "20260809-083257";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2741,6 +2741,24 @@ const stmtPolicies = (s) => state.policies.filter((p) =>
   (s.kind === "remittance" ? p.remit_statement_id : p.comm_statement_id) === s.id);
 const insurersUsed = () => [...new Set(state.policies.map((p) => p.insurer).filter(Boolean))].sort();
 
+// Who to chase: premiums already sent to the insurer that the client has not
+// finished paying. This is your own money sitting with someone else.
+function openFronted() {
+  const list = state.policies.filter((p) => polFronted(p) > 0.005)
+    .sort((a, b) => polBalance(b) - polBalance(a));
+  openSheet(`<h2>${T("Paid for, not collected", "Платено, ненаплатено")}</h2>
+    <p class="muted">${T("You have sent these premiums to the insurer. The clients are still paying you.",
+      "Овие премии се веќе платени на осигурителната. Клиентите сè уште ти плаќаат.")}</p>
+    <div class="totalbar"><span>${T("Out of my pocket", "Од мој џеб")}</span>
+      <span class="mono">${fmt(sumBy(list, polFronted))} ден.</span></div>
+    ${list.length ? list.map((p) => `<div class="card offer row" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
+      <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
+        <div class="o-num">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""}${p.phone ? " · " + esc(p.phone) : ""}
+          · ${T("paid", "платил")} ${fmt(polPaid(p))} ${T("of", "од")} ${fmt(policyTotal(p))}</div></div>
+      <span class="o-total mono" style="color:var(--amber)">${fmt(polBalance(p))}</span>
+    </div>`).join("") : `<p class="muted">${T("Nothing — every remitted policy is paid up.", "Ништо — сите препратени полиси се наплатени.")}</p>`}`);
+}
+
 function renderStatements() {
   const list = state.statements;
   const open = list.filter((s) => !s.paid_on);
@@ -2794,12 +2812,21 @@ function openStmtBuilder(kind, insurer, period) {
     ${pool.length ? pool.map((p) => `<div class="row" style="gap:10px;margin-bottom:6px;align-items:flex-start">
       <button class="clbox on" onclick="stmtToggle('${p.id}', this)">✓</button>
       <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
-        <div class="muted" style="font-size:12px">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div></div>
+        <div class="muted" style="font-size:12px">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div>
+        ${kind === "remittance" && polBalance(p) > 0.005
+          ? `<div style="font-size:12px;color:var(--amber)">${T("client still owes", "клиентот должи")} ${fmt(polBalance(p))} ден.</div>`
+          : ""}</div>
       <span class="mono">${fmt(kind === "remittance" ? policyTotal(p) : p.commission)}</span>
     </div>`).join("")
       : `<p class="muted">${T("Nothing outstanding for that company and month.", "Ништо неподмирено за таа компанија и месец.")}</p>`}
     <div class="totalbar"><span>${T("Statement total", "Вкупно извод")}</span>
       <span class="mono" id="st-total">${fmt(total())} ден.</span></div>
+    ${kind === "remittance" ? `<div class="row" style="justify-content:space-between;margin-top:6px;font-size:12.5px">
+      <span class="muted nw">${T("Of that, clients have not paid you", "Од тоа, клиентите не ти платиле")}</span>
+      <span class="mono" id="st-front" style="color:var(--amber)"></span></div>
+      <p class="muted" style="font-size:12px">${T(
+        "You pay the insurer whatever the clients have done. This is the part you are covering yourself for now.",
+        "Плаќаш на осигурителната без разлика што направиле клиентите. Ова е делот што сега го покриваш сам.")}</p>` : ""}
     <div class="grid2">
       <div><label>${T("Due date", "Рок")}</label><input id="st-due" type="date" value="${stmtDueDefault(per)}"></div>
       <div><label>${T("Settled on (leave empty if not yet)", "Платено на (празно ако не е)")}</label>
@@ -2808,6 +2835,7 @@ function openStmtBuilder(kind, insurer, period) {
     <label>${T("Note", "Белешка")}</label><input id="st-note">
     <button class="btn" onclick="saveStatement()">${T("Create statement", "Создај извод")}</button>
   `);
+  stmtTotals();
 }
 const stmtDueDefault = (period) => {
   const day = parseInt(setting("remit_due_day", "15")) || 15;
@@ -2819,10 +2847,14 @@ function stmtToggle(id, btn) {
   const i = stmtDraft.picked.indexOf(id);
   if (i >= 0) { stmtDraft.picked.splice(i, 1); btn.classList.remove("on"); btn.textContent = ""; }
   else { stmtDraft.picked.push(id); btn.classList.add("on"); btn.textContent = "✓"; }
+  stmtTotals();
+}
+function stmtTotals() {
   const kind = stmtDraft.kind;
-  const total = sumBy(state.policies.filter((p) => stmtDraft.picked.includes(p.id)),
-    (p) => kind === "remittance" ? policyTotal(p) : p.commission);
-  $("st-total").textContent = fmt(total) + " ден.";
+  const picked = state.policies.filter((p) => stmtDraft.picked.includes(p.id));
+  $("st-total").textContent = fmt(sumBy(picked, (p) => kind === "remittance" ? policyTotal(p) : p.commission)) + " ден.";
+  const fr = $("st-front");
+  if (fr) fr.textContent = fmt(sumBy(picked, (p) => Math.max(0, polBalance(p)))) + " ден.";
 }
 
 async function saveStatement() {
@@ -2916,7 +2948,7 @@ function renderInsSummary() {
       <div class="acct" role="button" tabindex="0" onclick="state.insView='statements';renderPolicies()">
         <span>${T("Commission due", "Провизија за наплата")}</span>
         <b style="color:var(--personal)">${fmt(commDue)}</b></div>
-      <div class="acct" style="cursor:default">
+      <div class="acct" role="button" tabindex="0" onclick="openFronted()">
         <span>${fronted >= holding ? T("Out of my pocket", "Од мој џеб") : T("Holding for insurer", "Држам за нив")}</span>
         <b style="${fronted > holding ? "color:var(--amber)" : ""}">${fmt(fronted >= holding ? fronted : holding)}</b></div>
     </div>
