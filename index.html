@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-123303";
+const BUILD = "20260809-124141";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2907,19 +2907,18 @@ function renderStatements() {
   const list = state.statements;
   const open = list.filter((s) => !s.paid_on);
   $("pol-list").innerHTML = `
-    <div class="grid2" style="margin-bottom:12px">
-      <button class="btn sm" style="width:100%" onclick="openStmtBuilder('remittance')">${T("+ Pay an insurer", "+ Плати осигурителна")}</button>
-      <button class="btn sm ghost" style="width:100%" onclick="openStmtBuilder('commission')">${T("+ Commission received", "+ Примена провизија")}</button>
-    </div>
+    <button class="btn" style="margin:0 0 12px" onclick="openSettleSheet()">${T("+ Settle with an insurer", "+ Порамни со осигурителна")}</button>
     ${list.length ? list.map((s) => {
       const pols = stmtPolicies(s);
       const late = !s.paid_on && s.due_date && s.due_date < todayStr();
+      const twin = list.find((x) => x.id !== s.id && x.insurer === s.insurer && x.paid_on === s.paid_on
+        && x.kind !== s.kind && s.paid_on);
       return `<div class="card offer row" role="button" tabindex="0" onclick="openStmtSheet('${s.id}')">
         <span class="led ${s.kind === "remittance" ? "elaks" : "personal"}"></span>
         <div style="flex:1;min-width:0"><b>${esc(s.insurer)}</b>
           <div class="o-num">${s.kind === "remittance" ? T("premiums", "премии") : T("commission", "провизија")} ·
             ${monthName(s.period)} ${s.period.slice(0, 4)} · ${pols.length} ${T("policies", "полиси")} ·
-            ${s.paid_on ? `<span style="color:var(--personal)">${T("settled", "затворено")} ${dmy(s.paid_on)}</span>`
+            ${twin ? `${T("settled together", "порамнето заедно")} · ` : ""}${s.paid_on ? `<span style="color:var(--personal)">${T("settled", "затворено")} ${dmy(s.paid_on)}</span>`
               : late ? `<span style="color:var(--danger)">${T("overdue", "задоцнето")} ${dmy(s.due_date)}</span>`
               : `<span style="color:var(--amber)">${T("due", "рок")} ${s.due_date ? dmy(s.due_date) : "—"}</span>`}</div></div>
         <span class="o-total mono">${fmt(s.amount)}</span>
@@ -2932,6 +2931,110 @@ function renderStatements() {
 // Pick an insurer and a month; everything of that insurer not yet settled that
 // way is offered, so nothing is quietly left behind.
 let stmtDraft = null;
+// Going to the insurer: you take a list of every policy not yet settled —
+// however the client paid — because that list is what their commission is
+// worked out from. Premiums owed and commission earned close together.
+function openSettleSheet(insurer) {
+  const ins = insurer || insurersUsed()[0] || "";
+  const pool = state.policies
+    .filter((p) => (p.insurer || "") === ins && (!p.remit_statement_id || !p.comm_statement_id))
+    .sort((a, b) => (a.start_date || "").localeCompare(b.start_date || ""));
+  settleDraft = { insurer: ins, picked: pool.map((p) => p.id) };
+
+  openSheet(`
+    <h2>${T("Settle with an insurer", "Порамни со осигурителна")}</h2>
+    <label>${T("Insurance company", "Осигурителна компанија")}</label>
+    <select id="se-ins" onchange="openSettleSheet(this.value)">
+      ${insurersUsed().map((n) => `<option ${n === ins ? "selected" : ""}>${esc(n)}</option>`).join("")
+        || `<option>${T("no policies yet", "сè уште нема полиси")}</option>`}
+    </select>
+
+    <div class="sec">${T("Everything not yet settled", "Сè што не е порамнето")} · ${pool.length}
+      <span class="muted" style="font-weight:400">· ${T("oldest first", "најстарите прво")}</span></div>
+    ${pool.length ? `<div class="ohead" style="grid-template-columns:26px 1fr 78px 70px">
+        <span></span><span>${T("Policy", "Полиса")}</span><span style="text-align:right">${T("Premium", "Премија")}</span>
+        <span style="text-align:right">${T("Commission", "Провизија")}</span></div>`
+      : ""}
+    ${pool.length ? pool.map((p) => `<div class="row" style="gap:8px;margin-bottom:6px;align-items:flex-start">
+      <button class="clbox on" style="margin-top:2px" onclick="settleToggle('${p.id}', this)">✓</button>
+      <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
+        <div class="muted" style="font-size:12px">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div>
+        <div style="font-size:12px">${polPaidCash(p)
+            ? `<span style="color:var(--personal)">${T("cash", "кеш")} ${fmt(polPaidCash(p))}</span>` : ""}${
+          polPaidDirect(p) ? `<span class="muted">${polPaidCash(p) ? " · " : ""}${T("paid them directly", "платено директно")} ${fmt(polPaidDirect(p))}</span>` : ""}${
+          policyDue(p) - polPaidCash(p) > 0.005 ? `<span style="color:var(--amber)">${(polPaidCash(p) || polPaidDirect(p)) ? " · " : ""}${T("not collected", "ненаплатено")} ${fmt(policyDue(p) - polPaidCash(p))}</span>` : ""}</div>
+      </div>
+      <span class="mono" style="width:78px;text-align:right">${fmt(policyDue(p))}</span>
+      <span class="mono" style="width:70px;text-align:right;color:var(--personal)">${fmt(policyCommission(p))}</span>
+    </div>`).join("")
+      : `<p class="muted">${T("Nothing outstanding with this company.", "Ништо неподмирено кај оваа компанија.")}</p>`}
+
+    <div class="card" style="margin-top:12px">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Premiums to hand over", "Премии за предавање")}</span>
+        <span class="mono" id="se-prem">0</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Commission earned", "Заработена провизија")}</span>
+        <span class="mono" id="se-comm" style="color:var(--personal)">0</span></div>
+      <div class="row bankrow" style="border-top:1px solid var(--line);padding-top:8px">
+        <span class="muted nw" id="se-net-label">${T("Net to pay them", "Нето за плаќање")}</span>
+        <span class="mono"><b id="se-net">0</b></span></div>
+      <div class="muted" style="font-size:12px;margin-top:4px" id="se-front"></div>
+    </div>
+
+    <label>${T("Settled on", "Порамнето на")}</label><input id="se-date" type="date" value="${todayStr()}">
+    <label>${T("Note", "Белешка")}</label><input id="se-note" placeholder="${T("statement number, agreed figure…", "број на извод, договорен износ…")}">
+    <button class="btn" onclick="saveSettlement()">${T("Record the settlement", "Запиши го порамнувањето")}</button>
+  `);
+  settleTotals();
+}
+let settleDraft = null;
+function settleToggle(id, btn) {
+  const i = settleDraft.picked.indexOf(id);
+  if (i >= 0) { settleDraft.picked.splice(i, 1); btn.classList.remove("on"); btn.textContent = ""; }
+  else { settleDraft.picked.push(id); btn.classList.add("on"); btn.textContent = "✓"; }
+  settleTotals();
+}
+function settleTotals() {
+  const picked = state.policies.filter((p) => settleDraft.picked.includes(p.id));
+  const prem = sumBy(picked, policyDue);
+  const comm = sumBy(picked, policyCommission);
+  const net = prem - comm;
+  const notCollected = sumBy(picked, (p) => Math.max(0, policyDue(p) - polPaidCash(p)));
+  $("se-prem").textContent = fmt(prem) + " ден.";
+  $("se-comm").textContent = "−" + fmt(comm) + " ден.";
+  $("se-net").textContent = fmt(Math.abs(net)) + " ден.";
+  $("se-net-label").textContent = net >= 0 ? T("Net to pay them", "Нето за плаќање") : T("Net they owe you", "Нето што ти должат");
+  $("se-front").textContent = notCollected > 0.005
+    ? T(`Of the premiums, ${fmt(notCollected)} ден. has not been collected from clients yet — you are covering it.`,
+        `Од премиите, ${fmt(notCollected)} ден. сè уште не се наплатени од клиентите — ти го покриваш.`)
+    : "";
+}
+
+async function saveSettlement() {
+  const d = settleDraft;
+  if (!d || !d.picked.length) return toast(T("Nothing selected", "Ништо не е избрано"));
+  const picked = state.policies.filter((p) => d.picked.includes(p.id));
+  const prem = sumBy(picked, policyDue);
+  const comm = sumBy(picked, policyCommission);
+  const paid = $("se-date").value || todayStr();
+  const note = $("se-note").value.trim() || null;
+  const period = paid.slice(0, 7);
+  const insurer = $("se-ins").value;
+  try {
+    // kept as two records so the report can still tell the two flows apart,
+    // even though you settle them in one visit
+    const remit = await dbq(db.from("statements").insert({
+      insurer, kind: "remittance", period, amount: prem, paid_on: paid, note,
+    }).select().single(), T("Not saved", "Не е зачувано"));
+    const commSt = await dbq(db.from("statements").insert({
+      insurer, kind: "commission", period, amount: comm, paid_on: paid, note,
+    }).select().single(), T("Not saved", "Не е зачувано"));
+    await dbq(db.from("policies").update({ remit_statement_id: remit.id, comm_statement_id: commSt.id })
+      .in("id", d.picked), T("Policies not linked", "Полисите не се поврзани"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["statements", "policies"]); render();
+  toast(T(`${d.picked.length} policies settled`, `${d.picked.length} полиси порамнети`));
+}
+
 function openStmtBuilder(kind, insurer, period) {
   const ins = insurer || insurersUsed()[0] || "";
   const per = period || prevMonth(todayStr().slice(0, 7));
@@ -3097,7 +3200,7 @@ function renderInsSummary() {
     </div>
     <div class="acct-grid">
       <div class="acct" role="button" tabindex="0" onclick="state.insView='statements';renderPolicies()">
-        <span>${T("I owe insurers", "Им должам")}</span>
+        <span>${T("Premiums to settle", "Премии за порамнување")}</span>
         <b style="${toRemit ? "color:var(--danger)" : ""}">${fmt(toRemit)}</b></div>
       <div class="acct" role="button" tabindex="0" onclick="state.insView='statements';renderPolicies()">
         <span>${T("Commission due", "Провизија за наплата")}</span>
