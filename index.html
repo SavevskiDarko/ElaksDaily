@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-083751";
+const BUILD = "20260809-121509";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2708,7 +2708,15 @@ const POLICY_KINDS = ["Автомобил", "Зелен картон", "Имот
 // owed is the two together.
 const gcPrice = (p) => p.has_green_card ? (parseFloat(p.green_card_price) || 0) : 0;
 const policyTotal = (p) => (parseFloat(p.amount) || 0) + gcPrice(p);
-const polPaid = (p) => sumBy(state.polPays.filter((x) => x.policy_id === p.id), (x) => x.amount);
+const polPays = (p) => state.polPays.filter((x) => x.policy_id === p.id);
+// Card and bank go straight to the insurer; only cash passes through your hands.
+const throughMe = (m) => String(m || "cash").toLowerCase() === "cash";
+const polPaid = (p) => sumBy(polPays(p), (x) => x.amount);
+const polPaidCash = (p) => sumBy(polPays(p).filter((x) => throughMe(x.method)), (x) => x.amount);
+const polPaidDirect = (p) => sumBy(polPays(p).filter((x) => !throughMe(x.method)), (x) => x.amount);
+// what the insurer expects from YOU: the premium less whatever the client
+// already sent them directly
+const policyDue = (p) => Math.max(0, policyTotal(p) - polPaidDirect(p));
 const polBalance = (p) => policyTotal(p) - polPaid(p);
 const polSettled = (p) => polBalance(p) <= 0.005;
 const polDaysLeft = (p) => !p.end_date ? null
@@ -2731,10 +2739,10 @@ function polStatus(p) {
 // what clients still owe me, what I owe the insurers, and what they owe me.
 const polRemitted = (p) => !!p.remit_statement_id;
 const polCommPaid = (p) => !!p.comm_statement_id;
-// premiums I have already sent on while the client is still paying me
-const polFronted = (p) => polRemitted(p) ? Math.max(0, polBalance(p)) : 0;
-// money sitting with me that belongs to the insurer
-const polHolding = (p) => !polRemitted(p) ? Math.min(polPaid(p), policyTotal(p)) : 0;
+// sent on out of your own money, because the cash has not come in yet
+const polFronted = (p) => polRemitted(p) ? Math.max(0, policyDue(p) - polPaidCash(p)) : 0;
+// cash in your hands that belongs to the insurer
+const polHolding = (p) => !polRemitted(p) ? Math.min(polPaidCash(p), policyDue(p)) : 0;
 
 /* ---------- statements: settling with the insurer ---------- */
 const stmtPolicies = (s) => state.policies.filter((p) =>
@@ -2924,12 +2932,15 @@ function openStmtBuilder(kind, insurer, period) {
   const ins = insurer || insurersUsed()[0] || "";
   const per = period || prevMonth(todayStr().slice(0, 7));
   const field = kind === "remittance" ? "remit_statement_id" : "comm_statement_id";
+  // nothing to remit on a policy the client paid by card or bank — that money
+  // already reached the insurer without touching you
   const pool = state.policies.filter((p) => (p.insurer || "") === ins && !p[field]
-    && (p.start_date || "").slice(0, 7) <= per);
+    && (p.start_date || "").slice(0, 7) <= per
+    && (kind === "commission" ? (parseFloat(p.commission) || 0) > 0 : policyDue(p) > 0.005));
   stmtDraft = { kind, insurer: ins, period: per, picked: pool.map((p) => p.id) };
 
   const total = () => sumBy(pool.filter((p) => stmtDraft.picked.includes(p.id)),
-    (p) => kind === "remittance" ? policyTotal(p) : p.commission);
+    (p) => kind === "remittance" ? policyDue(p) : p.commission);
 
   openSheet(`
     <h2>${kind === "remittance" ? T("Pay an insurer", "Плати осигурителна") : T("Commission received", "Примена провизија")}</h2>
@@ -2945,10 +2956,12 @@ function openStmtBuilder(kind, insurer, period) {
       <button class="clbox on" onclick="stmtToggle('${p.id}', this)">✓</button>
       <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
         <div class="muted" style="font-size:12px">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div>
-        ${kind === "remittance" && polBalance(p) > 0.005
-          ? `<div style="font-size:12px;color:var(--amber)">${T("client still owes", "клиентот должи")} ${fmt(polBalance(p))} ден.</div>`
-          : ""}</div>
-      <span class="mono">${fmt(kind === "remittance" ? policyTotal(p) : p.commission)}</span>
+        ${kind === "remittance" ? `<div style="font-size:12px">
+          ${polPaidCash(p) ? `<span style="color:var(--personal)">${T("cash in hand", "кеш во рака")} ${fmt(polPaidCash(p))}</span>` : ""}
+          ${polPaidDirect(p) ? `<span class="muted">${polPaidCash(p) ? " · " : ""}${T("paid the insurer directly", "платено директно")} ${fmt(polPaidDirect(p))}</span>` : ""}
+          ${policyDue(p) - polPaidCash(p) > 0.005 ? `<span style="color:var(--amber)">${polPaidCash(p) || polPaidDirect(p) ? " · " : ""}${T("not collected", "ненаплатено")} ${fmt(policyDue(p) - polPaidCash(p))}</span>` : ""}
+        </div>` : ""}</div>
+      <span class="mono">${fmt(kind === "remittance" ? policyDue(p) : p.commission)}</span>
     </div>`).join("")
       : `<p class="muted">${T("Nothing outstanding for that company and month.", "Ништо неподмирено за таа компанија и месец.")}</p>`}
     <div class="totalbar"><span>${T("Statement total", "Вкупно извод")}</span>
@@ -2984,9 +2997,9 @@ function stmtToggle(id, btn) {
 function stmtTotals() {
   const kind = stmtDraft.kind;
   const picked = state.policies.filter((p) => stmtDraft.picked.includes(p.id));
-  $("st-total").textContent = fmt(sumBy(picked, (p) => kind === "remittance" ? policyTotal(p) : p.commission)) + " ден.";
+  $("st-total").textContent = fmt(sumBy(picked, (p) => kind === "remittance" ? policyDue(p) : p.commission)) + " ден.";
   const fr = $("st-front");
-  if (fr) fr.textContent = fmt(sumBy(picked, (p) => Math.max(0, polBalance(p)))) + " ден.";
+  if (fr) fr.textContent = fmt(sumBy(picked, (p) => Math.max(0, policyDue(p) - polPaidCash(p)))) + " ден.";
 }
 
 async function saveStatement() {
@@ -2994,7 +3007,7 @@ async function saveStatement() {
   if (!d || !d.picked.length) return toast(T("Nothing selected", "Ништо не е избрано"));
   const kind = d.kind;
   const amount = sumBy(state.policies.filter((p) => d.picked.includes(p.id)),
-    (p) => kind === "remittance" ? policyTotal(p) : p.commission);
+    (p) => kind === "remittance" ? policyDue(p) : p.commission);
   const row = {
     insurer: $("st-ins").value, kind, period: $("st-per").value || d.period,
     amount, due_date: $("st-due").value || null, paid_on: $("st-paid").value || null,
@@ -3036,7 +3049,7 @@ function openStmtSheet(id) {
     <div class="sec">${T("Policies on this statement", "Полиси на изводот")}</div>
     ${pols.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
       <span>${esc(p.holder_name)}${p.policy_no ? " · " + esc(p.policy_no) : ""}</span>
-      <span class="mono">${fmt(s.kind === "remittance" ? policyTotal(p) : p.commission)} ›</span></div>`).join("")}
+      <span class="mono">${fmt(s.kind === "remittance" ? policyDue(p) : p.commission)} ›</span></div>`).join("")}
     <button class="btn danger" onclick="delStatement('${s.id}')">${T("Delete statement", "Избриши извод")}</button>
   `);
 }
@@ -3062,7 +3075,7 @@ async function delStatement(id) {
 function renderInsSummary() {
   const live = state.policies;
   const toCollect = sumBy(live.filter((p) => !polSettled(p)), polBalance);
-  const toRemit = sumBy(live.filter((p) => !polRemitted(p)), policyTotal);
+  const toRemit = sumBy(live.filter((p) => !polRemitted(p)), policyDue);
   const fronted = sumBy(live, polFronted);
   const holding = sumBy(live, polHolding);
   const commDue = sumBy(live.filter((p) => !polCommPaid(p)), (p) => p.commission);
@@ -3343,6 +3356,15 @@ function polPaymentsBlock(p) {
 }
 
 let polMethod = "cash";
+function polPayHint() {
+  const el = $("pp-hint2");
+  if (!el) return;
+  el.textContent = throughMe(polMethod)
+    ? T("Cash sits with you until you remit it to the insurer.",
+        "Кешот стои кај тебе додека не го препратиш на осигурителната.")
+    : T("This goes straight to the insurer — you owe them nothing for it, only your commission is left to come.",
+        "Ова оди директно кај осигурителната — не им должиш ништо за него, ти останува само провизијата.");
+}
 function polPaySheet(policyId) {
   const p = state.policies.find((x) => x.id === policyId);
   const bal = polBalance(p);
@@ -3352,9 +3374,14 @@ function polPaySheet(policyId) {
     <p class="muted">${esc(p.holder_name)} · ${T("left to pay", "останува")} ${fmt(bal)} ден.</p>
     <label>${T("Paid by", "Платено со")}</label>
     <div class="chips" id="pp-m2">
-      ${[["cash", T("Cash", "Кеш")], ["bank", T("Bank", "Банка")], ["card", T("Card", "Картичка")]].map(([v, l], i) =>
-        `<button class="chip ${i === 0 ? "on" : ""}" onclick="polMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this))">${l}</button>`).join("")}
+      ${[["cash", T("Cash — to me", "Кеш — кај мене")],
+         ["card", T("Card — to the insurer", "Картичка — кај осигурителната")],
+         ["bank", T("Bank — to the insurer", "Банка — кај осигурителната")]].map(([v, l], i) =>
+        `<button class="chip ${i === 0 ? "on" : ""}" onclick="polMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this));polPayHint()">${l}</button>`).join("")}
     </div>
+    <p class="muted" id="pp-hint2" style="font-size:12.5px">${T(
+      "Cash sits with you until you remit it. Card and bank go straight to the insurer, so only your commission is left to come.",
+      "Кешот стои кај тебе додека не го препратиш. Картичка и банка одат директно кај осигурителната, па ти останува само провизијата.")}</p>
     <label>${T("Amount (ден.)", "Износ (ден.)")}</label>
     <input id="pp-amt2" type="number" inputmode="decimal" step="any" value="${Math.max(0, Math.round(bal * 100) / 100)}">
     <div class="chips" style="margin-top:8px">
