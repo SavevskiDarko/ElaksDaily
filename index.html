@@ -525,16 +525,14 @@ async function startApp() {
       if (!rerr && r) {
         state.role = r.role;
         state.perm = r.role === "owner"
-          ? { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true }
+          ? { owner: true, ctx: ["work", "elaks", "personal", "apts"],
+              elaks: !(r.hide_tabs || []).includes("elaks"),
+              apts: !(r.hide_tabs || []).includes("apt"),
+              ins: !(r.hide_tabs || []).includes("ins") }
           : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance };
       }
     }
-    if (!state.perm.elaks) {
-      const b = document.querySelector('[data-tab="elaks"]'); if (b) b.style.display = "none";
-      const bs = $("biz-settings"); if (bs) bs.style.display = "none";
-    }
-    if (!state.perm.apts) { const b = document.querySelector('[data-tab="apt"]'); if (b) b.style.display = "none"; }
-    if (!state.perm.ins) { const b = document.querySelector('[data-tab="ins"]'); if (b) b.style.display = "none"; }
+    applyTabVisibility();
     if (state.perm.owner) loadTeam();
     if (state.perm.owner && $("apts-settings")) $("apts-settings").style.display = "";
     if (state.perm.owner && $("data-settings")) $("data-settings").style.display = "";
@@ -653,7 +651,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-070242";
+const BUILD = "20260809-073852";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3368,7 +3366,13 @@ async function loadTeam() {
   renderTeam();
 }
 function permSummary(r) {
-  if (r.role === "owner") return "Owner · everything";
+  if (r.role === "owner") {
+    const hidden = (r.hide_tabs || [])
+      .map((t) => ({ elaks: "Elaks", apt: T("Apartments", "Станови"), ins: T("Insurance", "Осигурување") })[t])
+      .filter(Boolean);
+    return T("Owner · everything", "Сопственик · сè")
+      + (hidden.length ? ` · ${T("put away", "склонето")}: ${hidden.join(", ")}` : "");
+  }
   const parts = [];
   if ((r.task_contexts || []).length) parts.push("Tasks: " + r.task_contexts.map((c) => CTX[c]).join(", "));
   if (r.see_elaks) parts.push("Elaks");
@@ -3380,28 +3384,60 @@ function renderTeam() {
   const el = $("team-list");                  // only exists while the Team sheet is open
   if (!el) return;
   el.innerHTML = state.team.map((r) => `
-    <div class="card row" ${r.role === "owner" ? "" : `role="button" tabindex="0" onclick="openPermSheet('${r.user_id}')"`}>
-      <div style="flex:1"><b>${esc(r.display_name || "Unnamed")}</b>
+    <div class="card row" role="button" tabindex="0" onclick="openPermSheet('${r.user_id}')">
+      <div style="flex:1"><b>${esc(r.display_name || "Unnamed")}</b>${
+        r.user_id === state.uid ? ` <span class="muted">· ${T("you", "ти")}</span>` : ""}
         <div class="muted">${permSummary(r)}</div></div>
-    </div>`).join("") || '<p class="muted">Only you so far.</p>';
+      <span class="muted">›</span>
+    </div>`).join("") || `<p class="muted">${T("Only you so far.", "Засега само ти.")}</p>`;
 }
 let permDraft = null;
+const TABBABLE = [["elaks", "Elaks"], ["apt", "Apartments"], ["ins", "Insurance"]];
+// Hiding is only about what is on screen — an owner always keeps the access,
+// so a tab put away can be brought back at any time.
+const isHidden = (r, tab) => (r && r.hide_tabs ? r.hide_tabs : []).includes(tab);
+
 function openPermSheet(uid) {
   const r = state.team.find((x) => x.user_id === uid);
-  permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance };
+  if (!r) return;
+  const owner = r.role === "owner";
+  permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts,
+                ins: !!r.see_insurance, hide: [...(r.hide_tabs || [])] };
   openSheet(`
-    <h2>${esc(r.display_name || "Team member")}</h2>
-    <label>Display name</label><input id="pm-name" value="${esc(r.display_name || "")}">
-    <label>Task contexts they can see & create</label>
-    <div id="pm-ctx"></div>
-    <label>Businesses they can manage</label>
-    <div id="pm-biz"></div>
-    <button class="btn" onclick="savePerm('${uid}')">Save permissions</button>
-    <button class="btn danger" onclick="removePerm('${uid}')">Remove all access</button>
+    <h2>${esc(r.display_name || T("Team member", "Член на тимот"))}${owner ? ` · ${T("owner", "сопственик")}` : ""}</h2>
+    <label>${T("Display name", "Име за приказ")}</label><input id="pm-name" value="${esc(r.display_name || "")}">
+    ${owner ? `
+      <label>${T("Tabs to show", "Табови за приказ")}</label>
+      <div id="pm-tabs"></div>
+      <p class="muted" style="font-size:12.5px">${T(
+        "Unticking only puts a tab away — you keep full access and can bring it back here whenever you want.",
+        "Отчекирањето само го склонува табот — пристапот останува и можеш да го вратиш кога сакаш.")}</p>
+      <button class="btn" onclick="savePerm('${uid}')">${T("Save", "Зачувај")}</button>`
+    : `
+      <label>${T("Task contexts they can see & create", "Задачи што ги гледа и создава")}</label>
+      <div id="pm-ctx"></div>
+      <label>${T("Businesses they can manage", "Делови што ги води")}</label>
+      <div id="pm-biz"></div>
+      <button class="btn" onclick="savePerm('${uid}')">${T("Save permissions", "Зачувај дозволи")}</button>
+      <button class="btn danger" onclick="removePerm('${uid}')">${T("Remove all access", "Одземи пристап")}</button>`}
   `);
-  renderPermBoxes();
+  renderPermBoxes(owner);
 }
-function renderPermBoxes() {
+function permToggleTab(t) {
+  const i = permDraft.hide.indexOf(t);
+  if (i >= 0) permDraft.hide.splice(i, 1); else permDraft.hide.push(t);
+  renderPermBoxes(true);
+}
+function renderPermBoxes(owner) {
+  if (owner) {
+    $("pm-tabs").innerHTML = TABBABLE.map(([k, l]) => {
+      const on = !permDraft.hide.includes(k);
+      return `<div class="row" style="margin-bottom:6px">
+        <button class="clbox ${on ? "on" : ""}" onclick="permToggleTab('${k}')">${on ? "✓" : ""}</button>
+        <span>${T(l, l === "Elaks" ? "Елакс" : l === "Apartments" ? "Станови" : "Осигурување")}</span></div>`;
+    }).join("");
+    return;
+  }
   $("pm-ctx").innerHTML = Object.keys(CTX).map((c) => `
     <div class="row" style="margin-bottom:6px">
       <button class="clbox ${permDraft.ctx.includes(c) ? "on" : ""}" onclick="permToggleCtx('${c}')">${permDraft.ctx.includes(c) ? "✓" : ""}</button>
@@ -3421,11 +3457,38 @@ function permToggleCtx(c) {
   renderPermBoxes();
 }
 function permToggleBiz(k) { permDraft[k] = !permDraft[k]; renderPermBoxes(); }
+// Shows or puts away the business tabs. Called at start-up and again the
+// moment the owner changes what they want to see.
+function applyTabVisibility() {
+  const show = (sel, on) => { const b = document.querySelector(sel); if (b) b.style.display = on ? "" : "none"; };
+  show('[data-tab="elaks"]', state.perm.elaks);
+  show('[data-tab="apt"]', state.perm.apts);
+  show('[data-tab="ins"]', state.perm.ins);
+  const bs = $("biz-settings"); if (bs) bs.style.display = state.perm.elaks ? "" : "none";
+  // if you just put away the tab you were standing on, step back to Home
+  const onHidden = (state.tab === "elaks" && !state.perm.elaks)
+    || (state.tab === "apt" && !state.perm.apts)
+    || (state.tab === "ins" && !state.perm.ins);
+  if (onHidden) tab("home");
+}
+
 async function savePerm(uid) {
-  const row = { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
-    see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins };
-  try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), "Not saved"); } catch { return; }
-  closeSheet(); await loadTeam(); toast("Permissions saved");
+  const me = state.team.find((x) => x.user_id === uid);
+  const row = me && me.role === "owner"
+    ? { display_name: $("pm-name").value.trim() || null, hide_tabs: permDraft.hide }
+    : { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
+        see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins };
+  try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), T("Not saved", "Не е зачувано")); } catch { return; }
+  if (uid === state.uid && me && me.role === "owner") {
+    // my own view — take effect straight away
+    state.perm.elaks = !permDraft.hide.includes("elaks");
+    state.perm.apts = !permDraft.hide.includes("apt");
+    state.perm.ins = !permDraft.hide.includes("ins");
+    applyTabVisibility();
+    await refreshAll(); render();
+  }
+  closeSheet(); await loadTeam();
+  toast(uid === state.uid ? T("Saved", "Зачувано") : T("Permissions saved", "Дозволите се зачувани"));
 }
 async function removePerm(uid) {
   if (!await ask("Remove all access for this person? Their login stays but they will see nothing.")) return;
