@@ -653,7 +653,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-065729";
+const BUILD = "20260809-070242";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2864,7 +2864,7 @@ async function openPolicySheet(id) {
           oninput="polCommHint()"></div>
     </div>
     <div class="chips" style="margin-top:6px">
-      ${[5, 10, 15, 20].map((pct) => `<button class="chip" onclick="setComm(${pct})">${pct}%</button>`).join("")}
+      ${[5, 10, 18, 20].map((pct) => `<button class="chip" onclick="setComm(${pct})">${pct}%</button>`).join("")}
       <span class="muted nw" id="po-comm-hint" style="align-self:center;font-size:12.5px"></span>
     </div>
 
