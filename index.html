@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-182328";
+const BUILD = "20260809-224528";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3430,10 +3430,11 @@ async function openPolicySheet(id) {
     <div class="grid2">
       <div><label>${T("Price (ден.)", "Цена (ден.)")}</label>
         <input id="po-amount" type="number" inputmode="decimal" step="any" value="${p.amount ?? 0}"
-          oninput="polCommHint()"></div>
+          oninput="autoComm()"></div>
       <div><label>${T("Commission (ден.)", "Провизија (ден.)")}</label>
         <input id="po-comm" type="number" inputmode="decimal" step="any" value="${p.commission ?? 0}"
-          oninput="polCommHint()"></div>
+          ${p.commission ? 'data-touched="1"' : ""}
+          oninput="this.dataset.touched='1';polCommHint()"></div>
     </div>
     <div class="chips" style="margin-top:6px">
       ${[5, 10, 18, 20].map((pct) => `<button class="chip" onclick="setComm(${pct})">${pct}%</button>`).join("")}
@@ -3455,10 +3456,11 @@ async function openPolicySheet(id) {
       <div class="grid2">
         <div><label>${T("Green card price (ден.)", "Цена на зелен картон (ден.)")}</label>
           <input id="po-gcprice" type="number" inputmode="decimal" step="any"
-            value="${p.green_card_price ?? 0}" oninput="polCommHint()"></div>
+            value="${p.green_card_price ?? 0}" oninput="autoGcComm()"></div>
         <div><label>${T("Its commission (ден.)", "Провизија од него (ден.)")}</label>
           <input id="po-gccomm" type="number" inputmode="decimal" step="any"
-            value="${p.gc_commission ?? 0}" oninput="polCommHint()"></div>
+            value="${p.gc_commission ?? 0}" ${p.gc_commission ? 'data-touched="1"' : ""}
+            oninput="this.dataset.touched='1';polCommHint()"></div>
       </div>
       <div class="chips" style="margin-top:6px">
         ${[5, 10, 18, 20].map((pct) => `<button class="chip" onclick="setGcComm(${pct})">${pct}%</button>`).join("")}
@@ -3495,12 +3497,33 @@ async function openPolicySheet(id) {
   `);
   renderPolImg();
 }
+// 18% is the usual rate, so entering a price fills the commission in. Type
+// your own figure and it stops guessing for that policy.
+const DEFAULT_COMM_PCT = 18;
+function autoComm() {
+  const el = $("po-comm");
+  if (el && !el.dataset.touched) {
+    el.value = Math.round((parseFloat($("po-amount").value) || 0) * DEFAULT_COMM_PCT) / 100;
+  }
+  polCommHint();
+}
+function autoGcComm() {
+  const el = $("po-gccomm");
+  if (el && !el.dataset.touched) {
+    el.value = Math.round((parseFloat($("po-gcprice").value) || 0) * DEFAULT_COMM_PCT) / 100;
+  }
+  polCommHint();
+}
 function setComm(pct) {
-  $("po-comm").value = Math.round((parseFloat($("po-amount").value) || 0) * pct) / 100;
+  const el = $("po-comm");
+  el.value = Math.round((parseFloat($("po-amount").value) || 0) * pct) / 100;
+  el.dataset.touched = "1";                      // an explicit choice
   polCommHint();
 }
 function setGcComm(pct) {
-  $("po-gccomm").value = Math.round((parseFloat($("po-gcprice").value) || 0) * pct) / 100;
+  const el = $("po-gccomm");
+  el.value = Math.round((parseFloat($("po-gcprice").value) || 0) * pct) / 100;
+  el.dataset.touched = "1";
   polCommHint();
 }
 // what the client pays in total: the policy plus the green card on it
@@ -3516,13 +3539,16 @@ function polCommHint() {
   const total = sheetTotal();
   const comm = (parseFloat($("po-comm").value) || 0)
     + (($("po-gc") && $("po-gc").classList.contains("on")) ? (parseFloat(($("po-gccomm") || {}).value) || 0) : 0);
+  const auto = $("po-comm") && !$("po-comm").dataset.touched;
   el.textContent = (total ? `${T("sale", "продажба")} ${fmt(total)}` : "")
     + (comm ? ` · ${T("you earn", "заработуваш")} ${fmt(comm)}` : "")
-    + (total && comm ? ` (${Math.round((comm / total) * 1000) / 10}%)` : "");
+    + (total && comm ? ` (${Math.round((comm / total) * 1000) / 10}%)` : "")
+    + (auto && comm ? ` · ${T("default", "стандардно")} ${DEFAULT_COMM_PCT}%` : "");
 }
 function gcToggle() {
   const on = $("po-gc").classList.contains("on");
   $("po-gc-fields").style.display = on ? "block" : "none";
+  if (on) autoGcComm();
   polCommHint();
   // a green card is usually a month — offer that rather than leave it blank
   if (on && !$("po-gcend").value) {
