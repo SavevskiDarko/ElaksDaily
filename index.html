@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-125318";
+const BUILD = "20260809-182328";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2713,7 +2713,22 @@ const gcComm = (p) => p.has_green_card ? (parseFloat(p.gc_commission) || 0) : 0;
 const policyCommission = (p) => (parseFloat(p.commission) || 0) + gcComm(p);
 const polPays = (p) => state.polPays.filter((x) => x.policy_id === p.id);
 // Card and bank go straight to the insurer; only cash passes through your hands.
+// Only cash handed to YOU has to be handed on. Cash the client takes to the
+// insurer, like card and bank, never passes through your hands.
 const throughMe = (m) => String(m || "cash").toLowerCase() === "cash";
+const PAY_LABELS = {
+  cash: ["cash to me", "кеш кај мене"],
+  cash_insurer: ["cash to insurer", "кеш кај осигурителната"],
+  card: ["card to insurer", "картичка кај осигурителната"],
+  bank: ["bank to insurer", "банка кај осигурителната"],
+};
+const payLabel = (m) => { const l = PAY_LABELS[m] || PAY_LABELS.cash; return T(l[0], l[1]); };
+// how a policy was paid, in words — "cash to me 3.000 · card to insurer 1.000"
+const payBreakdown = (p) => {
+  const by = {};
+  for (const x of polPays(p)) by[x.method || "cash"] = (by[x.method || "cash"] || 0) + (parseFloat(x.amount) || 0);
+  return Object.entries(by).map(([m, a]) => `${payLabel(m)} ${fmt(a)}`).join(" · ");
+};
 const polPaid = (p) => sumBy(polPays(p), (x) => x.amount);
 const polPaidCash = (p) => sumBy(polPays(p).filter((x) => throughMe(x.method)), (x) => x.amount);
 const polPaidDirect = (p) => sumBy(polPays(p).filter((x) => !throughMe(x.method)), (x) => x.amount);
@@ -2958,7 +2973,7 @@ function openSettleSheet(insurer) {
     ${pool.length ? pool.map((p) => `<div class="row" style="gap:8px;margin-bottom:6px;align-items:flex-start">
       <button class="clbox on" style="margin-top:2px" onclick="settleToggle('${p.id}', this)">✓</button>
       <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
-        <div class="muted" style="font-size:12px">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div>
+        <div class="muted" style="font-size:12px">${p.plate ? esc(p.plate) + " · " : ""}${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div>
         <div style="font-size:12px">${polPaidCash(p)
             ? `<span style="color:var(--personal)">${T("cash", "кеш")} ${fmt(polPaidCash(p))}</span>` : ""}${
           polPaidDirect(p) ? `<span class="muted">${polPaidCash(p) ? " · " : ""}${T("paid them directly", "платено директно")} ${fmt(polPaidDirect(p))}</span>` : ""}${
@@ -2988,10 +3003,17 @@ function openSettleSheet(insurer) {
     <label>${T("Settled on", "Порамнето на")}</label><input id="se-date" type="date" value="${todayStr()}">
     <label>${T("Note", "Белешка")}</label><input id="se-note" placeholder="${T("statement number, agreed figure…", "број на извод, договорен износ…")}">
     <button class="btn" onclick="saveSettlement()">${T("Record the settlement", "Запиши го порамнувањето")}</button>
+    <button class="btn ghost" onclick="printSettleDraft()">${T("Print the list for them", "Печати ја спецификацијата")}</button>
   `);
   settleTotals();
 }
 let settleDraft = null;
+function printSettleDraft() {
+  const picked = state.policies.filter((p) => settleDraft.picked.includes(p.id));
+  if (!picked.length) return toast(T("Nothing selected", "Ништо не е избрано"));
+  printSettlementList(picked, $("se-ins").value, $("se-date").value || todayStr(),
+    { note: $("se-note").value.trim() });
+}
 function settleToggle(id, btn) {
   const i = settleDraft.picked.indexOf(id);
   if (i >= 0) { settleDraft.picked.splice(i, 1); btn.classList.remove("on"); btn.textContent = ""; }
@@ -3016,6 +3038,56 @@ function settleTotals() {
     ? T(`Of the premiums, ${fmt(notCollected)} ден. has not been collected from clients yet — you are covering it.`,
         `Од премиите, ${fmt(notCollected)} ден. сè уште не се наплатени од клиентите — ти го покриваш.`)
     : "";
+}
+
+// The paper you hand the insurer: every policy on the settlement, what it is
+// for, and by which route the money reached them — grouped, because they
+// reconcile the cash they received separately from the cards and transfers.
+async function printSettlementList(policies, insurer, when, opts) {
+  const o = opts || {};
+  const groups = [
+    ["cash", T("Cash collected by me — handed over now", "Кеш наплатен од мене — се предава сега")],
+    ["cash_insurer", T("Cash paid to you directly", "Кеш платен директно кај вас")],
+    ["card", T("Card to you", "Картичка кај вас")],
+    ["bank", T("Bank transfer to you", "Банка кај вас")],
+    ["unpaid", T("Not collected yet", "Сè уште ненаплатено")],
+  ];
+  // a policy can be split across routes, so it is listed by each amount
+  const lines = [];
+  for (const p of policies) {
+    const pays = polPays(p);
+    for (const x of pays) lines.push({ p, method: x.method || "cash", amount: parseFloat(x.amount) || 0 });
+    const unpaid = policyTotal(p) - polPaid(p);
+    if (unpaid > 0.005) lines.push({ p, method: "unpaid", amount: unpaid });
+  }
+  const money = (m) => sumBy(lines.filter((l) => l.method === m), (l) => l.amount);
+
+  const table = (m) => {
+    const rows = lines.filter((l) => l.method === m);
+    if (!rows.length) return "";
+    return `<div class="rp-h1">${groups.find((g) => g[0] === m)[1]}</div>
+      <table class="rp-tbl">
+        <tr><th>Осигуреник</th><th>Регистрација</th><th>Полиса</th><th class="r">Износ</th></tr>
+        ${rows.map((l) => `<tr><td>${esc(l.p.holder_name)}</td><td>${esc(l.p.plate || "—")}</td>
+          <td>${esc(l.p.policy_no || "—")}</td><td class="r">${fmt(l.amount)} ден.</td></tr>`).join("")}
+        <tr><th>Вкупно</th><td></td><td></td><th class="r">${fmt(money(m))} ден.</th></tr>
+      </table>`;
+  };
+
+  const premiums = sumBy(policies, policyDue);
+  const commission = sumBy(policies, policyCommission);
+  await printDoc(`
+    <div class="rp-h1">Спецификација — ${esc(insurer)}</div>
+    <div class="rp-sub">ЕЛАКС · ${policies.length} полиси · ${dmy(when)}</div>
+    <div class="rp-bar"><span>За плаќање (премии − провизија)</span><span>${fmt(premiums - commission)} ден.</span></div>
+    <table class="rp-tbl">
+      <tr><th>Вкупна вредност на полисите</th><td class="r">${fmt(sumBy(policies, policyTotal))} ден.</td></tr>
+      <tr><th>Платено директно кај вас</th><td class="r">${fmt(sumBy(policies, polPaidDirect))} ден.</td></tr>
+      <tr><th>Премии што ги предавам</th><td class="r">${fmt(premiums)} ден.</td></tr>
+      <tr><th>Провизија</th><td class="r">${fmt(commission)} ден.</td></tr>
+    </table>
+    ${groups.map(([m]) => table(m)).join("")}
+    ${o.note ? `<div class="rp-sub">${esc(o.note)}</div>` : ""}`);
 }
 
 async function saveSettlement() {
@@ -3167,6 +3239,8 @@ function openStmtSheet(id) {
         ? T("Mark as paid to the insurer", "Означи како платено")
         : T("Mark commission as received", "Означи дека провизијата е примена")}</button>`
       : `<button class="btn ghost" onclick="unsettleStatement('${s.id}')">${T("Not settled after all", "Сепак не е платено")}</button>`}
+    <button class="btn ghost" onclick="printSettlementList(stmtPolicies(state.statements.find(x=>x.id==='${s.id}')), '${esc(s.insurer).replace(/'/g, "\\'")}', '${s.paid_on || s.due_date || todayStr()}')">
+      ${T("Print the list for them", "Печати ја спецификацијата")}</button>
     <div class="sec">${T("Policies on this statement", "Полиси на изводот")}</div>
     ${pols.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
       <span>${esc(p.holder_name)}${p.policy_no ? " · " + esc(p.policy_no) : ""}</span>
@@ -3260,7 +3334,7 @@ function renderPolicies() {
       ${p.photo_thumb ? `<img class="thumb" src="${p.photo_thumb}" alt="">` : ""}
       <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>${
           p.has_green_card ? ` <span class="pill" style="padding:1px 7px;font-size:10.5px">ЗК</span>` : ""}
-        <div class="o-num">${p.kind ? esc(p.kind) + " · " : ""}${p.policy_no ? esc(p.policy_no) + " · " : ""}<span style="color:${st.colour}">${st.label}</span>${
+        <div class="o-num">${p.plate ? esc(p.plate) + " · " : ""}${p.kind ? esc(p.kind) + " · " : ""}${p.policy_no ? esc(p.policy_no) + " · " : ""}<span style="color:${st.colour}">${st.label}</span>${
           p.end_date ? " · " + dmy(p.end_date) : ""}${gcSoon(p) ? ` · <span style="color:var(--amber)">ЗК ${dmy(p.green_card_end)}</span>` : ""}</div></div>
       <div style="text-align:right;flex:none">
         <div class="mono"><b>${fmt(policyTotal(p))}</b></div>
@@ -3339,6 +3413,9 @@ async function openPolicySheet(id) {
       <div><label>${T("Policy number", "Број на полиса")}</label><input id="po-no" value="${esc(p.policy_no || "")}"></div>
       <div><label>${T("Phone", "Телефон")}</label><input id="po-phone" value="${esc(p.phone || "")}"></div>
     </div>
+    <label>${T("Vehicle registration", "Регистарска ознака")}</label>
+    <input id="po-plate" value="${esc(p.plate || "")}" placeholder="KU-1234-AB"
+      style="text-transform:uppercase">
     <label>${T("Type", "Вид")}</label>
     <div class="chips" id="po-kind">
       ${POLICY_KINDS.map((k) => `<button class="chip ${(p.kind || POLICY_KINDS[0]) === k ? "on" : ""}"
@@ -3509,6 +3586,7 @@ function polPaySheet(policyId) {
     <label>${T("Paid by", "Платено со")}</label>
     <div class="chips" id="pp-m2">
       ${[["cash", T("Cash — to me", "Кеш — кај мене")],
+         ["cash_insurer", T("Cash — to the insurer", "Кеш — кај осигурителната")],
          ["card", T("Card — to the insurer", "Картичка — кај осигурителната")],
          ["bank", T("Bank — to the insurer", "Банка — кај осигурителната")]].map(([v, l], i) =>
         `<button class="chip ${i === 0 ? "on" : ""}" onclick="polMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this));polPayHint()">${l}</button>`).join("")}
@@ -3532,6 +3610,7 @@ async function savePolicy(id) {
   const row = {
     holder_name: $("po-name").value.trim(),
     policy_no: $("po-no").value.trim() || null,
+    plate: ($("po-plate").value || "").trim().toUpperCase() || null,
     phone: $("po-phone").value.trim() || null,
     kind: ($("po-kind").querySelector(".chip.on") || {}).dataset?.k || null,
     insurer: $("po-insurer").value.trim() || null,
@@ -3605,7 +3684,7 @@ async function renewPolicy(id) {
     T("Renew", "Обнови"))) return;
 
   const row = {
-    holder_name: p.holder_name, policy_no: null, phone: p.phone, kind: p.kind,
+    holder_name: p.holder_name, policy_no: null, phone: p.phone, kind: p.kind, plate: p.plate,
     insurer: p.insurer, client_id: p.client_id, start_date: start, end_date: end,
     amount: p.amount, commission: p.commission, gc_commission: p.gc_commission, note: p.note,
     has_green_card: p.has_green_card, green_card_price: p.green_card_price, green_card_no: null,
