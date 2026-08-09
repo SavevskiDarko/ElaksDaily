@@ -363,6 +363,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   <!-- INSURANCE -->
   <div class="view" id="v-ins">
     <div id="pol-summary"></div>
+    <div class="chips" id="ins-tabs" style="margin-bottom:10px"></div>
     <input class="search" id="pol-search" placeholder="Search name, policy number or phone…" oninput="renderPolicies()">
     <div class="chips" id="pol-filter" style="margin-bottom:12px"></div>
     <div id="pol-list"></div>
@@ -486,7 +487,8 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
-  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], policies: [], polPays: [], polFilter: "open", apartments: [], stays: [], bills: [], cash: [],
+  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], policies: [], polPays: [], statements: [],
+  polFilter: "open", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -584,6 +586,7 @@ const LOADERS = {
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
   policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
   polPays:    { need: () => state.perm.ins,     q: () => db.from("policy_payments").select("*").order("paid_on", { ascending: false }).limit(500) },
+  statements: { need: () => state.perm.ins,     q: () => db.from("statements").select("*").order("period", { ascending: false }).limit(120) },
   cashTotal:  { need: () => state.perm.elaks,   q: () => db.from("elaks_cash_total").select("balance").maybeSingle(), scalar: true },
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
@@ -651,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-073852";
+const BUILD = "20260809-081141";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2724,7 +2727,214 @@ function polStatus(p) {
   return { key: "live", label: T("running", "активна"), colour: "var(--personal)" };
 }
 
+// Money moves three ways here, and the summary has to keep them apart:
+// what clients still owe me, what I owe the insurers, and what they owe me.
+const polRemitted = (p) => !!p.remit_statement_id;
+const polCommPaid = (p) => !!p.comm_statement_id;
+// premiums I have already sent on while the client is still paying me
+const polFronted = (p) => polRemitted(p) ? Math.max(0, polBalance(p)) : 0;
+// money sitting with me that belongs to the insurer
+const polHolding = (p) => !polRemitted(p) ? Math.min(polPaid(p), policyTotal(p)) : 0;
+
+/* ---------- statements: settling with the insurer ---------- */
+const stmtPolicies = (s) => state.policies.filter((p) =>
+  (s.kind === "remittance" ? p.remit_statement_id : p.comm_statement_id) === s.id);
+const insurersUsed = () => [...new Set(state.policies.map((p) => p.insurer).filter(Boolean))].sort();
+
+function renderStatements() {
+  const list = state.statements;
+  const open = list.filter((s) => !s.paid_on);
+  $("pol-list").innerHTML = `
+    <div class="grid2" style="margin-bottom:12px">
+      <button class="btn sm" style="width:100%" onclick="openStmtBuilder('remittance')">${T("+ Pay an insurer", "+ Плати осигурителна")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="openStmtBuilder('commission')">${T("+ Commission received", "+ Примена провизија")}</button>
+    </div>
+    ${list.length ? list.map((s) => {
+      const pols = stmtPolicies(s);
+      const late = !s.paid_on && s.due_date && s.due_date < todayStr();
+      return `<div class="card offer row" role="button" tabindex="0" onclick="openStmtSheet('${s.id}')">
+        <span class="led ${s.kind === "remittance" ? "elaks" : "personal"}"></span>
+        <div style="flex:1;min-width:0"><b>${esc(s.insurer)}</b>
+          <div class="o-num">${s.kind === "remittance" ? T("premiums", "премии") : T("commission", "провизија")} ·
+            ${monthName(s.period)} ${s.period.slice(0, 4)} · ${pols.length} ${T("policies", "полиси")} ·
+            ${s.paid_on ? `<span style="color:var(--personal)">${T("settled", "затворено")} ${dmy(s.paid_on)}</span>`
+              : late ? `<span style="color:var(--danger)">${T("overdue", "задоцнето")} ${dmy(s.due_date)}</span>`
+              : `<span style="color:var(--amber)">${T("due", "рок")} ${s.due_date ? dmy(s.due_date) : "—"}</span>`}</div></div>
+        <span class="o-total mono">${fmt(s.amount)}</span>
+      </div>`;
+    }).join("") : `<div class="empty">${T("No statements yet.<br>Settle a month with an insurer using the buttons above.",
+        "Нема изводи.<br>Затвори месец со осигурителна преку копчињата горе.")}</div>`}
+    ${open.length ? `<p class="muted" style="font-size:12.5px;margin-top:10px">${open.length} ${T("still open", "сè уште отворени")}</p>` : ""}`;
+}
+
+// Pick an insurer and a month; everything of that insurer not yet settled that
+// way is offered, so nothing is quietly left behind.
+let stmtDraft = null;
+function openStmtBuilder(kind, insurer, period) {
+  const ins = insurer || insurersUsed()[0] || "";
+  const per = period || prevMonth(todayStr().slice(0, 7));
+  const field = kind === "remittance" ? "remit_statement_id" : "comm_statement_id";
+  const pool = state.policies.filter((p) => (p.insurer || "") === ins && !p[field]
+    && (p.start_date || "").slice(0, 7) <= per);
+  stmtDraft = { kind, insurer: ins, period: per, picked: pool.map((p) => p.id) };
+
+  const total = () => sumBy(pool.filter((p) => stmtDraft.picked.includes(p.id)),
+    (p) => kind === "remittance" ? policyTotal(p) : p.commission);
+
+  openSheet(`
+    <h2>${kind === "remittance" ? T("Pay an insurer", "Плати осигурителна") : T("Commission received", "Примена провизија")}</h2>
+    <label>${T("Insurance company", "Осигурителна компанија")}</label>
+    <select id="st-ins" onchange="openStmtBuilder('${kind}', this.value, $('st-per').value)">
+      ${insurersUsed().map((n) => `<option ${n === ins ? "selected" : ""}>${esc(n)}</option>`).join("")
+        || `<option>${T("no policies yet", "сè уште нема полиси")}</option>`}
+    </select>
+    <label>${T("Period", "Период")}</label>
+    <input id="st-per" type="month" value="${per}" onchange="openStmtBuilder('${kind}', $('st-ins').value, this.value)">
+    <div class="sec">${T("Policies included", "Вклучени полиси")} · ${pool.length}</div>
+    ${pool.length ? pool.map((p) => `<div class="row" style="gap:10px;margin-bottom:6px;align-items:flex-start">
+      <button class="clbox on" onclick="stmtToggle('${p.id}', this)">✓</button>
+      <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
+        <div class="muted" style="font-size:12px">${esc(p.kind || "")}${p.policy_no ? " · " + esc(p.policy_no) : ""} · ${dmy(p.start_date)}</div></div>
+      <span class="mono">${fmt(kind === "remittance" ? policyTotal(p) : p.commission)}</span>
+    </div>`).join("")
+      : `<p class="muted">${T("Nothing outstanding for that company and month.", "Ништо неподмирено за таа компанија и месец.")}</p>`}
+    <div class="totalbar"><span>${T("Statement total", "Вкупно извод")}</span>
+      <span class="mono" id="st-total">${fmt(total())} ден.</span></div>
+    <div class="grid2">
+      <div><label>${T("Due date", "Рок")}</label><input id="st-due" type="date" value="${stmtDueDefault(per)}"></div>
+      <div><label>${T("Settled on (leave empty if not yet)", "Платено на (празно ако не е)")}</label>
+        <input id="st-paid" type="date" value=""></div>
+    </div>
+    <label>${T("Note", "Белешка")}</label><input id="st-note">
+    <button class="btn" onclick="saveStatement()">${T("Create statement", "Создај извод")}</button>
+  `);
+}
+const stmtDueDefault = (period) => {
+  const day = parseInt(setting("remit_due_day", "15")) || 15;
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(y, m, Math.min(day, 28));      // the month after the period
+  return d.toLocaleDateString("sv-SE");
+};
+function stmtToggle(id, btn) {
+  const i = stmtDraft.picked.indexOf(id);
+  if (i >= 0) { stmtDraft.picked.splice(i, 1); btn.classList.remove("on"); btn.textContent = ""; }
+  else { stmtDraft.picked.push(id); btn.classList.add("on"); btn.textContent = "✓"; }
+  const kind = stmtDraft.kind;
+  const total = sumBy(state.policies.filter((p) => stmtDraft.picked.includes(p.id)),
+    (p) => kind === "remittance" ? policyTotal(p) : p.commission);
+  $("st-total").textContent = fmt(total) + " ден.";
+}
+
+async function saveStatement() {
+  const d = stmtDraft;
+  if (!d || !d.picked.length) return toast(T("Nothing selected", "Ништо не е избрано"));
+  const kind = d.kind;
+  const amount = sumBy(state.policies.filter((p) => d.picked.includes(p.id)),
+    (p) => kind === "remittance" ? policyTotal(p) : p.commission);
+  const row = {
+    insurer: $("st-ins").value, kind, period: $("st-per").value || d.period,
+    amount, due_date: $("st-due").value || null, paid_on: $("st-paid").value || null,
+    note: $("st-note").value.trim() || null,
+  };
+  let made;
+  try { made = await dbq(db.from("statements").insert(row).select().single(), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  const field = kind === "remittance" ? "remit_statement_id" : "comm_statement_id";
+  try { await dbq(db.from("policies").update({ [field]: made.id }).in("id", d.picked), T("Policies not linked", "Полисите не се поврзани")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["statements", "policies"]); render();
+  toast(T(`${d.picked.length} policies settled`, `${d.picked.length} полиси затворени`));
+}
+
+function openStmtSheet(id) {
+  const s = state.statements.find((x) => x.id === id);
+  if (!s) return;
+  const pols = stmtPolicies(s);
+  openSheet(`
+    <h2>${esc(s.insurer)}</h2>
+    <p class="muted">${s.kind === "remittance" ? T("Premiums you owe", "Премии што ги должиш") : T("Commission owed to you", "Провизија што ти следува")}
+      · ${monthName(s.period)} ${s.period.slice(0, 4)}</p>
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Total", "Вкупно")}</span>
+        <span class="mono"><b>${fmt(s.amount)}</b> ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Policies", "Полиси")}</span><span class="mono">${pols.length}</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Due", "Рок")}</span>
+        <span class="mono">${s.due_date ? dmy(s.due_date) : "—"}</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Settled", "Платено")}</span>
+        <span class="mono" style="color:${s.paid_on ? "var(--personal)" : "var(--amber)"}">${s.paid_on ? dmy(s.paid_on) : T("not yet", "сè уште не")}</span></div>
+    </div>
+    ${!s.paid_on ? `<label>${T("Settled on", "Платено на")}</label>
+      <input id="st-paid2" type="date" value="${todayStr()}">
+      <button class="btn" onclick="settleStatement('${s.id}')">${s.kind === "remittance"
+        ? T("Mark as paid to the insurer", "Означи како платено")
+        : T("Mark commission as received", "Означи дека провизијата е примена")}</button>`
+      : `<button class="btn ghost" onclick="unsettleStatement('${s.id}')">${T("Not settled after all", "Сепак не е платено")}</button>`}
+    <div class="sec">${T("Policies on this statement", "Полиси на изводот")}</div>
+    ${pols.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
+      <span>${esc(p.holder_name)}${p.policy_no ? " · " + esc(p.policy_no) : ""}</span>
+      <span class="mono">${fmt(s.kind === "remittance" ? policyTotal(p) : p.commission)} ›</span></div>`).join("")}
+    <button class="btn danger" onclick="delStatement('${s.id}')">${T("Delete statement", "Избриши извод")}</button>
+  `);
+}
+
+async function settleStatement(id) {
+  try { await dbq(db.from("statements").update({ paid_on: $("st-paid2").value || todayStr() }).eq("id", id), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["statements"]); render(); toast(T("Settled", "Затворено"));
+}
+async function unsettleStatement(id) {
+  try { await dbq(db.from("statements").update({ paid_on: null }).eq("id", id), T("Not saved", "Не е зачувано")); } catch { return; }
+  closeSheet(); await refreshAll(["statements"]); render();
+}
+async function delStatement(id) {
+  const s = state.statements.find((x) => x.id === id);
+  const n = stmtPolicies(s).length;
+  if (!await ask(T(`Delete this statement?\n\nIts ${n} policies go back to unsettled.`,
+    `Избриши го изводот?\n\nНеговите ${n} полиси се враќаат како неподмирени.`))) return;
+  try { await dbq(db.from("statements").delete().eq("id", id), T("Not deleted", "Не е избришано")); } catch { return; }
+  closeSheet(); await refreshAll(["statements", "policies"]); render();
+}
+
+function renderInsSummary() {
+  const live = state.policies;
+  const toCollect = sumBy(live.filter((p) => !polSettled(p)), polBalance);
+  const toRemit = sumBy(live.filter((p) => !polRemitted(p)), policyTotal);
+  const fronted = sumBy(live, polFronted);
+  const holding = sumBy(live, polHolding);
+  const commDue = sumBy(live.filter((p) => !polCommPaid(p)), (p) => p.commission);
+
+  $("pol-summary").innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><div class="bank-big">${fmt(toCollect)} <span style="font-size:16px">ден.</span></div>
+        <div class="bank-lbl">${T("clients still owe me", "клиентите ми должат")}</div></div>
+      <span class="muted nw">${live.length} ${T("policies", "полиси")}</span>
+    </div>
+    <div class="acct-grid">
+      <div class="acct" role="button" tabindex="0" onclick="state.insView='statements';renderPolicies()">
+        <span>${T("I owe insurers", "Им должам")}</span>
+        <b style="${toRemit ? "color:var(--danger)" : ""}">${fmt(toRemit)}</b></div>
+      <div class="acct" role="button" tabindex="0" onclick="state.insView='statements';renderPolicies()">
+        <span>${T("Commission due", "Провизија за наплата")}</span>
+        <b style="color:var(--personal)">${fmt(commDue)}</b></div>
+      <div class="acct" style="cursor:default">
+        <span>${fronted >= holding ? T("Out of my pocket", "Од мој џеб") : T("Holding for insurer", "Држам за нив")}</span>
+        <b style="${fronted > holding ? "color:var(--amber)" : ""}">${fmt(fronted >= holding ? fronted : holding)}</b></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:8px">${fronted > holding
+      ? T("You have paid insurers more than clients have paid you.", "Си им платил на осигурителните повеќе отколку што ти платиле клиентите.")
+      : T("Money collected that has not been sent on yet.", "Наплатени пари што сè уште не се препратени.")}</p>
+  </div>`;
+}
+
 function renderPolicies() {
+  $("ins-tabs").innerHTML = [["policies", T("Policies", "Полиси")], ["statements", T("Statements", "Изводи")]]
+    .map(([v, l]) => `<button class="chip ${state.insView === v ? "on" : ""}"
+      onclick="state.insView='${v}';renderPolicies()">${l}</button>`).join("");
+  const onPolicies = state.insView === "policies";
+  $("pol-search").style.display = onPolicies ? "" : "none";
+  $("pol-filter").style.display = onPolicies ? "" : "none";
+  renderInsSummary();
+  if (!onPolicies) return renderStatements();
   const q = (($("pol-search") || {}).value || "").trim().toLowerCase();
   const all = state.policies;
   const counts = {
@@ -2737,22 +2947,6 @@ function renderPolicies() {
       onclick="state.polFilter='${v}';renderPolicies()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
 
   const owed = all.filter((p) => !polSettled(p));
-  $("pol-summary").innerHTML = `<div class="card">
-    <div class="row" style="justify-content:space-between;align-items:flex-start">
-      <div><div class="bank-big">${fmt(sumBy(owed, polBalance))} <span style="font-size:16px">ден.</span></div>
-        <div class="bank-lbl">${T("still to collect", "останува да се наплати")}</div></div>
-      <span class="muted nw">${all.length} ${T("policies", "полиси")}</span>
-    </div>
-    <div class="stat-row">
-      <div class="stat"><span>${T("Collected this month", "Наплатено овој месец")}</span>
-        <b>${fmt(sumBy(state.polPays.filter((x) => (x.paid_on || "").slice(0, 7) === todayStr().slice(0, 7)), (x) => x.amount))}</b></div>
-      <div class="stat"><span>${T("Commission this month", "Провизија овој месец")}</span>
-        <b style="color:var(--personal)">${fmt(sumBy(all.filter((p) => (p.start_date || "").slice(0, 7) === todayStr().slice(0, 7)), (p) => p.commission))}</b></div>
-      <div class="stat"><span>${T("Ending soon", "Истекуваат")}</span>
-        <b class="${counts.expiring ? "hflag" : ""}">${counts.expiring}</b></div>
-    </div>
-  </div>`;
-
   let list = all;
   if (state.polFilter === "open") list = all.filter((p) => !polSettled(p));
   else if (state.polFilter === "expiring") list = all.filter((p) => { const d = polDaysLeft(p); return d !== null && d >= 0 && d <= 30; });
@@ -2772,7 +2966,10 @@ function renderPolicies() {
         <div class="mono"><b>${fmt(policyTotal(p))}</b></div>
         <div class="muted" style="font-size:12px">${bal > 0.005
           ? `<span class="hflag">${fmt(bal)} ${T("left", "останува")}</span>`
-          : (p.commission ? `+${fmt(p.commission)}` : T("paid", "платено"))}</div></div>
+          : (p.commission ? `+${fmt(p.commission)}` : T("paid", "платено"))}</div>
+        <div class="muted" style="font-size:11px">${polRemitted(p)
+          ? (polCommPaid(p) ? T("closed", "затворена") : `<span style="color:var(--personal)">${T("commission due", "провизија следува")}</span>`)
+          : `<span style="color:var(--amber)">${T("to remit", "за плаќање")}</span>`}</div></div>
     </div>`;
   }).join("") : (state.loading ? SKEL(3) : `<div class="empty">${q
       ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
@@ -2894,6 +3091,17 @@ async function openPolicySheet(id) {
       <button class="btn sm ghost" style="flex:1" onclick="removePolicyImage()">${T("Remove photo", "Отстрани слика")}</button>
     </div>
     <button class="btn" onclick="savePolicy('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? `<div class="sec">${T("With the insurer", "Со осигурителната")}</div>
+      <div class="card">
+        <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Premium sent on", "Премија препратена")}</span>
+          <span class="mono" style="color:${polRemitted(p) ? "var(--personal)" : "var(--amber)"}">${polRemitted(p)
+            ? T("yes", "да") : T("not yet", "сè уште не")}</span></div>
+        <div class="row bankrow"><span class="muted nw">${T("Commission received", "Провизија примена")}</span>
+          <span class="mono" style="color:${polCommPaid(p) ? "var(--personal)" : "var(--amber)"}">${polCommPaid(p)
+            ? T("yes", "да") : T("not yet", "сè уште не")}</span></div>
+        ${polFronted(p) > 0.005 ? `<div class="muted" style="font-size:12.5px;margin-top:4px">
+          ${T("You have sent the premium on but the client still owes", "Премијата е препратена, но клиентот сè уште должи")} ${fmt(polBalance(p))} ден.</div>` : ""}
+      </div>` : ""}
     ${id ? polPaymentsBlock(p) : `<p class="muted" style="font-size:12.5px">${T(
       "Save it first, then you can record what has been paid — in one go or in instalments.",
       "Прво зачувај ја, потоа можеш да внесуваш уплати — одеднаш или на рати.")}</p>`}
