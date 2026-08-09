@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-121509";
+const BUILD = "20260809-122044";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2932,11 +2932,12 @@ function openStmtBuilder(kind, insurer, period) {
   const ins = insurer || insurersUsed()[0] || "";
   const per = period || prevMonth(todayStr().slice(0, 7));
   const field = kind === "remittance" ? "remit_statement_id" : "comm_statement_id";
-  // nothing to remit on a policy the client paid by card or bank — that money
-  // already reached the insurer without touching you
+  // Everything still open with this insurer, however old — you settle what is
+  // outstanding, not what a calendar month happens to contain. Nothing to remit
+  // on a policy the client paid by card or bank: that money never touched you.
   const pool = state.policies.filter((p) => (p.insurer || "") === ins && !p[field]
-    && (p.start_date || "").slice(0, 7) <= per
-    && (kind === "commission" ? (parseFloat(p.commission) || 0) > 0 : policyDue(p) > 0.005));
+    && (kind === "commission" ? (parseFloat(p.commission) || 0) > 0 : policyDue(p) > 0.005))
+    .sort((a, b) => (a.start_date || "").localeCompare(b.start_date || ""));
   stmtDraft = { kind, insurer: ins, period: per, picked: pool.map((p) => p.id) };
 
   const total = () => sumBy(pool.filter((p) => stmtDraft.picked.includes(p.id)),
@@ -2949,9 +2950,10 @@ function openStmtBuilder(kind, insurer, period) {
       ${insurersUsed().map((n) => `<option ${n === ins ? "selected" : ""}>${esc(n)}</option>`).join("")
         || `<option>${T("no policies yet", "сè уште нема полиси")}</option>`}
     </select>
-    <label>${T("Period", "Период")}</label>
-    <input id="st-per" type="month" value="${per}" onchange="openStmtBuilder('${kind}', $('st-ins').value, this.value)">
-    <div class="sec">${T("Policies included", "Вклучени полиси")} · ${pool.length}</div>
+    <label>${T("Label this statement", "Означи го изводот")}</label>
+    <input id="st-per" type="month" value="${per}">
+    <div class="sec">${T("Everything still open", "Сè што е отворено")} · ${pool.length}
+      ${pool.length ? `<span class="muted" style="font-weight:400">· ${T("oldest first", "најстарите прво")}</span>` : ""}</div>
     ${pool.length ? pool.map((p) => `<div class="row" style="gap:10px;margin-bottom:6px;align-items:flex-start">
       <button class="clbox on" onclick="stmtToggle('${p.id}', this)">✓</button>
       <div style="flex:1;min-width:0"><b>${esc(p.holder_name)}</b>
@@ -2963,7 +2965,10 @@ function openStmtBuilder(kind, insurer, period) {
         </div>` : ""}</div>
       <span class="mono">${fmt(kind === "remittance" ? policyDue(p) : p.commission)}</span>
     </div>`).join("")
-      : `<p class="muted">${T("Nothing outstanding for that company and month.", "Ништо неподмирено за таа компанија и месец.")}</p>`}
+      : `<p class="muted">${kind === "remittance"
+        ? T("Nothing owed to this company — every policy was paid to them directly, or already handed over.",
+            "Ништо не се должи на оваа компанија — сè е платено директно или веќе предадено.")
+        : T("No commission outstanding with this company.", "Нема неисплатена провизија кај оваа компанија.")}</p>`}
     <div class="totalbar"><span>${T("Statement total", "Вкупно извод")}</span>
       <span class="mono" id="st-total">${fmt(total())} ден.</span></div>
     ${kind === "remittance" ? `<div class="row" style="justify-content:space-between;margin-top:6px;font-size:12.5px">
