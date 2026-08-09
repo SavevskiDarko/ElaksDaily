@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-083257";
+const BUILD = "20260809-083751";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2759,6 +2759,138 @@ function openFronted() {
     </div>`).join("") : `<p class="muted">${T("Nothing — every remitted policy is paid up.", "Ништо — сите препратени полиси се наплатени.")}</p>`}`);
 }
 
+/* ---------- what the month actually earned ---------- */
+let insRepMonth = null;
+function insMonthFigures(mo) {
+  const inMonth = (d) => (d || "").slice(0, 7) === mo;
+  const sold = state.policies.filter((p) => inMonth(p.start_date));
+  const renewals = sold.filter((p) => p.renewed_from);
+  const stmts = state.statements.filter((s) => inMonth(s.paid_on));
+  return {
+    sold, renewals,
+    // what the month earned, whether or not the money has arrived
+    commissionEarned: sumBy(sold, (p) => p.commission),
+    premiumsWritten: sumBy(sold, policyTotal),
+    // what actually moved
+    collected: sumBy(state.polPays.filter((x) => inMonth(x.paid_on)), (x) => x.amount),
+    remitted: sumBy(stmts.filter((s) => s.kind === "remittance"), (s) => s.amount),
+    commissionReceived: sumBy(stmts.filter((s) => s.kind === "commission"), (s) => s.amount),
+    byKind: POLICY_KINDS.map((k) => ({ k, n: sold.filter((p) => p.kind === k).length,
+      comm: sumBy(sold.filter((p) => p.kind === k), (p) => p.commission) })).filter((x) => x.n),
+    byInsurer: [...new Set(sold.map((p) => p.insurer).filter(Boolean))].map((ins) => ({
+      ins, n: sold.filter((p) => p.insurer === ins).length,
+      comm: sumBy(sold.filter((p) => p.insurer === ins), (p) => p.commission),
+    })).sort((a, b) => b.comm - a.comm),
+  };
+}
+
+function renderInsReport() {
+  const mo = insRepMonth || todayStr().slice(0, 7);
+  insRepMonth = mo;
+  const f = insMonthFigures(mo);
+  const cash = f.collected - f.remitted + f.commissionReceived;
+  const row = (label, value, colour, sub) => `<div class="row bankrow">
+    <span class="muted nw">${label}${sub ? `<br><span style="font-size:11.5px">${sub}</span>` : ""}</span>
+    <span class="mono"${colour ? ` style="color:${colour}"` : ""}>${value}</span></div>`;
+
+  $("pol-list").innerHTML = `
+    <div class="row" style="justify-content:center;gap:18px;margin-bottom:10px">
+      <button class="chip" onclick="insRepMonth='${prevMonth(mo)}';renderPolicies()">‹</button>
+      <b>${monthName(mo)} ${mo.slice(0, 4)}</b>
+      <button class="chip" onclick="insRepMonth='${nextMonth(mo)}';renderPolicies()">›</button>
+    </div>
+
+    <div class="card">
+      <div class="bank-big">${fmt(f.commissionEarned)} <span style="font-size:16px">ден.</span></div>
+      <div class="bank-lbl">${T("commission earned this month", "заработена провизија овој месец")}</div>
+      <div class="stat-row">
+        <div class="stat"><span>${T("Policies", "Полиси")}</span><b>${f.sold.length}</b></div>
+        <div class="stat"><span>${T("Renewals", "Обнови")}</span><b>${f.renewals.length}</b></div>
+        <div class="stat"><span>${T("Premiums written", "Издадени премии")}</span><b>${fmt(f.premiumsWritten)}</b></div>
+      </div>
+    </div>
+
+    <div class="sec">${T("Money that moved", "Пари што се движеле")}</div>
+    <div class="card">
+      ${row(T("Collected from clients", "Наплатено од клиенти"), fmt(f.collected) + " ден.", "var(--personal)")}
+      ${row(T("Paid to insurers", "Платено на осигурителни"), "−" + fmt(f.remitted) + " ден.", "var(--danger)")}
+      ${row(T("Commission received", "Примена провизија"), "+" + fmt(f.commissionReceived) + " ден.", "var(--personal)")}
+      <div class="row bankrow" style="border-top:1px solid var(--line);padding-top:8px">
+        <span class="muted nw">${T("Net into my hands", "Нето во мои раце")}</span>
+        <span class="mono"><b style="color:${cash >= 0 ? "var(--personal)" : "var(--danger)"}">${fmt(cash)}</b> ден.</span></div>
+    </div>
+    <p class="muted" style="font-size:12px">${T(
+      "Earned is what the month sold; net is what actually passed through your hands, which lags behind it.",
+      "Заработено е она што е продадено; нето е она што навистина поминало низ твои раце, што доцни зад него.")}</p>
+
+    ${f.byKind.length ? `<div class="sec">${T("By type", "По вид")}</div>
+      ${f.byKind.map((x) => `<div class="mov"><span>${esc(x.k)} · ${x.n}</span>
+        <span class="mono">${fmt(x.comm)} ден.</span></div>`).join("")}` : ""}
+
+    ${f.byInsurer.length ? `<div class="sec">${T("By insurer", "По осигурителна")}</div>
+      ${f.byInsurer.map((x) => `<div class="mov"><span>${esc(x.ins)} · ${x.n}</span>
+        <span class="mono">${fmt(x.comm)} ден.</span></div>`).join("")}` : ""}
+
+    ${f.sold.length ? `<div class="sec">${T("Policies sold", "Продадени полиси")}</div>
+      ${f.sold.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
+        <span>${esc(p.holder_name)}${p.renewed_from ? ` <span class="muted">· ${T("renewal", "обнова")}</span>` : ""}</span>
+        <span class="mono">${fmt(p.commission)} ден. ›</span></div>`).join("")}` : ""}
+
+    <button class="btn ghost" onclick="printInsReport()">${T("Save as PDF", "Зачувај како PDF")}</button>
+    <button class="btn ghost" onclick="openInsYear()">${T("The whole year", "Целата година")}</button>`;
+}
+
+const nextMonth = (ym) => {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m, 1).toLocaleDateString("sv-SE").slice(0, 7);
+};
+
+// Twelve months at a glance — the question "how am I doing" is really a
+// question about the trend, not one month.
+function openInsYear() {
+  const year = (insRepMonth || todayStr()).slice(0, 4);
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+  const rows = months.map((mo) => ({ mo, f: insMonthFigures(mo) }));
+  const totalComm = sumBy(rows, (r) => r.f.commissionEarned);
+  const totalPol = rows.reduce((s, r) => s + r.f.sold.length, 0);
+  const best = Math.max(...rows.map((r) => r.f.commissionEarned), 1);
+  openSheet(`
+    <h2>${year}</h2>
+    <div class="totalbar"><span>${T("Commission earned", "Заработена провизија")}</span>
+      <span class="mono">${fmt(totalComm)} ден.</span></div>
+    <p class="muted">${totalPol} ${T("policies over the year", "полиси во годината")}</p>
+    ${rows.map((r) => `<div style="margin-bottom:7px">
+      <div class="row" style="justify-content:space-between;font-size:12.5px">
+        <span class="muted nw">${monthName(r.mo)}</span>
+        <span class="mono">${r.f.sold.length ? fmt(r.f.commissionEarned) + " ден. · " + r.f.sold.length : "—"}</span></div>
+      <div style="height:6px;border-radius:3px;background:var(--line);overflow:hidden">
+        <div style="height:100%;width:${Math.round((r.f.commissionEarned / best) * 100)}%;background:var(--personal)"></div></div>
+    </div>`).join("")}`);
+}
+
+async function printInsReport() {
+  const mo = insRepMonth || todayStr().slice(0, 7);
+  const f = insMonthFigures(mo);
+  const cash = f.collected - f.remitted + f.commissionReceived;
+  await printDoc(`
+    <div class="rp-h1">Осигурување — извештај за ${monthName(mo)} ${mo.slice(0, 4)}</div>
+    <div class="rp-sub">генериран ${dmy(todayStr())}</div>
+    <div class="rp-bar"><span>Заработена провизија</span><span>${fmt(f.commissionEarned)} ден.</span></div>
+    <table class="rp-tbl">
+      <tr><th>Продадени полиси</th><td class="r">${f.sold.length}</td></tr>
+      <tr><th>Од тоа обнови</th><td class="r">${f.renewals.length}</td></tr>
+      <tr><th>Издадени премии</th><td class="r">${fmt(f.premiumsWritten)} ден.</td></tr>
+      <tr><th>Наплатено од клиенти</th><td class="r">${fmt(f.collected)} ден.</td></tr>
+      <tr><th>Платено на осигурителни</th><td class="r">${fmt(f.remitted)} ден.</td></tr>
+      <tr><th>Примена провизија</th><td class="r">${fmt(f.commissionReceived)} ден.</td></tr>
+      <tr><th>Нето во мои раце</th><td class="r">${fmt(cash)} ден.</td></tr>
+    </table>
+    ${f.byInsurer.length ? `<div class="rp-h1">По осигурителна</div>
+      <table class="rp-tbl"><tr><th>Компанија</th><th class="r">Полиси</th><th class="r">Провизија</th></tr>
+      ${f.byInsurer.map((x) => `<tr><td>${esc(x.ins)}</td><td class="r">${x.n}</td><td class="r">${fmt(x.comm)} ден.</td></tr>`).join("")}
+      </table>` : ""}`);
+}
+
 function renderStatements() {
   const list = state.statements;
   const open = list.filter((s) => !s.paid_on);
@@ -2959,13 +3091,15 @@ function renderInsSummary() {
 }
 
 function renderPolicies() {
-  $("ins-tabs").innerHTML = [["policies", T("Policies", "Полиси")], ["statements", T("Statements", "Изводи")]]
+  $("ins-tabs").innerHTML = [["policies", T("Policies", "Полиси")], ["statements", T("Statements", "Изводи")], ["report", T("Report", "Извештај")]]
     .map(([v, l]) => `<button class="chip ${state.insView === v ? "on" : ""}"
       onclick="state.insView='${v}';renderPolicies()">${l}</button>`).join("");
   const onPolicies = state.insView === "policies";
   $("pol-search").style.display = onPolicies ? "" : "none";
   $("pol-filter").style.display = onPolicies ? "" : "none";
-  renderInsSummary();
+  $("pol-summary").style.display = state.insView === "report" ? "none" : "";
+  if (state.insView !== "report") renderInsSummary();
+  if (state.insView === "report") return renderInsReport();
   if (!onPolicies) return renderStatements();
   const q = (($("pol-search") || {}).value || "").trim().toLowerCase();
   const all = state.policies;
