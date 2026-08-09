@@ -654,7 +654,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-122044";
+const BUILD = "20260809-123303";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2708,6 +2708,9 @@ const POLICY_KINDS = ["Автомобил", "Зелен картон", "Имот
 // owed is the two together.
 const gcPrice = (p) => p.has_green_card ? (parseFloat(p.green_card_price) || 0) : 0;
 const policyTotal = (p) => (parseFloat(p.amount) || 0) + gcPrice(p);
+// You earn on the green card as well as on the policy it rides on.
+const gcComm = (p) => p.has_green_card ? (parseFloat(p.gc_commission) || 0) : 0;
+const policyCommission = (p) => (parseFloat(p.commission) || 0) + gcComm(p);
 const polPays = (p) => state.polPays.filter((x) => x.policy_id === p.id);
 // Card and bank go straight to the insurer; only cash passes through your hands.
 const throughMe = (m) => String(m || "cash").toLowerCase() === "cash";
@@ -2739,6 +2742,7 @@ function polStatus(p) {
 // what clients still owe me, what I owe the insurers, and what they owe me.
 const polRemitted = (p) => !!p.remit_statement_id;
 const polCommPaid = (p) => !!p.comm_statement_id;
+const polCommDue = (p) => polCommPaid(p) ? 0 : policyCommission(p);
 // sent on out of your own money, because the cash has not come in yet
 const polFronted = (p) => polRemitted(p) ? Math.max(0, policyDue(p) - polPaidCash(p)) : 0;
 // cash in your hands that belongs to the insurer
@@ -2777,17 +2781,17 @@ function insMonthFigures(mo) {
   return {
     sold, renewals,
     // what the month earned, whether or not the money has arrived
-    commissionEarned: sumBy(sold, (p) => p.commission),
+    commissionEarned: sumBy(sold, policyCommission),
     premiumsWritten: sumBy(sold, policyTotal),
     // what actually moved
     collected: sumBy(state.polPays.filter((x) => inMonth(x.paid_on)), (x) => x.amount),
     remitted: sumBy(stmts.filter((s) => s.kind === "remittance"), (s) => s.amount),
     commissionReceived: sumBy(stmts.filter((s) => s.kind === "commission"), (s) => s.amount),
     byKind: POLICY_KINDS.map((k) => ({ k, n: sold.filter((p) => p.kind === k).length,
-      comm: sumBy(sold.filter((p) => p.kind === k), (p) => p.commission) })).filter((x) => x.n),
+      comm: sumBy(sold.filter((p) => p.kind === k), policyCommission) })).filter((x) => x.n),
     byInsurer: [...new Set(sold.map((p) => p.insurer).filter(Boolean))].map((ins) => ({
       ins, n: sold.filter((p) => p.insurer === ins).length,
-      comm: sumBy(sold.filter((p) => p.insurer === ins), (p) => p.commission),
+      comm: sumBy(sold.filter((p) => p.insurer === ins), policyCommission),
     })).sort((a, b) => b.comm - a.comm),
   };
 }
@@ -2842,7 +2846,7 @@ function renderInsReport() {
     ${f.sold.length ? `<div class="sec">${T("Policies sold", "Продадени полиси")}</div>
       ${f.sold.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
         <span>${esc(p.holder_name)}${p.renewed_from ? ` <span class="muted">· ${T("renewal", "обнова")}</span>` : ""}</span>
-        <span class="mono">${fmt(p.commission)} ден. ›</span></div>`).join("")}` : ""}
+        <span class="mono">${fmt(policyCommission(p))} ден. ›</span></div>`).join("")}` : ""}
 
     <button class="btn ghost" onclick="printInsReport()">${T("Save as PDF", "Зачувај како PDF")}</button>
     <button class="btn ghost" onclick="openInsYear()">${T("The whole year", "Целата година")}</button>`;
@@ -2936,12 +2940,12 @@ function openStmtBuilder(kind, insurer, period) {
   // outstanding, not what a calendar month happens to contain. Nothing to remit
   // on a policy the client paid by card or bank: that money never touched you.
   const pool = state.policies.filter((p) => (p.insurer || "") === ins && !p[field]
-    && (kind === "commission" ? (parseFloat(p.commission) || 0) > 0 : policyDue(p) > 0.005))
+    && (kind === "commission" ? policyCommission(p) > 0 : policyDue(p) > 0.005))
     .sort((a, b) => (a.start_date || "").localeCompare(b.start_date || ""));
   stmtDraft = { kind, insurer: ins, period: per, picked: pool.map((p) => p.id) };
 
   const total = () => sumBy(pool.filter((p) => stmtDraft.picked.includes(p.id)),
-    (p) => kind === "remittance" ? policyDue(p) : p.commission);
+    (p) => kind === "remittance" ? policyDue(p) : policyCommission(p));
 
   openSheet(`
     <h2>${kind === "remittance" ? T("Pay an insurer", "Плати осигурителна") : T("Commission received", "Примена провизија")}</h2>
@@ -2963,7 +2967,7 @@ function openStmtBuilder(kind, insurer, period) {
           ${polPaidDirect(p) ? `<span class="muted">${polPaidCash(p) ? " · " : ""}${T("paid the insurer directly", "платено директно")} ${fmt(polPaidDirect(p))}</span>` : ""}
           ${policyDue(p) - polPaidCash(p) > 0.005 ? `<span style="color:var(--amber)">${polPaidCash(p) || polPaidDirect(p) ? " · " : ""}${T("not collected", "ненаплатено")} ${fmt(policyDue(p) - polPaidCash(p))}</span>` : ""}
         </div>` : ""}</div>
-      <span class="mono">${fmt(kind === "remittance" ? policyDue(p) : p.commission)}</span>
+      <span class="mono">${fmt(kind === "remittance" ? policyDue(p) : policyCommission(p))}</span>
     </div>`).join("")
       : `<p class="muted">${kind === "remittance"
         ? T("Nothing owed to this company — every policy was paid to them directly, or already handed over.",
@@ -3002,7 +3006,7 @@ function stmtToggle(id, btn) {
 function stmtTotals() {
   const kind = stmtDraft.kind;
   const picked = state.policies.filter((p) => stmtDraft.picked.includes(p.id));
-  $("st-total").textContent = fmt(sumBy(picked, (p) => kind === "remittance" ? policyDue(p) : p.commission)) + " ден.";
+  $("st-total").textContent = fmt(sumBy(picked, (p) => kind === "remittance" ? policyDue(p) : policyCommission(p))) + " ден.";
   const fr = $("st-front");
   if (fr) fr.textContent = fmt(sumBy(picked, (p) => Math.max(0, policyDue(p) - polPaidCash(p)))) + " ден.";
 }
@@ -3012,7 +3016,7 @@ async function saveStatement() {
   if (!d || !d.picked.length) return toast(T("Nothing selected", "Ништо не е избрано"));
   const kind = d.kind;
   const amount = sumBy(state.policies.filter((p) => d.picked.includes(p.id)),
-    (p) => kind === "remittance" ? policyDue(p) : p.commission);
+    (p) => kind === "remittance" ? policyDue(p) : policyCommission(p));
   const row = {
     insurer: $("st-ins").value, kind, period: $("st-per").value || d.period,
     amount, due_date: $("st-due").value || null, paid_on: $("st-paid").value || null,
@@ -3054,7 +3058,7 @@ function openStmtSheet(id) {
     <div class="sec">${T("Policies on this statement", "Полиси на изводот")}</div>
     ${pols.map((p) => `<div class="mov tapp" role="button" tabindex="0" onclick="openPolicySheet('${p.id}')">
       <span>${esc(p.holder_name)}${p.policy_no ? " · " + esc(p.policy_no) : ""}</span>
-      <span class="mono">${fmt(s.kind === "remittance" ? policyDue(p) : p.commission)} ›</span></div>`).join("")}
+      <span class="mono">${fmt(s.kind === "remittance" ? policyDue(p) : policyCommission(p))} ›</span></div>`).join("")}
     <button class="btn danger" onclick="delStatement('${s.id}')">${T("Delete statement", "Избриши извод")}</button>
   `);
 }
@@ -3083,7 +3087,7 @@ function renderInsSummary() {
   const toRemit = sumBy(live.filter((p) => !polRemitted(p)), policyDue);
   const fronted = sumBy(live, polFronted);
   const holding = sumBy(live, polHolding);
-  const commDue = sumBy(live.filter((p) => !polCommPaid(p)), (p) => p.commission);
+  const commDue = sumBy(live, polCommDue);
 
   $("pol-summary").innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -3150,7 +3154,7 @@ function renderPolicies() {
         <div class="mono"><b>${fmt(policyTotal(p))}</b></div>
         <div class="muted" style="font-size:12px">${bal > 0.005
           ? `<span class="hflag">${fmt(bal)} ${T("left", "останува")}</span>`
-          : (p.commission ? `+${fmt(p.commission)}` : T("paid", "платено"))}</div>
+          : (policyCommission(p) ? `+${fmt(policyCommission(p))}` : T("paid", "платено"))}</div>
         <div class="muted" style="font-size:11px">${polRemitted(p)
           ? (polCommPaid(p) ? T("closed", "затворена") : `<span style="color:var(--personal)">${T("commission due", "провизија следува")}</span>`)
           : `<span style="color:var(--amber)">${T("to remit", "за плаќање")}</span>`}</div></div>
@@ -3259,9 +3263,17 @@ async function openPolicySheet(id) {
         <div><label>${T("Green card ends", "Зелен картон завршува")}</label>
           <input id="po-gcend" type="date" value="${p.green_card_end || ""}"></div>
       </div>
-      <label>${T("Green card price (ден.)", "Цена на зелен картон (ден.)")}</label>
-      <input id="po-gcprice" type="number" inputmode="decimal" step="any"
-        value="${p.green_card_price ?? 0}" oninput="polCommHint()">
+      <div class="grid2">
+        <div><label>${T("Green card price (ден.)", "Цена на зелен картон (ден.)")}</label>
+          <input id="po-gcprice" type="number" inputmode="decimal" step="any"
+            value="${p.green_card_price ?? 0}" oninput="polCommHint()"></div>
+        <div><label>${T("Its commission (ден.)", "Провизија од него (ден.)")}</label>
+          <input id="po-gccomm" type="number" inputmode="decimal" step="any"
+            value="${p.gc_commission ?? 0}" oninput="polCommHint()"></div>
+      </div>
+      <div class="chips" style="margin-top:6px">
+        ${[5, 10, 18, 20].map((pct) => `<button class="chip" onclick="setGcComm(${pct})">${pct}%</button>`).join("")}
+      </div>
       <p class="muted" style="font-size:12.5px">${T(
         "A green card usually runs a month while the policy runs a year, so it is watched separately.",
         "Зелениот картон обично трае месец, а полисата година — затоа се следи одделно.")}</p>
@@ -3295,7 +3307,11 @@ async function openPolicySheet(id) {
   renderPolImg();
 }
 function setComm(pct) {
-  $("po-comm").value = Math.round(sheetTotal() * pct) / 100;   // on the whole sale
+  $("po-comm").value = Math.round((parseFloat($("po-amount").value) || 0) * pct) / 100;
+  polCommHint();
+}
+function setGcComm(pct) {
+  $("po-gccomm").value = Math.round((parseFloat($("po-gcprice").value) || 0) * pct) / 100;
   polCommHint();
 }
 // what the client pays in total: the policy plus the green card on it
@@ -3306,13 +3322,14 @@ function sheetTotal() {
   return amt + gc;
 }
 function polCommHint() {
-  const total = sheetTotal();
-  const c = parseFloat($("po-comm").value) || 0;
   const el = $("po-comm-hint");
   if (!el) return;
-  const gc = total - (parseFloat($("po-amount").value) || 0);
-  el.textContent = (gc ? `${T("total", "вкупно")} ${fmt(total)} ден.` : "")
-    + (total && c ? `${gc ? " · " : ""}= ${Math.round((c / total) * 1000) / 10}%` : "");
+  const total = sheetTotal();
+  const comm = (parseFloat($("po-comm").value) || 0)
+    + (($("po-gc") && $("po-gc").classList.contains("on")) ? (parseFloat(($("po-gccomm") || {}).value) || 0) : 0);
+  el.textContent = (total ? `${T("sale", "продажба")} ${fmt(total)}` : "")
+    + (comm ? ` · ${T("you earn", "заработуваш")} ${fmt(comm)}` : "")
+    + (total && comm ? ` (${Math.round((comm / total) * 1000) / 10}%)` : "");
 }
 function gcToggle() {
   const on = $("po-gc").classList.contains("on");
@@ -3412,6 +3429,7 @@ async function savePolicy(id) {
     commission: parseFloat($("po-comm").value) || 0,
     has_green_card: $("po-gc").classList.contains("on"),
     green_card_price: parseFloat($("po-gcprice").value) || 0,
+    gc_commission: parseFloat($("po-gccomm").value) || 0,
     green_card_no: $("po-gcno").value.trim() || null,
     green_card_end: $("po-gcend").value || null,
     note: $("po-note").value.trim() || null,
@@ -3477,7 +3495,7 @@ async function renewPolicy(id) {
   const row = {
     holder_name: p.holder_name, policy_no: null, phone: p.phone, kind: p.kind,
     insurer: p.insurer, client_id: p.client_id, start_date: start, end_date: end,
-    amount: p.amount, commission: p.commission, note: p.note,
+    amount: p.amount, commission: p.commission, gc_commission: p.gc_commission, note: p.note,
     has_green_card: p.has_green_card, green_card_price: p.green_card_price, green_card_no: null,
     green_card_end: p.has_green_card ? (() => {
       const g = new Date(start + "T12:00"); g.setMonth(g.getMonth() + 1);
