@@ -258,13 +258,14 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
 @media print{
+  /* Everything is hidden by display, not by visibility: some phone print
+     engines ignore visibility. And the report stays in normal flow — an
+     absolutely positioned container gets clipped to the first page. */
   html,body{background:#fff !important;padding:0 !important;margin:0 !important;
-    height:auto !important;overflow:visible !important}
-  body *{visibility:hidden !important}
-  #printroot{display:block !important;visibility:visible !important;
-    position:absolute;left:0;top:0;width:100%}
-  #printroot *{visibility:visible !important}
-  .topbar,.tabbar,.fab,.mic,.sheet,.overlay,.toast,.updbar,.dlg{display:none !important}
+    height:auto !important;min-height:0 !important;overflow:visible !important;display:block !important}
+  body > *{display:none !important}
+  #printroot{display:block !important;position:static !important;
+    width:auto !important;height:auto !important;overflow:visible !important}
   @page{size:A4;margin:12mm 10mm}
 }
 .pv{font-family:Arial,Helvetica,sans-serif;color:#232323;font-size:9.5pt;
@@ -670,7 +671,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260810-094759";
+const BUILD = "20260810-095402";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2401,32 +2402,16 @@ async function printOrder(gi) {
 }
 
 /* ---------- one branded print wrapper for both ---------- */
-// Printing happens in a document of its own — a hidden iframe holding nothing
-// but the report. Printing the app's own page meant fighting its styles, its
-// fixed sheets and the browser's timing, which is what produced blank PDFs.
-function printStyles() {
-  let out = "";
-  for (const sheet of document.styleSheets) {
-    let rules;
-    try { rules = sheet.cssRules; } catch (e) { continue; }   // other origins
-    for (const r of rules) {
-      if (r.selectorText && /^\s*\.(pv|rp)/.test(r.selectorText)) out += r.cssText + "\n";
-      if (r.media && String(r.media).includes("print")) {
-        for (const inner of r.cssRules || []) {
-          if (String(inner.cssText).startsWith("@page")) out += inner.cssText + "\n";
-        }
-      }
-    }
-  }
-  return out;
-}
-
-// brand: false for anything that is not Elaks — insurance is a separate
-// business and its papers should not carry someone else's letterhead.
+// The report is written into the page itself and everything else is hidden
+// for the duration. A hidden iframe looked tidier, but a phone prints the main
+// document and ignores the frame — which is exactly how blank pages happened.
+//
+// brand: false for anything that is not Elaks.
 async function printDoc(inner, opts) {
   const brand = !opts || opts.brand !== false;
+  const root = $("printroot");
   try {
-    const body = `<div class="pv">
+    root.innerHTML = `<div class="pv">
       ${brand
         ? `<table class="pv-top"><tr><td></td><td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td></tr></table>`
         : (opts && opts.heading ? `<div class="pv-plain">${opts.heading}</div>` : "")}
@@ -2434,35 +2419,24 @@ async function printDoc(inner, opts) {
       ${brand ? `<img class="pv-footer" src="brand-footer.png" alt="ELAKS">` : ""}
     </div>`;
 
-    const doc = `<!doctype html><html><head><meta charset="utf-8">
-      <base href="${location.href}">
-      <style>
-        @page{size:A4;margin:12mm 10mm}
-        html,body{margin:0;padding:0;background:#fff;color:#232323;
-          font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-        ${printStyles()}
-      </style></head><body>${body}</body></html>`;
-
-    const frame = document.createElement("iframe");
-    frame.setAttribute("aria-hidden", "true");
-    frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0";
-    document.body.appendChild(frame);
-    const gone = () => { try { frame.remove(); } catch (e) { /* already gone */ } };
-
-    await new Promise((done) => { frame.onload = done; frame.srcdoc = doc; });
-    const win = frame.contentWindow;
-    // let the pictures arrive before the snapshot is taken
-    const imgs = [...frame.contentDocument.images];
+    // nothing prints until the pictures have arrived
+    const imgs = [...root.querySelectorAll("img")];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
-    await new Promise((r) => setTimeout(r, 250));
+    // and until the browser has actually laid the report out
+    root.getBoundingClientRect();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise((r) => setTimeout(r, 200));
 
-    win.addEventListener("afterprint", gone);
-    setTimeout(gone, 120000);
-    win.focus();
-    win.print();
+    if (!root.textContent.trim()) throw new Error("the document came out empty");
+
+    const clear = () => { root.innerHTML = ""; window.removeEventListener("afterprint", clear); };
+    window.addEventListener("afterprint", clear);
+    setTimeout(clear, 180000);            // long backstop only
+    window.print();
     toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
   } catch (e) {
     console.error(e);
+    root.innerHTML = "";
     say(T("Could not build the document: ", "Не можев да го подготвам документот: ") + e.message);
   }
 }
