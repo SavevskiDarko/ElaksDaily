@@ -258,9 +258,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
 @media print{
-  body{background:#fff;padding:0}
-  body > *:not(#printroot){display:none !important}
-  #printroot{display:block !important}
+  html,body{background:#fff !important;padding:0 !important;margin:0 !important;
+    height:auto !important;overflow:visible !important}
+  body *{visibility:hidden !important}
+  #printroot{display:block !important;visibility:visible !important;
+    position:absolute;left:0;top:0;width:100%}
+  #printroot *{visibility:visible !important}
+  .topbar,.tabbar,.fab,.mic,.sheet,.overlay,.toast,.updbar,.dlg{display:none !important}
   @page{size:A4;margin:12mm 10mm}
 }
 .pv{font-family:Arial,Helvetica,sans-serif;color:#232323;font-size:9.5pt;
@@ -666,7 +670,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260810-041452";
+const BUILD = "20260810-094759";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2397,31 +2401,72 @@ async function printOrder(gi) {
 }
 
 /* ---------- one branded print wrapper for both ---------- */
+// Printing happens in a document of its own — a hidden iframe holding nothing
+// but the report. Printing the app's own page meant fighting its styles, its
+// fixed sheets and the browser's timing, which is what produced blank PDFs.
+function printStyles() {
+  let out = "";
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch (e) { continue; }   // other origins
+    for (const r of rules) {
+      if (r.selectorText && /^\s*\.(pv|rp)/.test(r.selectorText)) out += r.cssText + "\n";
+      if (r.media && String(r.media).includes("print")) {
+        for (const inner of r.cssRules || []) {
+          if (String(inner.cssText).startsWith("@page")) out += inner.cssText + "\n";
+        }
+      }
+    }
+  }
+  return out;
+}
+
 // brand: false for anything that is not Elaks — insurance is a separate
 // business and its papers should not carry someone else's letterhead.
 async function printDoc(inner, opts) {
   const brand = !opts || opts.brand !== false;
   try {
-    $("printroot").innerHTML = `<div class="pv">
+    const body = `<div class="pv">
       ${brand
         ? `<table class="pv-top"><tr><td></td><td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td></tr></table>`
         : (opts && opts.heading ? `<div class="pv-plain">${opts.heading}</div>` : "")}
       ${inner}
       ${brand ? `<img class="pv-footer" src="brand-footer.png" alt="ELAKS">` : ""}
     </div>`;
-    const imgs = [...$("printroot").querySelectorAll("img")];
+
+    const doc = `<!doctype html><html><head><meta charset="utf-8">
+      <base href="${location.href}">
+      <style>
+        @page{size:A4;margin:12mm 10mm}
+        html,body{margin:0;padding:0;background:#fff;color:#232323;
+          font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        ${printStyles()}
+      </style></head><body>${body}</body></html>`;
+
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0";
+    document.body.appendChild(frame);
+    const gone = () => { try { frame.remove(); } catch (e) { /* already gone */ } };
+
+    await new Promise((done) => { frame.onload = done; frame.srcdoc = doc; });
+    const win = frame.contentWindow;
+    // let the pictures arrive before the snapshot is taken
+    const imgs = [...frame.contentDocument.images];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
-    await new Promise((r) => setTimeout(r, 150));
-    // The page must stay in place while the print preview is open. Clearing it
-    // on a timer produced a blank PDF, because the preview takes longer than
-    // the timer on a phone — so wait for the browser to tell us it is done.
-    const clear = () => { $("printroot").innerHTML = ""; window.removeEventListener("afterprint", clear); };
-    window.addEventListener("afterprint", clear);
-    setTimeout(clear, 120000);            // a long backstop, never a short one
-    window.print();
+    await new Promise((r) => setTimeout(r, 250));
+
+    win.addEventListener("afterprint", gone);
+    setTimeout(gone, 120000);
+    win.focus();
+    win.print();
     toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
-  } catch (e) { console.error(e); say("Could not build the document: " + e.message); }
+  } catch (e) {
+    console.error(e);
+    say(T("Could not build the document: ", "Не можев да го подготвам документот: ") + e.message);
+  }
 }
+
 function imgDims(src) {
   return new Promise((res) => {
     const im = new Image();
