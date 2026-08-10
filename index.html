@@ -265,6 +265,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 }
 .pv{font-family:Arial,Helvetica,sans-serif;color:#232323;font-size:9.5pt;
   -webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pv-plain{margin-bottom:6mm;padding-bottom:3mm;border-bottom:1.5pt solid #232323}
+.pv-plain b{font-size:13pt}
+.pv-plain span{display:block;color:#555;font-size:9.5pt;margin-top:1mm}
 .pv-top{width:100%;border-collapse:collapse;margin-bottom:6mm}
 .pv-top td{vertical-align:top}
 .pv-top td.r{text-align:right;width:42mm}
@@ -663,7 +666,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260809-225112";
+const BUILD = "20260810-041452";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2167,10 +2170,12 @@ async function printOffer(o) {
     </div>`;
     const imgs = [...$("printroot").querySelectorAll("img")];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 150));
+    const clear = () => { $("printroot").innerHTML = ""; window.removeEventListener("afterprint", clear); };
+    window.addEventListener("afterprint", clear);
+    setTimeout(clear, 120000);
     window.print();
-    setTimeout(() => { $("printroot").innerHTML = ""; }, 1500);
-    toast("Choose \"Save as PDF\" in the print dialog");
+    toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
   } catch (e) {
     console.error(e);
     say("Could not build the PDF view: " + e.message);
@@ -2392,19 +2397,29 @@ async function printOrder(gi) {
 }
 
 /* ---------- one branded print wrapper for both ---------- */
-async function printDoc(inner) {
+// brand: false for anything that is not Elaks — insurance is a separate
+// business and its papers should not carry someone else's letterhead.
+async function printDoc(inner, opts) {
+  const brand = !opts || opts.brand !== false;
   try {
     $("printroot").innerHTML = `<div class="pv">
-      <table class="pv-top"><tr><td></td><td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td></tr></table>
+      ${brand
+        ? `<table class="pv-top"><tr><td></td><td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td></tr></table>`
+        : (opts && opts.heading ? `<div class="pv-plain">${opts.heading}</div>` : "")}
       ${inner}
-      <img class="pv-footer" src="brand-footer.png" alt="ELAKS">
+      ${brand ? `<img class="pv-footer" src="brand-footer.png" alt="ELAKS">` : ""}
     </div>`;
     const imgs = [...$("printroot").querySelectorAll("img")];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 150));
+    // The page must stay in place while the print preview is open. Clearing it
+    // on a timer produced a blank PDF, because the preview takes longer than
+    // the timer on a phone — so wait for the browser to tell us it is done.
+    const clear = () => { $("printroot").innerHTML = ""; window.removeEventListener("afterprint", clear); };
+    window.addEventListener("afterprint", clear);
+    setTimeout(clear, 120000);            // a long backstop, never a short one
     window.print();
-    setTimeout(() => { $("printroot").innerHTML = ""; }, 1500);
-    toast('Choose "Save as PDF" in the print dialog');
+    toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
   } catch (e) { console.error(e); say("Could not build the document: " + e.message); }
 }
 function imgDims(src) {
@@ -2909,7 +2924,6 @@ async function printInsReport() {
   const f = insMonthFigures(mo);
   const cash = f.collected - f.remitted + f.commissionReceived;
   await printDoc(`
-    <div class="rp-h1">Осигурување — извештај за ${monthName(mo)} ${mo.slice(0, 4)}</div>
     <div class="rp-sub">генериран ${dmy(todayStr())}</div>
     <div class="rp-bar"><span>Заработена провизија</span><span>${fmt(f.commissionEarned)} ден.</span></div>
     <table class="rp-tbl">
@@ -2924,7 +2938,8 @@ async function printInsReport() {
     ${f.byInsurer.length ? `<div class="rp-h1">По осигурителна</div>
       <table class="rp-tbl"><tr><th>Компанија</th><th class="r">Полиси</th><th class="r">Провизија</th></tr>
       ${f.byInsurer.map((x) => `<tr><td>${esc(x.ins)}</td><td class="r">${x.n}</td><td class="r">${fmt(x.comm)} ден.</td></tr>`).join("")}
-      </table>` : ""}`);
+      </table>` : ""}`,
+    { brand: false, heading: `<b>Осигурување — извештај</b><span>${monthName(mo)} ${mo.slice(0, 4)}</span>` });
 }
 
 function renderStatements() {
@@ -3086,8 +3101,7 @@ async function printSettlementList(policies, insurer, when, opts) {
   const premiums = sumBy(policies, policyDue);
   const commission = sumBy(policies, policyCommission);
   await printDoc(`
-    <div class="rp-h1">Спецификација — ${esc(insurer)}</div>
-    <div class="rp-sub">ЕЛАКС · ${policies.length} полиси · ${dmy(when)}</div>
+    <div class="rp-sub">${policies.length} полиси · ${dmy(when)}</div>
     <div class="rp-bar"><span>За плаќање (премии − провизија)</span><span>${fmt(premiums - commission)} ден.</span></div>
     <table class="rp-tbl">
       <tr><th>Вкупна вредност на полисите</th><td class="r">${fmt(sumBy(policies, policyTotal))} ден.</td></tr>
@@ -3096,7 +3110,8 @@ async function printSettlementList(policies, insurer, when, opts) {
       <tr><th>Провизија</th><td class="r">${fmt(commission)} ден.</td></tr>
     </table>
     ${groups.map(([m]) => table(m)).join("")}
-    ${o.note ? `<div class="rp-sub">${esc(o.note)}</div>` : ""}`);
+    ${o.note ? `<div class="rp-sub">${esc(o.note)}</div>` : ""}`,
+    { brand: false, heading: `<b>Спецификација — ${esc(insurer)}</b><span>${dmy(when)}</span>` });
 }
 
 async function saveSettlement() {
