@@ -675,7 +675,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260813-071424";
+const BUILD = "20260813-072801";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1662,6 +1662,7 @@ let arVat = 18;
 function setArVat(r) {
   arVat = r;
   [...$("ar-vat").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", VAT_RATES[i] === r));
+  sellHint();                 // what you make depends on the rate
 }
 function openArticleSheet(id) {
   const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
@@ -1679,8 +1680,15 @@ function openArticleSheet(id) {
       <div><label>Min. stock</label><input id="ar-min" type="number" inputmode="decimal" value="${a.min_stock ?? 0}"></div>
     </div>
     <div class="grid2">
-      <div><label>Purchase price (со ДДВ)</label><input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}"></div>
-      <div><label>Sell price (со ДДВ)</label><input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"></div>
+      <div><label>Purchase price (со ДДВ)</label>
+        <input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}" oninput="autoSell()"></div>
+      <div><label>Sell price (со ДДВ)</label>
+        <input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"
+          ${a.sell_price ? 'data-touched="1"' : ""} oninput="this.dataset.touched='1';sellHint()"></div>
+    </div>
+    <div class="chips" style="margin-top:6px">
+      ${[30, 50, 80, 100].map((pct) => `<button class="chip" onclick="setMarkup(${pct})">+${pct}%</button>`).join("")}
+      <span class="muted nw" id="ar-margin" style="align-self:center;font-size:12.5px"></span>
     </div>
     <label>ДДВ rate</label>
     <div class="chips" id="ar-vat">
@@ -1705,6 +1713,7 @@ function openArticleSheet(id) {
       <button class="btn danger" onclick="delArticle('${id}')">Deactivate</button>` : ""}
   `);
   renderArImg();
+  sellHint();
   if (id) loadPriceHistory(id);
 }
 function renderArImg() {
@@ -1857,6 +1866,34 @@ function removeArticleImage() {
   const f = $("ar-img-file"); if (f) f.value = "";
   renderArImg();
 }
+// A new article sells at cost plus half, unless you set your own figure. Both
+// prices are со ДДВ, so the markup is the same on the net figures.
+const DEFAULT_MARKUP_PCT = 50;
+const markupPrice = (buy, pct) => buy ? Math.round(buy * (1 + pct / 100)) : "";
+function autoSell() {
+  const sp = $("ar-sp");
+  if (sp && !sp.dataset.touched) sp.value = markupPrice(parseFloat($("ar-pp").value) || 0, DEFAULT_MARKUP_PCT);
+  sellHint();
+}
+function setMarkup(pct) {
+  const sp = $("ar-sp");
+  if (!sp) return;
+  sp.value = markupPrice(parseFloat($("ar-pp").value) || 0, pct);
+  sp.dataset.touched = "1";                    // an explicit choice
+  sellHint();
+}
+function sellHint() {
+  const el = $("ar-margin");
+  if (!el) return;
+  const buy = parseFloat(($("ar-pp") || {}).value) || 0;
+  const sell = parseFloat(($("ar-sp") || {}).value) || 0;
+  if (!buy || !sell) return (el.textContent = "");
+  const markup = Math.round(((sell - buy) / buy) * 1000) / 10;
+  const auto = !$("ar-sp").dataset.touched;
+  el.textContent = `+${markup}% · ${T("you make", "заработуваш")} ${fmt(netOf(sell, arVat) - netOf(buy, arVat))} ден.`
+    + (auto ? ` · ${T("default", "стандардно")}` : "");
+}
+
 async function saveArticle(id) {
   const row = {
     name: $("ar-name").value.trim(), code: $("ar-code").value.trim() || null,
@@ -5992,7 +6029,8 @@ async function confirmArrival(id) {
         const parts = splitCode(it.name);
         const made = await dbq(db.from("articles").insert({
           name: parts.rest || "Unnamed", category: "Other", unit: "ком", min_stock: 0,
-          purchase_price: paid, sell_price: 0,
+          purchase_price: paid,
+          sell_price: paid ? Math.round(paid * (1 + DEFAULT_MARKUP_PCT / 100)) : 0,
           vat_rate: it.vat ?? 18, supplier: p.supplier,
           supplier_code: parts.code || it.code || null, active: true,
         }).select().single(), "Article not created");
