@@ -258,17 +258,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
 @media print{
-  /* Everything is hidden by display, not by visibility: some phone print
-     engines ignore visibility. And the report stays in normal flow — an
-     absolutely positioned container gets clipped to the first page. */
-  html,body{background:#fff !important;padding:0 !important;margin:0 !important;
-    height:auto !important;min-height:0 !important;overflow:visible !important;display:block !important}
-  body > *{display:none !important}
-  #printroot{display:block !important;position:static !important;
-    width:auto !important;height:auto !important;overflow:visible !important}
+  body{background:#fff;padding:0}
+  body > *:not(#printroot){display:none !important}
+  #printroot{display:block !important}
   @page{size:A4;margin:12mm 10mm}
 }
-.pv{font-family:Arial,Helvetica,sans-serif;color:#232323;font-size:9.5pt;
+#printroot{--paper:#fff;--card:#fff;--ink:#232323;--line:#CCCCCC;--muted:#555555;--surface:#fff}
+.pv{font-family:Arial,Helvetica,sans-serif;color:#232323;font-size:9.5pt;background:#fff;
   -webkit-print-color-adjust:exact;print-color-adjust:exact}
 .pv-plain{margin-bottom:6mm;padding-bottom:3mm;border-bottom:1.5pt solid #232323}
 .pv-plain b{font-size:13pt}
@@ -671,7 +667,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260810-095402";
+const BUILD = "20260813-065646";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2176,10 +2172,7 @@ async function printOffer(o) {
     const imgs = [...$("printroot").querySelectorAll("img")];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
     await new Promise((r) => setTimeout(r, 150));
-    const clear = () => { $("printroot").innerHTML = ""; window.removeEventListener("afterprint", clear); };
-    window.addEventListener("afterprint", clear);
-    setTimeout(clear, 120000);
-    window.print();
+    window.print();      // never cleared afterwards — see printDoc for why
     toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
   } catch (e) {
     console.error(e);
@@ -2402,9 +2395,12 @@ async function printOrder(gi) {
 }
 
 /* ---------- one branded print wrapper for both ---------- */
-// The report is written into the page itself and everything else is hidden
-// for the duration. A hidden iframe looked tidier, but a phone prints the main
-// document and ignores the frame — which is exactly how blank pages happened.
+// Android hands the page to the system print service, which takes its snapshot
+// AFTER window.print() returns — and fires "afterprint" straight away. So
+// anything that empties the page on a timer or on afterprint races that
+// snapshot and wins, which is exactly how blank PDFs happened. Nothing is
+// cleared after printing at all: #printroot is hidden on screen, so leftover
+// content is invisible, and it is replaced at the start of the next document.
 //
 // brand: false for anything that is not Elaks.
 async function printDoc(inner, opts) {
@@ -2418,20 +2414,10 @@ async function printDoc(inner, opts) {
       ${inner}
       ${brand ? `<img class="pv-footer" src="brand-footer.png" alt="ELAKS">` : ""}
     </div>`;
-
-    // nothing prints until the pictures have arrived
     const imgs = [...root.querySelectorAll("img")];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
-    // and until the browser has actually laid the report out
-    root.getBoundingClientRect();
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    await new Promise((r) => setTimeout(r, 200));
-
-    if (!root.textContent.trim()) throw new Error("the document came out empty");
-
-    const clear = () => { root.innerHTML = ""; window.removeEventListener("afterprint", clear); };
-    window.addEventListener("afterprint", clear);
-    setTimeout(clear, 180000);            // long backstop only
+    await new Promise((r) => setTimeout(r, 150));
+    if (!root.textContent.trim()) throw new Error(T("the document came out empty", "документот испадна празен"));
     window.print();
     toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
   } catch (e) {
