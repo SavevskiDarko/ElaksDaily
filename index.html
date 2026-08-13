@@ -153,6 +153,14 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .oitem input{padding:7px 8px;font-size:14px}
 .oitem .del{color:var(--danger);font-size:18px;text-align:center}
 .oitem.ord,.ohead.ord{grid-template-columns:22px 1fr 52px 68px 68px 24px;gap:5px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:4px}
+.pcell{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#ECECEC;border:1px solid var(--line)}
+.pcell img{width:100%;height:100%;object-fit:cover;display:block}
+.pdel{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:999px;
+  background:rgba(21,42,70,.78);color:#fff;font-size:12px;line-height:1;display:flex;
+  align-items:center;justify-content:center}
+.pnum{position:absolute;bottom:3px;left:4px;background:rgba(21,42,70,.78);color:#fff;
+  border-radius:5px;padding:1px 5px;font-size:10.5px;font-weight:700}
 .omove{display:flex;flex-direction:column;gap:2px}
 .omove button{font-size:9px;line-height:1;padding:4px 0;color:var(--muted);border:1px solid var(--line);
   border-radius:5px;background:var(--surface);width:100%}
@@ -685,7 +693,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260813-130232";
+const BUILD = "20260813-131717";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3458,46 +3466,75 @@ function renderPolicies() {
       : T("No policies here.<br>Add with +", "Нема полиси.<br>Додај со +")}</div>`);
 }
 
-let polImg = { mode: "keep", thumb: null, full: null };
+// A policy is usually several pages, so it carries a list. Each page keeps its
+// own small thumbnail, and the full-size version is fetched only when opened.
+let polPhotos = [];        // { id?, thumb, full?, isNew? }
+let polRemoved = [];       // ids to delete on save
 let polOpenId = null;
+
 function renderPolImg() {
   const el = $("po-img");
   if (!el) return;
-  el.innerHTML = polImg.thumb
-    ? `<img src="${polImg.full || polImg.thumb}" alt="" class="thumb-lg" style="max-height:190px"
-         role="button" tabindex="0" onclick="viewPolicyPhoto()">`
-    : "";
+  el.innerHTML = polPhotos.length
+    ? `<div class="pgrid">${polPhotos.map((p, i) => `<div class="pcell">
+        <img src="${p.thumb || p.full}" alt="" role="button" tabindex="0" onclick="viewPolicyPhoto(${i})">
+        <button class="pdel" onclick="event.stopPropagation();removePolicyImage(${i})"
+          aria-label="${T("Remove", "Отстрани")}">✕</button>
+        <span class="pnum">${i + 1}</span>
+      </div>`).join("")}</div>`
+    : `<p class="muted" style="font-size:12.5px">${T("No pages yet.", "Сè уште нема страници.")}</p>`;
 }
+
 function pickPolicyImage(input) {
-  const f = input.files && input.files[0];
-  if (!f) return;
-  if (f.size > 12 * 1024 * 1024) return toast(T("Photo too large", "Сликата е преголема"));
-  const fr = new FileReader();
-  fr.onload = () => {
-    const im = new Image();
-    im.onload = () => {
-      // big enough to read the small print on a policy, small enough to sync
-      polImg = { mode: "new", thumb: imgResize(im, 90, 0.6), full: imgResize(im, 1400, 0.8) };
-      renderPolImg();
+  const files = [...(input.files || [])];
+  input.value = "";
+  if (!files.length) return;
+  let added = 0;
+  files.forEach((f) => {
+    if (f.size > 12 * 1024 * 1024) return toast(T("One photo was too large", "Една слика беше преголема"));
+    const fr = new FileReader();
+    fr.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        // big enough to read the small print, small enough to sync
+        polPhotos.push({ thumb: imgResize(im, 110, 0.6), full: imgResize(im, 1400, 0.8), isNew: true });
+        added++;
+        renderPolImg();
+      };
+      im.onerror = () => toast(T("Could not read that image", "Не можев да ја прочитам сликата"));
+      im.src = fr.result;
     };
-    im.onerror = () => toast(T("Could not read that image", "Не можев да ја прочитам сликата"));
-    im.src = fr.result;
-  };
-  fr.readAsDataURL(f);
+    fr.readAsDataURL(f);
+  });
 }
-function removePolicyImage() {
-  polImg = { mode: "remove", thumb: null, full: null };
-  const f = $("po-file"); if (f) f.value = "";
+
+function removePolicyImage(i) {
+  const p = polPhotos[i];
+  if (!p) return;
+  if (p.id) polRemoved.push(p.id);       // deleted from the database on save
+  polPhotos.splice(i, 1);
   renderPolImg();
 }
-function viewPolicyPhoto() {
-  if (!polImg.full && !polImg.thumb) return;
-  const src = polImg.full || polImg.thumb;
+
+async function viewPolicyPhoto(i) {
+  const p = polPhotos[i];
+  if (!p) return;
+  if (!p.full && p.id) {
+    try {
+      const { data } = await db.from("policy_photos").select("data").eq("id", p.id).maybeSingle();
+      if (data && data.data) p.full = data.data;
+    } catch (e) { console.warn("policy photo", e); }
+  }
+  const src = p.full || p.thumb;
   const back = polOpenId;
-  openSheet(`<h2>${T("Policy photo", "Слика од полисата")}</h2>
+  openSheet(`<h2>${T("Page", "Страница")} ${i + 1} ${T("of", "од")} ${polPhotos.length}</h2>
     <img src="${src}" alt="" style="width:100%;border-radius:11px;background:#ECECEC">
-    <p class="muted" style="font-size:12.5px">${T("Open it in a new tab to zoom in on the small print.",
-      "Отвори ја во нов таб за да го зумираш ситниот текст.")}</p>
+    ${polPhotos.length > 1 ? `<div class="grid2" style="margin-top:8px">
+      <button class="btn sm ghost" style="width:100%" ${i === 0 ? "disabled" : ""}
+        onclick="viewPolicyPhoto(${i - 1})">‹ ${T("Previous", "Претходна")}</button>
+      <button class="btn sm ghost" style="width:100%" ${i === polPhotos.length - 1 ? "disabled" : ""}
+        onclick="viewPolicyPhoto(${i + 1})">${T("Next", "Следна")} ›</button>
+    </div>` : ""}
     <button class="btn ghost" onclick="window.open('${src}','_blank')">${T("Open full size", "Отвори во полна големина")}</button>
     ${back ? `<button class="btn ghost" onclick="openPolicySheet('${back}')">${T("Back to the policy", "Назад кон полисата")}</button>` : ""}`);
 }
@@ -3505,13 +3542,15 @@ function viewPolicyPhoto() {
 async function openPolicySheet(id) {
   const p = id ? state.policies.find((x) => x.id === id) : { start_date: todayStr(), amount: 0 };
   if (id && !p) return;
-  polImg = { mode: "keep", thumb: p.photo_thumb || null, full: null };
+  polPhotos = []; polRemoved = [];
   polOpenId = id || null;
-  if (id && p.photo_thumb) {
+  if (id) {
     try {
-      const { data } = await db.from("policy_photos").select("data").eq("policy_id", id).maybeSingle();
-      if (data && data.data) polImg.full = data.data;
-    } catch (e) { console.warn("policy photo", e); }
+      // thumbnails only — the full pages are fetched one at a time when opened
+      const { data } = await db.from("policy_photos").select("id, thumb, sort")
+        .eq("policy_id", id).order("sort");
+      polPhotos = (data || []).map((r) => ({ id: r.id, thumb: r.thumb }));
+    } catch (e) { console.warn("policy photos", e); }
   }
   openSheet(`
     <h2>${id ? esc(p.holder_name) : T("New policy", "Нова полиса")}</h2>
@@ -3578,12 +3617,13 @@ async function openPolicySheet(id) {
         "Зелениот картон обично трае месец, а полисата година — затоа се следи одделно.")}</p>
     </div>
     <label>${T("Note", "Белешка")}</label><input id="po-note" value="${esc(p.note || "")}">
-    <label>${T("Photo of the policy", "Слика од полисата")}</label>
+    <label>${T("Pages of the policy", "Страници од полисата")}</label>
     <div id="po-img"></div>
-    <div class="row" style="gap:8px;margin-top:6px">
-      <input type="file" accept="image/*" id="po-file" style="display:none" onchange="pickPolicyImage(this)">
-      <button class="btn sm ghost" style="flex:1" onclick="$('po-file').click()">${T("Choose or photograph", "Избери или сликај")}</button>
-      <button class="btn sm ghost" style="flex:1" onclick="removePolicyImage()">${T("Remove photo", "Отстрани слика")}</button>
+    <input type="file" accept="image/*" capture="environment" id="po-cam" style="display:none" onchange="pickPolicyImage(this)">
+    <input type="file" accept="image/*" multiple id="po-file" style="display:none" onchange="pickPolicyImage(this)">
+    <div class="grid2" style="margin-top:6px">
+      <button class="btn sm ghost" style="width:100%" onclick="$('po-cam').click()">${T("Photograph a page", "Сликај страница")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="$('po-file').click()">${T("Add from gallery", "Додај од галерија")}</button>
     </div>
     <button class="btn" onclick="savePolicy('${id || ""}')">${T("Save", "Зачувај")}</button>
     ${id ? `<div class="sec">${T("With the insurer", "Со осигурителната")}</div>
@@ -3760,18 +3800,26 @@ async function savePolicy(id) {
     note: $("po-note").value.trim() || null,
   };
   if (!row.holder_name) return toast(T("Whose policy is it?", "Чија е полисата?"));
-  if (polImg.mode === "new") row.photo_thumb = polImg.thumb;
-  if (polImg.mode === "remove") row.photo_thumb = null;
+  // the first page is what the list shows
+  row.photo_thumb = polPhotos.length ? (polPhotos[0].thumb || null) : null;
   if (row.end_date && row.end_date < row.start_date) return toast(T("It cannot end before it starts", "Не може да заврши пред да почне"));
   let saved;
   try {
     saved = await dbq(id ? db.from("policies").update(row).eq("id", id).select().single()
                          : db.from("policies").insert(row).select().single(), T("Not saved", "Не е зачувано"));
-    if (polImg.mode === "new") {
-      await dbq(db.from("policy_photos").upsert({ policy_id: saved.id, data: polImg.full }, { onConflict: "policy_id" }),
-        T("Photo not saved", "Сликата не е зачувана"));
+    if (polRemoved.length) await db.from("policy_photos").delete().in("id", polRemoved);
+    const fresh = polPhotos.filter((p) => p.isNew && p.full);
+    if (fresh.length) {
+      await dbq(db.from("policy_photos").insert(fresh.map((p, k) => ({
+        policy_id: saved.id, data: p.full, thumb: p.thumb, sort: polPhotos.indexOf(p),
+      }))), T("A page was not saved", "Страница не е зачувана"));
     }
-    if (polImg.mode === "remove") await db.from("policy_photos").delete().eq("policy_id", saved.id);
+    // keep the order the pages are shown in
+    const kept = polPhotos.filter((p) => p.id);
+    for (const p of kept) {
+      const want = polPhotos.indexOf(p);
+      if (p.sort !== want) await db.from("policy_photos").update({ sort: want }).eq("id", p.id);
+    }
   } catch { return; }
   closeSheet(); await refreshAll(["policies"]); render(); toast(T("Saved", "Зачувано"));
   if (!id) setTimeout(() => openPolicySheet(saved.id), 240);
