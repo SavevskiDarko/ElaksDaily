@@ -519,12 +519,13 @@ const wd = (v, style = "short") => {
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
-  perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true },
+  perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true },
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
-  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], policies: [], polPays: [], statements: [], docs: [],
+  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
+  accounts: [], policies: [], polPays: [], statements: [], docs: [],
   docKind: "all", docClient: "all",
   polFilter: "open", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -591,7 +592,7 @@ async function startApp() {
       const { data } = await db.from("app_settings").select("key, value").in("key", ["digest_hour", "bills_day", "bill_types", "stay_remind_time", "checkout_time"]);
       let stored = null;
       for (const r of data || []) {
-        if (r.key === "digest_hour") $("digest-hour").value = String(r.value).replace(/"/g, "");
+        if (r.key === "digest_hour" && $("digest-hour")) $("digest-hour").value = String(r.value).replace(/"/g, "");
         if (r.key === "bills_day" && $("bills-day")) $("bills-day").value = String(r.value).replace(/"/g, "");
         if (r.key === "stay_remind_time" && $("stay-time")) $("stay-time").value = String(r.value).replace(/"/g, "");
         if (r.key === "checkout_time" && $("apt-checkout")) $("apt-checkout").value = String(r.value).replace(/"/g, "");
@@ -693,7 +694,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260813-133050";
+const BUILD = "20260813-211345";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -833,7 +834,8 @@ async function deleteUndoable(table, row, label, keys) {
   await refreshAll(keys); render();
   toastUndo(label, async () => {
     const copy = { ...row };
-    delete copy.stock;                       // views add columns the table does not have
+    // views and joined selects add columns the table itself does not have
+    ["stock", "clients", "apartments", "articles", "warranty_until"].forEach((k) => delete copy[k]);
     const { error } = await db.from(table).insert(copy);
     if (error) { console.error(error); return toast(T("Could not undo", "Не може да се врати")); }
     await refreshAll(keys); render(); toast(T("Restored", "Вратено"));
@@ -4596,7 +4598,9 @@ function openSetSheet(kind) {
       <input type="file" accept="application/json,.json" id="restore-file" style="display:none" onchange="restoreJson(this)">
       <button class="btn ghost" onclick="$('restore-file').click()">Restore from a backup file…</button>
       <p class="muted" style="font-size:12.5px">Restoring adds back anything missing and updates anything that changed. It never deletes what is already there, so it is safe to run against a working database.</p>
-      <p class="muted" style="font-size:12.5px">Every task, article, offer, guest, bill, purchase and cash entry in one file. Photos are left out so it stays small and reliable. Worth doing once a month — keep it somewhere that is not your phone.</p>`);
+      <p class="muted" style="font-size:12.5px">${T(
+        "Everything you have typed: tasks, articles, offers, purchases, clients, suppliers, guests, bills, policies, payments, equipment and documents. Pictures and scans are NOT included — they would make the file too large to be reliable. Worth doing once a month, kept somewhere other than your phone.",
+        "Сè што си внел: задачи, артикли, понуди, набавки, клиенти, добавувачи, гости, сметки, полиси, уплати, опрема и документи. Сликите и скенираните документи НЕ се вклучени — датотеката би била преголема. Вреди еднаш месечно, зачувано надвор од телефонот.")}</p>`);
   } else if (kind === "aikey") {
     const on = setting("ai_key_set", "") === "yes";
     openSheet(`<h2>Document reading</h2>
@@ -4634,9 +4638,13 @@ function openSetSheet(kind) {
 // select policy on it, so only the server (service role) can fetch it.
 // Putting a backup back. Order matters: a stay needs its apartment to exist
 // first, an offer needs its client, and so on.
-const RESTORE_ORDER = ["app_settings", "user_roles", "clients", "apartments", "articles",
-  "offers", "purchases", "stays", "bills", "tasks", "task_templates", "task_completions",
-  "ical_feeds", "movements", "article_prices", "offer_payments", "elaks_cash"];
+// parents before children, or the foreign keys reject the rows
+const RESTORE_ORDER = ["app_settings", "user_roles", "team_members", "accounts", "suppliers",
+  "clients", "apartments", "articles", "statements",
+  "offers", "purchases", "stays", "bills", "policies",
+  "tasks", "task_templates", "task_completions", "ical_feeds",
+  "documents", "installations", "movements", "article_prices", "offer_payments",
+  "policy_payments", "elaks_cash"];
 
 function restoreJson(input) {
   const f = input.files && input.files[0];
@@ -4787,10 +4795,13 @@ async function backupJson() {
   toast("Preparing backup…");
   // photos are deliberately excluded: they are large, and a backup that fails
   // when you need it is worse than one that leaves images behind
-  const tables = ["tasks", "task_completions", "task_templates", "articles", "article_prices",
-                  "movements", "clients", "offers", "offer_payments", "purchases",
-                  "apartments", "stays", "bills", "ical_feeds", "elaks_cash",
-                  "user_roles", "app_settings"];
+  const tables = ["app_settings", "user_roles", "team_members", "accounts", "suppliers",
+                  "clients", "apartments", "articles", "statements",
+                  "tasks", "task_completions", "task_templates",
+                  "offers", "offer_payments", "purchases", "movements", "article_prices",
+                  "installations", "documents",
+                  "policies", "policy_payments",
+                  "stays", "bills", "ical_feeds", "elaks_cash"];
   const out = { app: "Centrala", version: 1, exported_at: new Date().toISOString(), data: {} };
   const missed = [];
   for (const t of tables) {
