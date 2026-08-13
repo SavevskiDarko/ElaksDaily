@@ -369,6 +369,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="pur-summary"></div>
       <div id="pur-list"></div>
     </div>
+    <div id="el-body-doc" style="display:none">
+      <input class="search" id="doc-search" placeholder="Search number, client or note…" oninput="renderDocs()">
+      <div class="chips" id="doc-kind" style="margin-bottom:6px"></div>
+      <div class="chips" id="doc-client" style="margin-bottom:10px"></div>
+      <div id="doc-list"></div>
+    </div>
     <div id="el-body-sup" style="display:none">
       <input class="search" id="sup-search" placeholder="Search suppliers…" style="display:none" oninput="renderSuppliers()">
       <div id="sup-list"></div>
@@ -403,6 +409,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div id="set-menu"></div>
   </div>
 
+  <input type="file" accept="image/*" capture="environment" id="doc-cam2" style="display:none" onchange="pickDocFile(this)">
+  <input type="file" accept="image/*,application/pdf" id="doc-file2" style="display:none" onchange="pickDocFile(this)">
   <div class="dlg" id="dlg"><div class="dlg-box">
     <div class="dlg-msg" id="dlg-msg"></div>
     <input id="dlg-input" style="display:none">
@@ -508,7 +516,8 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
-  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], policies: [], polPays: [], statements: [],
+  stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [], policies: [], polPays: [], statements: [], docs: [],
+  docKind: "all", docClient: "all",
   polFilter: "open", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
@@ -605,6 +614,7 @@ const LOADERS = {
   purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
+  docs:       { need: () => state.perm.elaks,   q: () => db.from("documents").select("*").order("doc_date", { ascending: false }).limit(400) },
   policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
   polPays:    { need: () => state.perm.ins,     q: () => db.from("policy_payments").select("*").order("paid_on", { ascending: false }).limit(500) },
   statements: { need: () => state.perm.ins,     q: () => db.from("statements").select("*").order("period", { ascending: false }).limit(120) },
@@ -675,7 +685,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260813-072801";
+const BUILD = "20260813-082029";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1928,16 +1938,19 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
+  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"],
+    ["doc", T("Documents", "Документи")], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
   $("el-body-off").style.display = state.elaksView === "off" ? "" : "none";
   $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
   $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
+  const docEl = $("el-body-doc"); if (docEl) docEl.style.display = state.elaksView === "doc" ? "" : "none";
   const supEl = $("el-body-sup"); if (supEl) supEl.style.display = state.elaksView === "sup" ? "" : "none";
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
   else if (state.elaksView === "pur") renderPurchases();
+  else if (state.elaksView === "doc") renderDocs();
   else if (state.elaksView === "sup") renderSuppliers();
   else renderClients();
 }
@@ -3831,6 +3844,192 @@ async function delPolicy(id) {
   await deleteUndoable("policies", p, T("Policy removed", "Полисата е отстранета"), ["policies", "polPays"]);
 }
 
+/* ---------- documents: испратници, фактури and the rest ---------- */
+const DOC_KINDS = ["испратница", "фактура", "договор", "друго"];
+const docClientName = (id) => (state.clients.find((c) => c.id === id) || {}).name || "";
+
+function renderDocs() {
+  const q = (($("doc-search") || {}).value || "").trim().toLowerCase();
+
+  $("doc-kind").innerHTML = [["all", T("All", "Сите")], ...DOC_KINDS.map((k) => [k, k])]
+    .map(([v, l]) => `<button class="chip ${state.docKind === v ? "on" : ""}"
+      onclick="state.docKind='${v}';renderDocs()">${l}${
+        v !== "all" ? ` ${state.docs.filter((d) => d.kind === v).length || ""}` : ""}</button>`).join("");
+
+  // only clients that actually have documents — a list of every client would
+  // be unusable once there are two hundred of them
+  const withDocs = [...new Set(state.docs.map((d) => d.client_id).filter(Boolean))]
+    .map((id) => ({ id, name: docClientName(id) })).filter((c) => c.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  $("doc-client").innerHTML = withDocs.length > 1
+    ? [["all", T("Any client", "Сите клиенти")], ...withDocs.map((c) => [c.id, c.name])]
+        .map(([v, l]) => `<button class="chip ${state.docClient === v ? "on" : ""}"
+          onclick="state.docClient='${v}';renderDocs()">${esc(l)}</button>`).join("")
+    : "";
+
+  let list = state.docs;
+  if (state.docKind !== "all") list = list.filter((d) => d.kind === state.docKind);
+  if (state.docClient !== "all") list = list.filter((d) => d.client_id === state.docClient);
+  if (q) list = list.filter((d) => [d.doc_no, d.note, d.supplier, docClientName(d.client_id), d.kind]
+    .some((v) => String(v || "").toLowerCase().includes(q)));
+
+  $("doc-list").innerHTML = `
+    <div class="grid2" style="margin-bottom:10px">
+      <button class="btn sm" style="width:100%" onclick="newDoc('cam')">📷 ${T("Photograph", "Сликај")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="newDoc('file')">📎 ${T("From files", "Од датотеки")}</button>
+    </div>
+    ${list.length ? list.map((d) => `<div class="card offer row" role="button" tabindex="0" onclick="openDocSheet('${d.id}')">
+      ${d.file_thumb ? `<img class="thumb" src="${d.file_thumb}" alt="">`
+        : `<span class="thumb" style="display:flex;align-items:center;justify-content:center;background:var(--line);font-size:18px">📄</span>`}
+      <div style="flex:1;min-width:0"><b>${esc(d.kind)}${d.doc_no ? " " + esc(d.doc_no) : ""}</b>
+        <div class="o-num">${dmy(d.doc_date)}${d.client_id ? " · " + esc(docClientName(d.client_id)) : ""}${
+          d.supplier ? " · " + esc(d.supplier) : ""}${d.note ? " · " + esc(d.note) : ""}</div></div>
+      ${parseFloat(d.amount) ? `<span class="o-total mono">${fmt(d.amount)}</span>` : ""}
+    </div>`).join("")
+      : (state.loading ? SKEL(3) : `<div class="empty">${q || state.docKind !== "all" || state.docClient !== "all"
+          ? T("Nothing matches those filters.", "Ништо не одговара на филтрите.")
+          : T("No documents yet.<br>Photograph an испратница or фактура to keep it here.",
+              "Сè уште нема документи.<br>Сликај испратница или фактура за да ја чуваш тука.")}</div>`)}`;
+}
+
+// what is being attached to the document currently open
+let docDraft = null;
+function newDoc(how) {
+  docDraft = { thumb: null, full: null, type: null, id: null };
+  $(how === "cam" ? "doc-cam2" : "doc-file2").click();
+}
+function pickDocFile(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  if (f.size > 8 * 1024 * 1024) return toast(T("That file is too large (8 MB max)", "Датотеката е преголема (макс. 8 MB)"));
+  docDraft = docDraft || { id: null };
+  const fr = new FileReader();
+  fr.onload = () => {
+    if (f.type === "application/pdf") {
+      docDraft.thumb = null; docDraft.full = fr.result; docDraft.type = "application/pdf";
+      openDocSheet(docDraft.id, true);
+      return;
+    }
+    const im = new Image();
+    im.onload = () => {
+      // readable enough for small print, small enough to sync
+      docDraft.thumb = imgResize(im, 90, 0.6);
+      docDraft.full = imgResize(im, 1500, 0.82);
+      docDraft.type = "image/jpeg";
+      openDocSheet(docDraft.id, true);
+    };
+    im.onerror = () => toast(T("Could not read that image", "Не можев да ја прочитам сликата"));
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+
+async function openDocSheet(id, keepDraft) {
+  const d = id ? state.docs.find((x) => x.id === id) : {};
+  if (id && !d) return;
+  if (!keepDraft) docDraft = { thumb: d.file_thumb || null, full: null, type: d.file_type || null, id: id || null };
+  docDraft.id = id || null;
+  if (id && !docDraft.full) {
+    try {
+      const { data } = await db.from("document_files").select("data").eq("document_id", id).maybeSingle();
+      if (data && data.data) docDraft.full = data.data;
+    } catch (e) { console.warn("document file", e); }
+  }
+  const has = !!(docDraft.full || docDraft.thumb);
+  const isPdf = docDraft.type === "application/pdf";
+  openSheet(`
+    <h2>${id ? T("Document", "Документ") : T("New document", "Нов документ")}</h2>
+    <label>${T("What is it", "Што е")}</label>
+    <div class="chips" id="dc-kind">
+      ${DOC_KINDS.map((k) => `<button class="chip ${(d.kind || DOC_KINDS[0]) === k ? "on" : ""}"
+        onclick="pickDocKind(this)" data-k="${k}">${k}</button>`).join("")}
+    </div>
+    <div class="grid2">
+      <div><label>${T("Number", "Број")}</label><input id="dc-no" value="${esc(d.doc_no || "")}"></div>
+      <div><label>${T("Date", "Датум")}</label><input id="dc-date" type="date" value="${d.doc_date || todayStr()}"></div>
+    </div>
+    <label>${T("Client", "Клиент")}</label>
+    <select id="dc-client"><option value="">${T("No client", "Без клиент")}</option>
+      ${state.clients.filter((c) => c.active !== false || d.client_id === c.id)
+        .map((c) => `<option value="${c.id}" ${d.client_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+    </select>
+    <div class="grid2">
+      <div><label>${T("Supplier (if it came from one)", "Добавувач (ако е од нив)")}</label>
+        ${supplierSelect("dc-sup", d.supplier || "")}</div>
+      <div><label>${T("Amount (ден.)", "Износ (ден.)")}</label>
+        <input id="dc-amt" type="number" inputmode="decimal" step="any" value="${d.amount ?? 0}"></div>
+    </div>
+    <label>${T("Note", "Белешка")}</label><input id="dc-note" value="${esc(d.note || "")}">
+
+    <div class="sec">${T("The paper", "Документот")}</div>
+    ${has
+      ? (isPdf
+        ? `<button class="btn ghost" onclick="openDocFile()">📄 ${T("Open the PDF", "Отвори го PDF")}</button>`
+        : `<img src="${docDraft.full || docDraft.thumb}" alt="" class="thumb-lg" style="max-height:220px"
+             role="button" tabindex="0" onclick="openDocFile()">`)
+      : `<p class="muted">${T("Nothing attached yet.", "Сè уште нема прикачено.")}</p>`}
+    <div class="grid2" style="margin-top:6px">
+      <button class="btn sm ghost" style="width:100%" onclick="$('doc-cam2').click()">${T("Photograph", "Сликај")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="$('doc-file2').click()">${T("From files", "Од датотеки")}</button>
+    </div>
+
+    <button class="btn" onclick="saveDoc('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? `<button class="btn danger" onclick="delDoc('${id}')">${T("Remove", "Отстрани")}</button>` : ""}
+  `);
+}
+function pickDocKind(btn) {
+  [...$("dc-kind").querySelectorAll(".chip")].forEach((b) => b.classList.toggle("on", b === btn));
+}
+function openDocFile() {
+  const src = docDraft && (docDraft.full || docDraft.thumb);
+  if (!src) return;
+  const w = window.open();
+  if (w) { w.document.write(`<iframe src="${src}" style="border:0;width:100%;height:100%"></iframe>`); w.document.close(); }
+  else toast(T("Allow pop-ups to open it", "Дозволи прозорци за да се отвори"));
+}
+
+async function saveDoc(id) {
+  const row = {
+    kind: ($("dc-kind").querySelector(".chip.on") || {}).dataset?.k || DOC_KINDS[0],
+    doc_no: $("dc-no").value.trim() || null,
+    doc_date: $("dc-date").value || todayStr(),
+    client_id: $("dc-client").value || null,
+    supplier: $("dc-sup").value || null,
+    amount: parseFloat($("dc-amt").value) || 0,
+    note: $("dc-note").value.trim() || null,
+    file_thumb: docDraft ? docDraft.thumb : null,
+    file_type: docDraft ? docDraft.type : null,
+  };
+  let saved;
+  try {
+    saved = await dbq(id ? db.from("documents").update(row).eq("id", id).select().single()
+                         : db.from("documents").insert(row).select().single(), T("Not saved", "Не е зачувано"));
+    if (docDraft && docDraft.full) {
+      await dbq(db.from("document_files").upsert({ document_id: saved.id, data: docDraft.full }, { onConflict: "document_id" }),
+        T("The file was not saved", "Датотеката не е зачувана"));
+    }
+  } catch { return; }
+  closeSheet(); docDraft = null;
+  await refreshAll(["docs"]); render(); toast(T("Saved", "Зачувано"));
+}
+
+async function delDoc(id) {
+  const d = state.docs.find((x) => x.id === id);
+  if (!await ask(T("Remove this document?", "Отстрани го документот?"))) return;
+  await deleteUndoable("documents", d, T("Document removed", "Документот е отстранет"), ["docs"]);
+}
+
+// the same papers, on the client they belong to
+function docsBlock(clientId) {
+  const list = state.docs.filter((d) => d.client_id === clientId);
+  if (!list.length) return "";
+  return `<div class="sec">${T("Documents", "Документи")}</div>
+    ${list.map((d) => `<div class="mov tapp" role="button" tabindex="0" onclick="openDocSheet('${d.id}')">
+      <span>${esc(d.kind)}${d.doc_no ? " " + esc(d.doc_no) : ""} · ${dmy(d.doc_date)}</span>
+      <span class="mono">${parseFloat(d.amount) ? fmt(d.amount) + " ден. " : ""}›</span></div>`).join("")}`;
+}
+
 /* ---------- suppliers ---------- */
 // A chosen name rather than a typed one — typing is how "Wizard Systems" and
 // "wizard sistemi" became two suppliers in the first place.
@@ -4047,6 +4246,7 @@ function openClientSheet(id) {
       ? `<button class="btn ghost" onclick="unhideClient('${id}')">${T("Bring back into the list", "Врати во листата")}</button>`
       : id ? `<button class="btn danger" onclick="delClient('${id}')">${T("Remove client", "Отстрани клиент")}</button>` : ""}
     ${id ? installsBlock(id) : ""}
+    ${id ? docsBlock(id) : ""}
     ${id ? relatedTasks("client_id", id) : ""}
     ${id ? '<div class="sec">Offers</div>' + (state.offers.filter((o) => o.client_id === id).map((o) =>
       `<div class="mov"><span>${o.number} · ${esc(o.title)} · ${STATUS[o.status]}</span><span class="mono">${fmt(o.grand_total)} ден.</span></div>`).join("") || '<p class="muted">No offers yet.</p>') : ""}
