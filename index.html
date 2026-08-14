@@ -471,6 +471,9 @@ const CTX = { work: "Work", elaks: "Elaks", personal: "Personal", apts: "Apts" }
 const VAT_RATES = [18, 5];
 const netOf = (gross, rate) => (parseFloat(gross) || 0) / (1 + (parseFloat(rate) || 0) / 100);
 const myCtx = () => state.perm.owner ? ["work", "elaks", "personal", "apts"] : (state.perm.ctx || []);
+// A new task is personal unless you say otherwise — most of them are, and it is
+// the one context that is private, so it is the safer thing to land on.
+const defaultCtx = () => myCtx().includes("personal") ? "personal" : (myCtx()[0] || "personal");
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
 const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
 const unitLbl = (u) => u === "m" ? "m" : "pcs";
@@ -695,7 +698,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260814-191847";
+const BUILD = "20260814-193553";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1138,7 +1141,7 @@ async function toggleTask(id, onDate) {
 let tkChecklist = [];
 function openTaskSheet(id) {
   if (!id && !myCtx().length) return toast("No task access yet");
-  const t = id ? state.tasks.find((x) => x.id === id) : { context: myCtx()[0], due_date: todayStr() };
+  const t = id ? state.tasks.find((x) => x.id === id) : { context: defaultCtx(), due_date: todayStr() };
   tkChecklist = JSON.parse(JSON.stringify((t && t.checklist) || []));
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
@@ -5839,7 +5842,7 @@ async function saveSpokenTask() {
   if (!p || !p.title) return toast("Nothing to save");
   voiceBusy = true;
   const row = {
-    title: p.title, context: p.context || myCtx()[0],
+    title: p.title, context: p.context || defaultCtx(),
     due_date: p.due_date, due_time: p.due_time,
     remind: !!(p.due_time && p.remind !== false), priority: p.priority, notes: null,
   };
