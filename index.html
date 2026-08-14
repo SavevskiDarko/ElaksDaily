@@ -571,6 +571,7 @@ async function startApp() {
               apts: !(r.hide_tabs || []).includes("apt"),
               ins: !(r.hide_tabs || []).includes("ins") }
           : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance };
+        state.perm.personalAccess = r.personal_access || [];
       }
     }
     applyTabVisibility();
@@ -694,7 +695,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260814-035037";
+const BUILD = "20260814-191847";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1145,7 +1146,13 @@ function openTaskSheet(id) {
     <label>Context</label>
     <div class="chips" id="tk-ctx">${myCtx().map((c) =>
       `<button class="chip ${t.context === c ? "on" : ""}" data-c="${c}"
-        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${CTX[c]}</button>`).join("")}</div>
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');togglePersonalOwner()">${CTX[c]}</button>`).join("")}</div>
+    ${(state.perm.personalAccess || []).length ? `<div id="tk-owner-row" style="display:none">
+      <label>${T("Whose personal list", "Чија лична листа")}</label>
+      <select id="tk-owner">
+        <option value="${state.uid}">${T("Mine", "Моја")}</option>
+        ${(state.perm.personalAccess || []).map((u) => `<option value="${u}" ${t.owner_uid === u ? "selected" : ""}>${esc(personName(u) || T("shared", "споделена"))}</option>`).join("")}
+      </select></div>` : ""}
     <div class="grid2">
       <div><label>Date</label><input id="tk-date" type="date" value="${t.due_date || todayStr()}"></div>
       <div><label>Time (opt.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}"></div>
@@ -1220,6 +1227,7 @@ function openTaskSheet(id) {
   `);
   renderCl(id || "");
   tkRecChanged();
+  togglePersonalOwner();
   tkImg = { mode: "keep", thumb: t.photo_thumb || null, full: null };
   renderTkImg();
 }
@@ -1274,6 +1282,13 @@ function toggleMore(id) {
   if (!el) return;
   el.setAttribute("data-open", el.getAttribute("data-open") === "1" ? "0" : "1");
 }
+// the "whose list" row only makes sense on a personal task
+function togglePersonalOwner() {
+  const row = $("tk-owner-row");
+  if (!row) return;
+  const on = ($("tk-ctx").querySelector(".chip.on") || {}).dataset?.c === "personal";
+  row.style.display = on ? "block" : "none";
+}
 function tkRecChanged() {
   const box = $("tk-days");
   if (!box) return;
@@ -1323,9 +1338,13 @@ async function saveTask(id) {
     if (!days.length) days = [d.getDay()];
     days.sort((a, b) => a - b);
   }
+  const ctx = $("tk-ctx").querySelector(".chip.on").dataset.c;
   const row = {
     title: $("tk-title").value.trim(),
-    context: $("tk-ctx").querySelector(".chip.on").dataset.c,
+    context: ctx,
+    // a personal task is private to one person — mine unless I am keeping
+    // someone else's list for them
+    owner_uid: ctx === "personal" ? (($("tk-owner") || {}).value || state.uid) : null,
     due_date: $("tk-date").value || null,
     due_time: $("tk-time").value || null,
     recurrence: rec,
@@ -4370,6 +4389,7 @@ function permSummary(r) {
   if (r.see_elaks) parts.push("Elaks");
   if (r.see_apts) parts.push("Apts");
   if (r.see_insurance) parts.push(T("Insurance", "Осигурување"));
+  if ((r.personal_access || []).includes(state.uid)) parts.push(T("my personal list", "моја лична листа"));
   return parts.join(" · ") || "No access yet";
 }
 function renderTeam() {
@@ -4410,6 +4430,15 @@ function openPermSheet(uid) {
       <div id="pm-ctx"></div>
       <label>${T("Businesses they can manage", "Делови што ги води")}</label>
       <div id="pm-biz"></div>
+      <label>${T("My personal tasks", "Мои лични задачи")}</label>
+      <div class="row" style="margin-bottom:6px">
+        <button class="clbox ${(r.personal_access || []).includes(state.uid) ? "on" : ""}" id="pm-pers"
+          onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${(r.personal_access || []).includes(state.uid) ? "✓" : ""}</button>
+        <span>${T("Can see and add tasks on my personal list", "Може да ги гледа и додава моите лични задачи")}</span>
+      </div>
+      <p class="muted" style="font-size:12.5px">${T(
+        "Their own personal tasks stay private — you cannot see those, and neither can anyone else.",
+        "Нивните лични задачи остануваат приватни — ниту ти ниту некој друг не ги гледа.")}</p>
       <button class="btn" onclick="savePerm('${uid}')">${T("Save permissions", "Зачувај дозволи")}</button>
       <button class="btn danger" onclick="removePerm('${uid}')">${T("Remove all access", "Одземи пристап")}</button>`}
   `);
@@ -4468,8 +4497,14 @@ async function savePerm(uid) {
   const me = state.team.find((x) => x.user_id === uid);
   const row = me && me.role === "owner"
     ? { display_name: $("pm-name").value.trim() || null, hide_tabs: permDraft.hide }
-    : { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
-        see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins };
+    : (() => {
+        // the grant lives on their row: it lists whose personal lists they may open
+        const had = (me.personal_access || []).filter((u) => u !== state.uid);
+        const wants = $("pm-pers") && $("pm-pers").classList.contains("on");
+        return { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
+                 see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins,
+                 personal_access: wants ? [...had, state.uid] : had };
+      })();
   try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), T("Not saved", "Не е зачувано")); } catch { return; }
   if (uid === state.uid && me && me.role === "owner") {
     // my own view — take effect straight away
