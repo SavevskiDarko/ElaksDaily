@@ -357,7 +357,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   <div class="view" id="v-elaks">
     <div class="chips" id="elaks-tabs" style="margin-bottom:12px"></div>
     <div id="el-body-inv">
-      <input class="search" id="inv-search" placeholder="Search article…" oninput="renderInv()">
+      <input class="search" id="inv-search" placeholder="Search name, code, supplier or specs…" oninput="renderInv()">
       <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
       <div id="inv-list"></div>
     </div>
@@ -694,7 +694,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260813-211345";
+const BUILD = "20260814-035037";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1401,10 +1401,13 @@ function stockLed(a) { return a.stock <= 0 ? "out" : (a.min_stock > 0 && a.stock
 function renderInv() {
   $("cat-filter").innerHTML = ["all", ...CATS].map((c) =>
     `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "All" : c}</button>`).join("");
-  const q = ($("inv-search").value || "").toLowerCase();
+  const q = ($("inv-search").value || "").trim().toLowerCase();
+  // you may remember the supplier's code, or a line from the specs, rather
+  // than the name — so match against all of it
   const list = state.stock.filter((a) =>
     (state.catFilter === "all" || a.category === state.catFilter) &&
-    (!q || a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)));
+    (!q || [a.name, a.code, a.supplier_code, a.supplier, a.specs, a.category]
+      .some((v) => String(v || "").toLowerCase().includes(q))));
   const pv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.purchase_price || 0), 0);
   const sv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.sell_price || 0), 0);
   const lowN = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
@@ -1431,7 +1434,10 @@ function renderInv() {
       ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
       <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
       <div class="a-qty">${fmt(a.stock)}<small>${unitLbl(a.unit)}</small></div>
-    </div>`).join("") : (state.loading ? SKEL(4) : '<div class="empty">No articles.<br>Add with +</div>'));
+    </div>`).join("") : (state.loading ? SKEL(4) : `<div class="empty">${
+      q ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
+        : state.catFilter !== "all" ? `${T("Nothing in", "Ништо во")} ${esc(state.catFilter)}`
+        : T("No articles.<br>Add with +", "Нема артикли.<br>Додај со +")}</div>`));
 }
 async function openArticleDetail(id) {
   const a = state.stock.find((x) => x.id === id);
@@ -6552,6 +6558,59 @@ const MK = {
   "Key saved": "Клучот е зачуван", "No key yet": "Сè уште нема клуч",
   "Photograph a supplier note": "Сликај испратница", "Check the note": "Провери го документот",
   "Possible duplicates": "Можни дупликати", "keep this ›": "задржи го овој ›", "in": "доаѓаат", "out": "заминуваат",
+  // third pass — the newest screens and the wording around them
+  "About (opt.)": "За (опц.)", "Note (opt.)": "Белешка (опц.)", "Notes (opt.)": "Белешки (опц.)",
+  "Until (opt.)": "До (опц.)", "Status": "Статус", "Paid": "Платено", "Repeat on": "Повторувај на",
+  "Open tasks": "Отворени задачи", "No tasks for today.": "Нема задачи за денес.",
+  "Add with +": "Додај со +", "Nothing scheduled.": "Нема закажано.",
+  "Nothing completed yet.": "Сè уште нема завршено.", "No templates yet.": "Сè уште нема шаблони.",
+  "Save this checklist as a template": "Зачувај ја листата како шаблон",
+  "Search article…": "Барај артикл…", "Search article to add…": "Барај артикл за додавање…",
+  "Search the article to keep…": "Барај го артиклот што останува…",
+  "Purchase price (со ДДВ)": "Набавна цена (со ДДВ)", "Sell price (со ДДВ)": "Продажна цена (со ДДВ)",
+  "Photo (appears in offers)": "Слика (се прикажува во понудите)",
+  "Specs for offers (each line starts with --)": "Спецификации за понуди (секој ред почнува со --)",
+  "System title": "Наслов на систем", "Description (Систем:)": "Опис (Систем:)",
+  "Validity (days)": "Важност (дена)", "Note next to total": "Белешка до вкупно",
+  "Save offer": "Зачувај понуда", "Save + PDF": "Зачувај + PDF", "Save + Generate .docx": "Зачувај + .docx",
+  "Take items out of stock": "Разнижи од магацин",
+  "Items have been taken out of stock.": "Ставките се разнижени од магацин.",
+  "Close job — enter meters": "Затвори работа — внеси метри",
+  "Confirm — update offer & stock": "Потврди — ажурирај понуда и залиха",
+  "Create installation task": "Создај задача за монтажа",
+  "Nothing is at or below its minimum right now.": "Ништо не е на или под минимумот.",
+  "Nothing left stock this month.": "Ништо не излегло од магацин овој месец.",
+  "None found — every article looks distinct.": "Ништо — сите артикли се различни.",
+  "Nothing similar found — type part of the name above.": "Нема слично — напиши дел од името горе.",
+  "Merge…": "Спој…", "Everything from": "Сè од",
+  "Profit (net of ДДВ)": "Заработка (без ДДВ)", "Profit on jobs settled": "Заработка од затворени работи",
+  "Everything accepted has been paid.": "Сè прифатено е платено.",
+  "Leave the balance open": "Остави го остатокот отворен",
+  "Settled by bank — just record it": "Платено преку банка — само запиши",
+  "Payment needs checking": "Плаќањето треба проверка",
+  "Cash payments are taken out of the register.": "Кеш плаќањата се одземаат од касата.",
+  "Keybox code": "Код за сеф", "Alarm code": "Код за аларм",
+  "Wi-Fi name": "Wi-Fi име", "Wi-Fi password": "Wi-Fi лозинка",
+  "Anything else worth remembering": "Друго што вреди да се запамети",
+  "Size (m²)": "Површина (m²)", "Starting amount": "Почетна состојба",
+  "Starting amount — cash earned before Centrala (ден.)": "Почетна состојба — пари пред Централа (ден.)",
+  "Add an apartment first (Apartments tab above).": "Прво додај стан (табот Станови погоре).",
+  "Tap a free day to book it, a booked day to open the stay.": "Допри слободен ден за резервација, зафатен за да ја отвориш.",
+  "Remind me the day before an arrival, at": "Потсети ме ден пред пристигнување, во",
+  "Remind me about unpaid bills from day": "Потсети ме за неплатени сметки од ден",
+  "Nothing ending in the next three months.": "Ништо не истекува во следните три месеци.",
+  "The next 90 days. A good moment to offer a service visit.": "Следните 90 дена. Добар момент за сервисна посета.",
+  "Photograph again": "Сликај повторно", "Pick another": "Избери друга",
+  "Push notifications": "Push известувања", "Nothing recorded": "Нема запишано",
+  "Nothing recorded in the last two weeks.": "Нема запишано во последните две недели.",
+  "Nothing recorded this year.": "Нема запишано оваа година.",
+  "Entries made before this was switched on show no name.": "Ставките пред вклучувањето немаат име.",
+  "Restoring…": "Враќам…", "Restore finished": "Враќањето заврши", "Put back": "Вратено",
+  "Could not restore": "Не може да се врати",
+  "Could not load this month — check your connection.": "Не се вчита овој месец — провери ја врската.",
+  "Some figures could not be loaded — check your connection.": "Некои бројки не се вчитаа — провери ја врската.",
+  "Take your time — pauses are fine. For example:": "Не брзај — паузите се во ред. На пример:",
+  "automatic": "автоматски", "entrance": "влез", "item…": "ставка…",
   "Installed equipment": "Вградена опрема", "+ Add installed equipment": "+ Додај вградена опрема",
   "Nothing recorded yet.": "Сè уште нема ништо.", "Serial number": "Сериски број",
   "Where": "Каде", "Installed on": "Вградено на", "Warranty (months)": "Гаранција (месеци)",
