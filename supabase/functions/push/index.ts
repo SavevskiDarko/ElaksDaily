@@ -73,9 +73,13 @@ Deno.serve(async (req) => {
     const doneToday = t.recurrence ? t.last_done === today : t.done;
     if (isToday && !doneToday && t.reminded_on !== today &&
         t.due_time.slice(0, 5) <= hhmm) {
-      const who = t.assigned_to
-        ? (r: any) => r.role === "owner" || r.user_id === t.assigned_to
-        : (r: any) => r.role === "owner" || (r.task_contexts ?? []).includes(t.context);
+      // A personal task is private: it goes to whoever it belongs to, and to
+      // anyone they have given access to — never to everyone with the context.
+      const who = t.context === "personal"
+        ? (r: any) => r.user_id === t.owner_uid || (r.personal_access ?? []).includes(t.owner_uid)
+        : t.assigned_to
+          ? (r: any) => r.role === "owner" || r.user_id === t.assigned_to
+          : (r: any) => r.role === "owner" || (r.task_contexts ?? []).includes(t.context);
       await sendToAll("Reminder", `${t.title} (${t.due_time.slice(0, 5)})`, `task-${t.id}`, who, t.id);
       await db.from("tasks").update({ reminded_on: today }).eq("id", t.id);
     }
@@ -107,7 +111,12 @@ Deno.serve(async (req) => {
         return isToday && !doneToday;
       });
     const { data: all } = await db.from("tasks").select("*");
-    const open = openToday(all ?? []);
+    const { data: ownerRow } = await db.from("user_roles").select("user_id").eq("role", "owner").maybeSingle();
+    const ownerId = ownerRow?.user_id ?? null;
+    // this message goes to the owner, so somebody else's personal tasks have
+    // no business being counted in it
+    const open = openToday((all ?? []).filter((t: any) =>
+      t.context !== "personal" || !t.owner_uid || t.owner_uid === ownerId));
     const byCtx = (c: string) => open.filter((t) => t.context === c).length;
     const lowCount = (stock ?? []).filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
     // the per-area counts already contain these, so name them rather than
@@ -285,8 +294,9 @@ Deno.serve(async (req) => {
     const getO = (k: string) => String((cfgO ?? []).find((r: any) => r.key === k)?.value ?? "").replace(/"/g, "");
     const hour = getO("digest_hour") || "07:30";
     if (hhmm >= hour && getO("overdue_sent_on") !== today) {
-      const { data: late } = await db.from("tasks").select("id, title, context, assigned_to")
-        .is("recurrence", null).eq("done", false).lt("due_date", today);
+      const { data: late } = await db.from("tasks").select("id, title, context, assigned_to, owner_uid")
+        .is("recurrence", null).eq("done", false).lt("due_date", today)
+        .neq("context", "personal");     // private tasks are not counted in a shared nudge
       if ((late ?? []).length) {
         const byCtx: Record<string, number> = {};
         for (const t of late!) byCtx[t.context] = (byCtx[t.context] ?? 0) + 1;
