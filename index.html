@@ -529,7 +529,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
-  accounts: [], policies: [], polPays: [], statements: [], docs: [],
+  accounts: [], policies: [], polPays: [], statements: [], docs: [], stayPays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -636,6 +636,7 @@ const LOADERS = {
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
   accounts:   { need: () => true,               q: () => db.from("accounts").select("*").eq("active", true).order("sort") },
+  stayPays:   { need: () => state.perm.apts,    q: () => db.from("stay_payments").select("*").order("paid_on", { ascending: false }).limit(600) },
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
   stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
   bills:      { need: () => state.perm.apts,    q: () => db.from("bills").select("*").gte("month", backMonths(24)) },
@@ -699,7 +700,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260814-204801";
+const BUILD = "20260815-095252";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1581,6 +1582,13 @@ function mvCashToggle(unitPrice) {
 const cashBal = () => parseFloat(state.cashTotal) || 0;
 // Guests pay on arrival, so a booking is only money in hand once it has begun.
 const stayStarted = (s) => !!s.check_in && s.check_in <= todayStr();
+// Guests pay at different moments — on arrival, part-way through, on the way
+// out — so the money counts when it is received, not when they turn up.
+const stayPaysOf = (s) => state.stayPays.filter((p) => p.stay_id === s.id);
+const stayPaid = (s) => sumBy(stayPaysOf(s), (p) => p.amount);
+const stayBalance = (s) => (parseFloat(s.amount) || 0) - stayPaid(s);
+const staySettled = (s) => stayBalance(s) <= 0.005;
+const stayPartly = (s) => stayPaid(s) > 0.005 && !staySettled(s);
 // Who made this entry. Nothing is shown for your own — on your own screen
 // that would just be noise — so a name always means somebody else.
 const authorTag = (uid) => (!uid || uid === state.uid) ? ""
@@ -4954,11 +4962,11 @@ function moneyArrived(s, acct) {
 function accountBalances() {
   const bal = {};
   for (const a of state.accounts) bal[a.id] = parseFloat(a.opening_balance) || 0;
-  for (const s of state.stays) {
-    const id = accountFor(s);
-    const acct = state.accounts.find((a) => a.id === id);
-    if (!moneyArrived(s, acct)) continue;
-    if (id) bal[id] = (bal[id] || 0) + (parseFloat(s.amount) || 0);
+  for (const p of state.stayPays) {
+    // where the payment went: what was chosen on it, else where that booking pays
+    const s = state.stays.find((x) => x.id === p.stay_id);
+    const id = p.account_id || (s ? accountFor(s) : null);
+    if (id) bal[id] = (bal[id] || 0) + (parseFloat(p.amount) || 0);
   }
   for (const b of state.bills) {
     const id = accountFor(b);
@@ -4976,15 +4984,13 @@ function renderApt() {
   const inM = (d, m) => (d || "").slice(0, 7) === m;
   const incM = sumBy(state.stays.filter((s) => inM(s.check_in, curM)), (s) => s.amount);
   const incY = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 4) === yr), (s) => s.amount);
-  const recAll = sumBy(state.stays.filter(stayStarted), (s) => s.amount);
+  const recAll = sumBy(state.stayPays, (p) => p.amount);
   const openAll = sumBy(state.apartments, (a) => a.opening_balance);
   const bilAll = sumBy(state.bills, (b) => b.amount);
   // the view sums the full history; the local figure is the fallback if it is missing
   const cashAll = state.aptCash === null ? (recAll + openAll - bilAll) : state.aptCash;
-  const soon = sumBy(state.stays.filter((s) => {
-    const acct = state.accounts.find((a) => a.id === accountFor(s));
-    return !moneyArrived(s, acct);
-  }), (s) => s.amount);
+  // everything still to collect, whether the guest has arrived or not
+  const soon = sumBy(state.stays.filter((s) => !staySettled(s)), stayBalance);
   const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
   const bilY = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
   const t = todayStr();
@@ -5010,8 +5016,9 @@ function renderApt() {
       <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='bills';renderApt()">
         <span>${T("This month", "Овој месец")}</span><b>${fmt(incM - bilM)}</b></div>
       <div class="stat"><span>${T("This year", "Оваа година")}</span><b>${fmt(incY - bilY)}</b></div>
-      <div class="stat"><span>${T("Coming in", "Претстојно")}</span>
-        <b class="${soon ? "" : "muted"}">${fmt(soon)}</b></div>
+      <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();openUnpaidStays()">
+        <span>${T("To collect", "За наплата")}</span>
+        <b class="${soon ? "hflag" : "muted"}">${fmt(soon)}</b></div>
     </div>
   </div>`;
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
@@ -5086,7 +5093,14 @@ function stayRow(s) {
       <div class="o-num">${esc(s.apartments?.name || "?")} · ${dm(s.check_in)} → ${dm(s.check_out)} · ${nightsBetween(s.check_in, s.check_out)}n${s.source && s.source !== "Direct" ? " · " + esc(s.source) : ""}${s.external_uid ? " · synced" : ""}${authorTag(s.created_by)}${mark}</div></div>
     ${arrivingToday(s)
       ? `<button class="chip on" style="flex:none" onclick="event.stopPropagation();markArrived('${s.id}')">${T("Arrived", "Пристигна")}</button>`
-      : `<span class="o-total mono">${fmt(s.amount)} ден.</span>`}
+      : `<div style="text-align:right;flex:none">
+          <div class="mono">${fmt(s.amount)} ден.</div>
+          <div style="font-size:11.5px">${staySettled(s)
+            ? `<span style="color:var(--personal)">${T("paid", "платено")}</span>`
+            : stayPartly(s)
+              ? `<span style="color:var(--amber)">${fmt(stayBalance(s))} ${T("left", "останува")}</span>`
+              : `<span class="hflag">${T("not paid", "неплатено")}</span>`}</div>
+        </div>`}
   </div>`;
 }
 
@@ -5094,6 +5108,116 @@ async function unmarkArrived(id) {
   try { await dbq(db.from("stays").update({ arrived_at: null }).eq("id", id), T("Not saved", "Не е зачувано")); } catch { return; }
   closeSheet(); await refreshAll(["stays"]); render();
 }
+// A guest may pay in one go or in parts, at any point in the stay.
+function stayPayBlock(s) {
+  const rows = stayPaysOf(s).slice().sort((a, b) => (b.paid_on || "").localeCompare(a.paid_on || ""));
+  const paid = stayPaid(s), bal = stayBalance(s);
+  return `<div class="sec">${T("Payment", "Плаќање")}</div>
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Price", "Цена")}</span>
+        <span class="mono">${fmt(s.amount)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Paid", "Платено")}</span>
+        <span class="mono" style="color:var(--personal)">${fmt(paid)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${bal > 0.005 ? T("Still to pay", "Останува") : T("Settled", "Затворено")}</span>
+        <span class="mono"><b style="color:${bal > 0.005 ? "var(--amber)" : "var(--personal)"}">${fmt(Math.abs(bal))}</b> ден.</span></div>
+      ${rows.length ? `<div class="sec" style="margin-top:10px">${T("Received", "Примено")}
+        <span class="muted" style="font-weight:400">· ${T("tap to remove", "допри за бришење")}</span></div>` : ""}
+      ${rows.map((r) => `<div class="mov tapp" role="button" tabindex="0" onclick="delStayPayment('${r.id}')">
+        <span><b class="mono" style="color:${(parseFloat(r.amount) || 0) < 0 ? "var(--danger)" : "var(--personal)"}">${fmt(r.amount)}</b>
+          ${esc(r.method)}${r.note ? " · " + esc(r.note) : ""}${r.account_id ? " · " + esc(accountName(r.account_id)) : ""}</span>
+        <span class="muted">${dmy(r.paid_on)} ›</span></div>`).join("")}
+      ${bal > 0.005 ? `<div class="grid2" style="margin-top:10px">
+        <button class="btn sm amber" style="width:100%" onclick="quickStayPay('${s.id}')">${T("Paid in full", "Платено во целост")}</button>
+        <button class="btn sm ghost" style="width:100%" onclick="stayPaySheet('${s.id}')">${T("Part payment…", "Делумно…")}</button>
+      </div>` : `<button class="btn sm ghost" style="margin-top:10px" onclick="stayPaySheet('${s.id}')">${T("Add another entry", "Додај уште")}</button>`}
+    </div>`;
+}
+
+let stayPayMethod = "cash";
+// the common case in one tap: the whole remaining amount, cash, today
+async function quickStayPay(stayId) {
+  const s = state.stays.find((x) => x.id === stayId);
+  if (!s) return;
+  try {
+    await dbq(db.from("stay_payments").insert({
+      stay_id: stayId, amount: Math.round(stayBalance(s) * 100) / 100,
+      method: "cash", account_id: accountFor(s), paid_on: todayStr(),
+    }), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
+  setTimeout(() => openStaySheet(stayId), 240);
+  toast(T("Payment recorded", "Плаќањето е зачувано"));
+}
+
+function stayPaySheet(stayId) {
+  const s = state.stays.find((x) => x.id === stayId);
+  const bal = stayBalance(s);
+  stayPayMethod = "cash";
+  openSheet(`
+    <h2>${T("Payment", "Плаќање")}</h2>
+    <p class="muted">${esc(s.guest_name)} · ${T("still to pay", "останува")} ${fmt(bal)} ден.</p>
+    <label>${T("Paid by", "Платено со")}</label>
+    <div class="chips">
+      ${[["cash", T("Cash", "Кеш")], ["card", T("Card", "Картичка")], ["bank", T("Bank", "Банка")], ["platform", T("Platform", "Платформа")]]
+        .map(([v, l], i) => `<button class="chip ${i === 0 ? "on" : ""}"
+          onclick="stayPayMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this))">${l}</button>`).join("")}
+    </div>
+    <label>${T("Amount (ден.)", "Износ (ден.)")}</label>
+    <input id="sp-amt" type="number" inputmode="decimal" step="any" value="${Math.max(0, Math.round(bal * 100) / 100)}">
+    <div class="chips" style="margin-top:8px">
+      <button class="chip" onclick="$('sp-amt').value=${Math.max(0, Math.round(bal * 50) / 100)}">${T("Half", "Половина")}</button>
+      <button class="chip" onclick="$('sp-amt').value=${Math.max(0, Math.round(bal * 100) / 100)}">${T("All of it", "Целиот остаток")}</button>
+    </div>
+    <label>${T("Into", "Оди во")}</label>
+    <select id="sp-acct">
+      ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
+    </select>
+    <label>${T("Date", "Датум")}</label><input id="sp-date" type="date" value="${todayStr()}">
+    <label>${T("Note", "Белешка")}</label><input id="sp-note" placeholder="${T("e.g. deposit", "на пр. аванс")}">
+    <button class="btn" onclick="saveStayPayment('${stayId}')">${T("Save payment", "Зачувај плаќање")}</button>
+  `);
+}
+
+async function saveStayPayment(stayId) {
+  const amt = parseFloat($("sp-amt").value);
+  if (!amt) return toast(T("Enter the amount", "Внеси износ"));
+  try {
+    await dbq(db.from("stay_payments").insert({
+      stay_id: stayId, amount: amt, method: stayPayMethod,
+      account_id: $("sp-acct").value || null, paid_on: $("sp-date").value || todayStr(),
+      note: $("sp-note").value.trim() || null,
+    }), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
+  setTimeout(() => openStaySheet(stayId), 240);
+  toast(T("Payment recorded", "Плаќањето е зачувано"));
+}
+
+async function delStayPayment(id) {
+  const r = state.stayPays.find((x) => x.id === id);
+  if (!r || !await ask(T("Remove this payment of " + fmt(r.amount) + " ден.?", "Отстрани го плаќањето од " + fmt(r.amount) + " ден.?"))) return;
+  try { await dbq(db.from("stay_payments").delete().eq("id", id), T("Not removed", "Не е отстрането")); } catch { return; }
+  closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
+  setTimeout(() => openStaySheet(r.stay_id), 240);
+}
+
+// who still owes something, so it can be chased
+function openUnpaidStays() {
+  const list = state.stays.filter((s) => !staySettled(s))
+    .sort((a, b) => (a.check_out || "").localeCompare(b.check_out || ""));
+  const aptOf = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+  openSheet(`<h2>${T("Still to collect", "За наплата")}</h2>
+    <div class="totalbar"><span>${T("Total", "Вкупно")}</span>
+      <span class="mono">${fmt(sumBy(list, stayBalance))} ден.</span></div>
+    ${list.length ? list.map((s) => `<div class="card offer row" role="button" tabindex="0" onclick="openStaySheet('${s.id}')">
+      <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
+        <div class="o-num">${esc(aptOf(s.apartment_id))} · ${dm(s.check_in)} → ${dm(s.check_out)}${
+          stayPartly(s) ? ` · ${T("part paid", "делумно")} ${fmt(stayPaid(s))}` : ""}${
+          dOnly(s.check_out) < todayStr() ? ` · <span style="color:var(--danger)">${T("already left", "веќе замина")}</span>` : ""}</div></div>
+      <span class="o-total mono" style="color:var(--amber)">${fmt(stayBalance(s))}</span>
+    </div>`).join("") : `<p class="muted">${T("Everyone has paid.", "Сите платиле.")}</p>`}`);
+}
+
 async function markArrived(id) {
   const s = state.stays.find((x) => x.id === id);
   if (!s) return;
@@ -5201,6 +5325,9 @@ function openStaySheet(id, pre) {
       ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
     </select>
     <div class="muted" id="st-nights" style="margin-top:4px"></div>
+    ${id ? stayPayBlock(s) : `<p class="muted" style="font-size:12.5px">${T(
+      "Save it first, then record what the guest pays — on arrival, part-way through, or on the way out.",
+      "Прво зачувај, потоа внеси што плаќа гостинот — при доаѓање, во меѓувреме или при заминување.")}</p>`}
     ${id && arrivingToday(s)
       ? `<button class="btn amber" onclick="markArrived('${id}');closeSheet()">${T("Guest has arrived", "Гостинот пристигна")}</button>`
       : id && s.arrived_at
