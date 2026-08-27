@@ -153,7 +153,18 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .oitem{display:grid;grid-template-columns:1fr 58px 74px 74px 28px;gap:6px;align-items:center;margin-bottom:6px;font-size:13.5px}
 .oitem input{padding:7px 8px;font-size:14px}
 .oitem .del{color:var(--danger);font-size:18px;text-align:center}
-.oitem.ord,.ohead.ord{grid-template-columns:22px 1fr 52px 68px 68px 24px;gap:5px}
+/* A line item on a phone: the name deserves the full width, the figures read
+   as qty × price = total underneath it. */
+.lrow{display:grid;grid-template-columns:22px 1fr 24px;gap:8px;align-items:center;
+  padding:8px 0;border-bottom:1px solid var(--line)}
+.lrow.nomove{grid-template-columns:1fr 24px}
+.lbody{min-width:0;display:flex;flex-direction:column;gap:6px}
+.lname{width:100%;font-weight:600}
+.lnums{display:grid;grid-template-columns:64px 12px 1fr 12px minmax(72px,auto);gap:6px;align-items:center}
+.lnums input{text-align:right}
+.lop{color:var(--muted);font-size:13px;text-align:center}
+.ltot{font-size:14.5px;text-align:right;white-space:nowrap}
+.lrow .del{color:var(--danger);font-size:18px;align-self:center}
 .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:4px}
 .pcell{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#ECECEC;border:1px solid var(--line)}
 .pcell img{width:100%;height:100%;object-fit:cover;display:block}
@@ -700,7 +711,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260815-095252";
+const BUILD = "20260827-115546";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2056,7 +2067,7 @@ async function openOfferSheet(id) {
     <div class="sec">Items</div>
     <input id="of-search" placeholder="Search article to add…" oninput="renderPicker()">
     <div id="of-picker"></div>
-    <div class="ohead ord" style="margin-top:10px"><span></span><span>Name</span><span>Qty</span><span>Price</span><span>Total</span><span></span></div>
+    <div class="sec" style="margin-top:10px">${T("Items", "Ставки")}</div>
     <div id="of-items"></div>
     <button class="btn sm ghost" onclick="addFreeItem()">+ Manual item (installation…)</button>
     <div class="totalbar"><span>Total</span><span class="mono" id="of-total">0 ден.</span></div>
@@ -2168,21 +2179,27 @@ function renderOfferItems() {
   $("of-items").innerHTML = offerItems.map((it, i) => {
     const tot = itemTotal(it);
     const last = offerItems.length - 1;
-    return `<div class="oitem ord">
+    return `<div class="lrow">
       <span class="omove">
         <button ${i === 0 ? "disabled" : ""} onclick="moveOfferItem(${i},-1)"
           aria-label="${T("Move up", "Помести горе")}">▲</button>
         <button ${i === last ? "disabled" : ""} onclick="moveOfferItem(${i},1)"
           aria-label="${T("Move down", "Помести долу")}">▼</button>
       </span>
-      <input value="${esc(it.name)}" oninput="offerItems[${i}].name=this.value">
-      ${it.unit === "m"
-        ? `<input value="${it.consumed ? fmt(it.consumed) + ' m' : 'm'}" disabled>`
-        : it.free
-          ? '<input value="" disabled>'
-          : `<input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="offerItems[${i}].qty=parseFloat(this.value)||0;updateTotal()">`}
-      <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="offerItems[${i}].price=parseFloat(this.value)||0;updateTotal()">
-      <input class="mono" value="${tot === null ? "???" : fmt(tot)}" disabled id="of-it-tot-${i}">
+      <div class="lbody">
+        <input class="lname" value="${esc(it.name)}" oninput="offerItems[${i}].name=this.value">
+        <div class="lnums">
+          ${it.unit === "m"
+            ? `<input value="${it.consumed ? fmt(it.consumed) + " m" : "m"}" disabled>`
+            : it.free
+              ? `<input value="—" disabled>`
+              : `<input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="offerItems[${i}].qty=parseFloat(this.value)||0;updateTotal()">`}
+          <span class="lop">×</span>
+          <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="offerItems[${i}].price=parseFloat(this.value)||0;updateTotal()">
+          <span class="lop">=</span>
+          <b class="mono ltot" id="of-it-tot-${i}">${tot === null ? "???" : fmt(tot)}</b>
+        </div>
+      </div>
       <button class="del" onclick="offerItems.splice(${i},1);renderOfferItems()">✕</button>
     </div>`;
   }).join("");
@@ -2193,7 +2210,8 @@ function updateTotal() {
   offerItems.forEach((it, i) => {
     const t = itemTotal(it);
     const cell = $("of-it-tot-" + i);
-    if (cell) cell.value = t === null ? "???" : fmt(t);
+    // the per-line total is text now, not a disabled input
+    if (cell) cell.textContent = t === null ? "???" : fmt(t);
     if (t !== null) sum += t;
   });
   $("of-total").textContent = fmt(sum) + " ден.";
@@ -6310,7 +6328,7 @@ function openPurchaseSheet(id) {
     <div class="sec">Items</div>
     <input id="pu-search" placeholder="Search an article you already have…" oninput="renderPurPicker()">
     <div id="pu-picker"></div>
-    <div class="ohead" style="margin-top:10px"><span>Name</span><span>Qty</span><span>Price</span><span>Total</span><span></span></div>
+    <div class="sec" style="margin-top:10px">${T("Items", "Ставки")}</div>
     <div id="pu-items"></div>
     <button class="btn sm ghost" style="margin-top:8px" onclick="addPurLine()">+ Add a line by hand</button>
     <p class="muted" style="font-size:12.5px">Prices are what the supplier charges you, со ДДВ. A line that isn't linked to an article yet becomes a new article when you receive it into stock.</p>
@@ -6361,11 +6379,17 @@ function addPurLine(articleId) {
   renderPurItems();
 }
 function renderPurItems() {
-  $("pu-items").innerHTML = purItems.map((it, i) => `<div class="oitem">
-    <input value="${esc(it.name)}" placeholder="Article name" oninput="purItems[${i}].name=this.value">
-    <input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="purItems[${i}].qty=parseFloat(this.value)||0;purTotals()">
-    <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="purItems[${i}].price=parseFloat(this.value)||0;purTotals()">
-    <input class="mono" value="${fmt((it.qty || 0) * (it.price || 0))}" disabled>
+  $("pu-items").innerHTML = purItems.map((it, i) => `<div class="lrow nomove">
+    <div class="lbody">
+      <input class="lname" value="${esc(it.name)}" placeholder="${T("Article name", "Име на артикл")}" oninput="purItems[${i}].name=this.value">
+      <div class="lnums">
+        <input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="purItems[${i}].qty=parseFloat(this.value)||0;purTotals()">
+        <span class="lop">×</span>
+        <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="purItems[${i}].price=parseFloat(this.value)||0;purTotals()">
+        <span class="lop">=</span>
+        <b class="mono ltot" id="pu-it-tot-${i}">${fmt((it.qty || 0) * (it.price || 0))}</b>
+      </div>
+    </div>
     <button class="del" onclick="purItems.splice(${i},1);renderPurItems()">✕</button>
   </div>`).join("");
   purTotals();
@@ -6376,8 +6400,9 @@ function purTotals() {
   $("pu-vat").textContent = fmt(t.net) + " + "
     + VAT_RATES.filter((r) => t.byRate[r]).map((r) => fmt(t.byRate[r]) + " (" + r + "%)").join(" + ") + " ден.";
   purItems.forEach((it, i) => {
-    const cell = $("pu-items").children[i];
-    if (cell) cell.children[3].value = fmt((it.qty || 0) * (it.price || 0));
+    // by id rather than by position — the row layout is free to change
+    const cell = $("pu-it-tot-" + i);
+    if (cell) cell.textContent = fmt((it.qty || 0) * (it.price || 0));
   });
 }
 async function savePurchase(id) {
