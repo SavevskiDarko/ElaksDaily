@@ -238,6 +238,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
 .stat span{display:block;font-size:11.5px;color:var(--muted)}
 .stat b{font-family:var(--mono);font-size:14px}
+/* A sort is not a filter, so it should not look like one: the chips above
+   choose which records, this chooses their order. */
+.sortbar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.sortlbl{font-size:12.5px;color:var(--muted);white-space:nowrap;font-weight:600;
+  display:flex;align-items:center;gap:5px}
+.sortic{font-size:15px;line-height:1}
+.sortbar select{width:auto;flex:0 1 auto;padding:7px 30px 7px 11px;font-size:13.5px;border-radius:9px}
 .setrow{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
   border-radius:var(--r);padding:13px 14px;margin-bottom:8px;cursor:pointer}
 .setrow:active{opacity:.65}
@@ -429,8 +436,11 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div id="pol-summary"></div>
     <div class="chips" id="ins-tabs" style="margin-bottom:10px"></div>
     <input class="search" id="pol-search" placeholder="Search name, policy number or phone…" oninput="renderPolicies()">
-    <div class="chips" id="pol-filter" style="margin-bottom:6px"></div>
-    <div class="chips" id="pol-sort" style="margin-bottom:12px"></div>
+    <div class="chips" id="pol-filter" style="margin-bottom:8px"></div>
+    <div class="sortbar" id="pol-sortbar">
+      <span class="sortlbl"><span class="sortic">⇅</span><span>Sort</span></span>
+      <select id="pol-sort" onchange="state.polSort=this.value;renderPolicies()"></select>
+    </div>
     <div id="pol-list"></div>
   </div>
 
@@ -729,7 +739,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260828-220651";
+const BUILD = "20260828-221742";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3497,7 +3507,7 @@ function renderPolicies() {
   const onPolicies = state.insView === "policies";
   $("pol-search").style.display = onPolicies ? "" : "none";
   $("pol-filter").style.display = onPolicies ? "" : "none";
-  $("pol-sort").style.display = onPolicies ? "" : "none";
+  $("pol-sortbar").style.display = onPolicies ? "" : "none";
   $("pol-summary").style.display = state.insView === "report" ? "none" : "";
   if (state.insView !== "report") renderInsSummary();
   if (state.insView === "report") return renderInsReport();
@@ -3520,8 +3530,7 @@ function renderPolicies() {
     ["ending", T("Ending first", "Прво што истекува")],
     ["name", T("By name", "По име")],
     ["added", T("Last added", "Последно додадени")],
-  ].map(([v, l]) => `<button class="chip ${state.polSort === v ? "on" : ""}"
-    onclick="state.polSort='${v}';renderPolicies()">${l}</button>`).join("");
+  ].map(([v, l]) => `<option value="${v}" ${state.polSort === v ? "selected" : ""}>${l}</option>`).join("");
 
   let list = all;
   if (state.polFilter === "open") list = all.filter((p) => !polSettled(p));
@@ -6793,7 +6802,7 @@ const MK = {
   "Add with +": "Додај со +", "Nothing scheduled.": "Нема закажано.",
   "Nothing completed yet.": "Сè уште нема завршено.", "No templates yet.": "Сè уште нема шаблони.",
   "Save this checklist as a template": "Зачувај ја листата како шаблон",
-  "Search article…": "Барај артикл…", "Search article to add…": "Барај артикл за додавање…",
+  "Sort": "Подреди", "Search article…": "Барај артикл…", "Search article to add…": "Барај артикл за додавање…",
   "Search the article to keep…": "Барај го артиклот што останува…",
   "Purchase price (со ДДВ)": "Набавна цена (со ДДВ)", "Sell price (со ДДВ)": "Продажна цена (со ДДВ)",
   "Photo (appears in offers)": "Слика (се прикажува во понудите)",
