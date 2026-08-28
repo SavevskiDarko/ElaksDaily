@@ -429,7 +429,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <div id="pol-summary"></div>
     <div class="chips" id="ins-tabs" style="margin-bottom:10px"></div>
     <input class="search" id="pol-search" placeholder="Search name, policy number or phone…" oninput="renderPolicies()">
-    <div class="chips" id="pol-filter" style="margin-bottom:12px"></div>
+    <div class="chips" id="pol-filter" style="margin-bottom:6px"></div>
+    <div class="chips" id="pol-sort" style="margin-bottom:12px"></div>
     <div id="pol-list"></div>
   </div>
 
@@ -559,7 +560,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
   accounts: [], policies: [], polPays: [], statements: [], docs: [], stayPays: [],
   docKind: "all", docClient: "all",
-  polFilter: "open", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
+  polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
@@ -728,7 +729,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260828-051852";
+const BUILD = "20260828-220651";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3496,6 +3497,7 @@ function renderPolicies() {
   const onPolicies = state.insView === "policies";
   $("pol-search").style.display = onPolicies ? "" : "none";
   $("pol-filter").style.display = onPolicies ? "" : "none";
+  $("pol-sort").style.display = onPolicies ? "" : "none";
   $("pol-summary").style.display = state.insView === "report" ? "none" : "";
   if (state.insView !== "report") renderInsSummary();
   if (state.insView === "report") return renderInsReport();
@@ -3512,12 +3514,28 @@ function renderPolicies() {
       onclick="state.polFilter='${v}';renderPolicies()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
 
   const owed = all.filter((p) => !polSettled(p));
+  // the filter says which policies, the sort says in what order — they are
+  // separate questions, so they get separate rows
+  $("pol-sort").innerHTML = [
+    ["ending", T("Ending first", "Прво што истекува")],
+    ["name", T("By name", "По име")],
+    ["added", T("Last added", "Последно додадени")],
+  ].map(([v, l]) => `<button class="chip ${state.polSort === v ? "on" : ""}"
+    onclick="state.polSort='${v}';renderPolicies()">${l}</button>`).join("");
+
   let list = all;
   if (state.polFilter === "open") list = all.filter((p) => !polSettled(p));
   else if (state.polFilter === "expiring") list = all.filter((p) => { const d = polDaysLeft(p); return d !== null && d >= 0 && d <= 30; });
   if (q) list = list.filter((p) => [p.holder_name, p.policy_no, p.phone, p.insurer, p.kind, p.note]
     .some((v) => String(v || "").toLowerCase().includes(q)));
-  list = list.slice().sort((a, b) => (a.end_date || "9999").localeCompare(b.end_date || "9999"));
+  const byEnd = (a, b) => (a.end_date || "9999-99-99").localeCompare(b.end_date || "9999-99-99");
+  const sorters = {
+    // a policy with no end date has nothing to run out, so it sits last
+    ending: byEnd,
+    name: (a, b) => (a.holder_name || "").localeCompare(b.holder_name || "", "mk") || byEnd(a, b),
+    added: (a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")) || byEnd(a, b),
+  };
+  list = list.slice().sort(sorters[state.polSort] || byEnd);
 
   $("pol-list").innerHTML = list.length ? list.map((p) => {
     const st = polStatus(p), bal = polBalance(p);
