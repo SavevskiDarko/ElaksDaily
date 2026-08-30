@@ -413,6 +413,11 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="pur-summary"></div>
       <div id="pur-list"></div>
     </div>
+    <div id="el-body-job" style="display:none">
+      <div class="chips" id="job-filter" style="margin-bottom:10px"></div>
+      <div id="job-list"></div>
+      <button class="btn ghost" onclick="openJobSheet()">+ New job</button>
+    </div>
     <div id="el-body-doc" style="display:none">
       <input class="search" id="doc-search" placeholder="Search number, client or note…" oninput="renderDocs()">
       <div class="chips" id="doc-kind" style="margin-bottom:6px"></div>
@@ -568,7 +573,8 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
-  accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], stayPays: [],
+  accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], jobs: [],
+  jobFilter: "upcoming", stayPays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -667,6 +673,7 @@ const LOADERS = {
   purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   sites:      { need: () => state.perm.elaks,   q: () => db.from("sites").select("*").eq("active", true).order("name") },
+  jobs:       { need: () => state.perm.elaks,   q: () => db.from("jobs").select("*").gte("scheduled_on", backDays(180)).order("scheduled_on") },
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
   docs:       { need: () => state.perm.elaks,   q: () => db.from("documents").select("*").order("doc_date", { ascending: false }).limit(400) },
   policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
@@ -740,7 +747,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-060401";
+const BUILD = "20260830-061020";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2027,18 +2034,20 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"],
+  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["job", T("Jobs", "Работи")], ["pur", "Purchases"],
     ["doc", T("Documents", "Документи")], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
   $("el-body-off").style.display = state.elaksView === "off" ? "" : "none";
   $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
   $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
+  const jobEl = $("el-body-job"); if (jobEl) jobEl.style.display = state.elaksView === "job" ? "" : "none";
   const docEl = $("el-body-doc"); if (docEl) docEl.style.display = state.elaksView === "doc" ? "" : "none";
   const supEl = $("el-body-sup"); if (supEl) supEl.style.display = state.elaksView === "sup" ? "" : "none";
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
   else if (state.elaksView === "pur") renderPurchases();
+  else if (state.elaksView === "job") renderJobs();
   else if (state.elaksView === "doc") renderDocs();
   else if (state.elaksView === "sup") renderSuppliers();
   else renderClients();
@@ -2114,6 +2123,15 @@ async function openOfferSheet(id) {
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
     <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
     ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
+    ${id && o.status === "accepted" ? (() => {
+      const j = state.jobs.find((x) => x.offer_id === id);
+      return j
+        ? `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openJobSheet('${j.id}'),240)">
+             <span>${T("Work", "Работа")}: ${esc(jobLabel(j.status))}${j.scheduled_on ? " · " + dmy(j.scheduled_on) : ""}</span>
+             <span class="muted">›</span></div>`
+        : `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openJobSheet(null,'${id}'),240)">
+             ${T("Schedule the work", "Закажи ја работата")}</button>`;
+    })() : ""}
     ${id ? paymentsBlock(o) : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
@@ -6119,6 +6137,14 @@ function renderHome() {
       <h3>Elaks</h3>
       <div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>
       <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
+      ${(() => {
+        const t = todayStr();
+        const todays = state.jobs.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled");
+        const late = state.jobs.filter((j) => j.scheduled_on && j.scheduled_on < t && j.status !== "done" && j.status !== "cancelled");
+        if (!todays.length && !late.length) return "";
+        return `<div class="hrow"><span>${T("Work today", "Работа денес")}</span>
+          <b>${todays.length}${late.length ? ` <span class="hflag">+${late.length} ${T("late", "задоцнети")}</span>` : ""}</b></div>`;
+      })()}
       <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
       ${expired.length ? `<div class="hnote warn">${expired.length} expired</div>` : ""}
       <div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>
@@ -6921,6 +6947,227 @@ const expiringSoon = () => state.installs.filter((i) => {
   const d = warrantyDaysLeft(i);
   return d !== null && d >= 0 && d <= 90;
 });
+
+/* ---------- jobs: the visit between an accepted offer and the money ---------- */
+const JOB_STATES = { scheduled: ["scheduled", "закажана"], started: ["on site", "во тек"],
+                     done: ["done", "завршена"], cancelled: ["cancelled", "откажана"] };
+const jobLabel = (s) => T(...(JOB_STATES[s] || JOB_STATES.scheduled));
+const jobColour = (j) => j.status === "done" ? "var(--personal)"
+  : j.status === "cancelled" ? "var(--muted)"
+  : j.status === "started" ? "var(--amber)"
+  : (j.scheduled_on && j.scheduled_on < todayStr()) ? "var(--danger)" : "var(--work)";
+const jobClient = (j) => (state.clients.find((c) => c.id === j.client_id) || {}).name || "";
+const jobSite = (j) => (state.sites.find((s) => s.id === j.site_id) || {}).name || "";
+
+function renderJobs() {
+  const t = todayStr();
+  const counts = {
+    today: state.jobs.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled").length,
+    upcoming: state.jobs.filter((j) => j.status !== "done" && j.status !== "cancelled").length,
+    done: state.jobs.filter((j) => j.status === "done").length,
+  };
+  $("job-filter").innerHTML = [["today", T("Today", "Денес")], ["upcoming", T("To do", "За работа")],
+    ["done", T("Finished", "Завршени")], ["all", T("All", "Сите")]]
+    .map(([v, l]) => `<button class="chip ${state.jobFilter === v ? "on" : ""}"
+      onclick="state.jobFilter='${v}';renderJobs()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
+
+  let list = state.jobs;
+  if (state.jobFilter === "today") list = list.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled");
+  else if (state.jobFilter === "upcoming") list = list.filter((j) => j.status !== "done" && j.status !== "cancelled");
+  else if (state.jobFilter === "done") list = list.filter((j) => j.status === "done");
+  list = list.slice().sort((a, b) => (a.scheduled_on || "9999").localeCompare(b.scheduled_on || "9999")
+    || String(a.scheduled_time || "").localeCompare(String(b.scheduled_time || "")));
+
+  let html = "", day = null;
+  for (const j of list) {
+    const d = j.scheduled_on || "";
+    if (d !== day) {
+      day = d;
+      const late = d && d < t && j.status !== "done";
+      html += `<div class="sec">${d ? dmy(d) : T("No date", "Без датум")}${
+        d === t ? ` · ${T("today", "денес")}` : late ? ` · <span style="color:var(--danger)">${T("overdue", "задоцнето")}</span>` : ""}</div>`;
+    }
+    html += `<div class="card offer row" role="button" tabindex="0" onclick="openJobSheet('${j.id}')">
+      <span class="led" style="background:${jobColour(j)}"></span>
+      <div style="flex:1;min-width:0"><b>${esc(j.title)}</b>
+        <div class="o-num">${[jobClient(j), jobSite(j), j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : "",
+          j.assigned_to && j.assigned_to !== state.uid ? personName(j.assigned_to) : ""].filter(Boolean).map(esc).join(" · ")}</div></div>
+      <span class="muted nw" style="font-size:12px;color:${jobColour(j)}">${jobLabel(j.status)}</span>
+    </div>`;
+  }
+  $("job-list").innerHTML = html || (state.loading ? SKEL(3)
+    : `<div class="empty">${T("Nothing here.<br>Accept an offer and schedule the work, or add a job with +",
+        "Ништо тука.<br>Прифати понуда и закажи ја работата, или додај со +")}</div>`);
+}
+
+let jobPhotos = [], jobRemoved = [], jobOpenId = null;
+
+async function openJobSheet(id, fromOffer) {
+  const o = fromOffer ? state.offers.find((x) => x.id === fromOffer) : null;
+  const j = id ? state.jobs.find((x) => x.id === id)
+    : { title: o ? o.title : "", offer_id: o ? o.id : null, client_id: o ? o.client_id : null,
+        scheduled_on: todayStr(), status: "scheduled", assigned_to: state.uid };
+  if (id && !j) return;
+  jobOpenId = id || null; jobPhotos = []; jobRemoved = [];
+  if (id) {
+    try {
+      const { data } = await db.from("job_photos").select("id, thumb, sort").eq("job_id", id).order("sort");
+      jobPhotos = (data || []).map((r) => ({ id: r.id, thumb: r.thumb }));
+    } catch (e) { console.warn("job photos", e); }
+  }
+  const cid = j.client_id || "";
+  openSheet(`
+    <h2>${id ? T("Job", "Работа") : T("New job", "Нова работа")}</h2>
+    <label>${T("What is the work", "Што е работата")}</label>
+    <input id="jb-title" value="${esc(j.title || "")}" placeholder="${T("e.g. fit 4 cameras", "на пр. монтажа на 4 камери")}">
+    <label>${T("Client", "Клиент")}</label>
+    <select id="jb-client" onchange="jbSiteOptions('')"><option value="">${T("No client", "Без клиент")}</option>
+      ${state.clients.filter((c) => c.active !== false || cid === c.id)
+        .map((c) => `<option value="${c.id}" ${cid === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+    </select>
+    <label>${T("Site", "Локација")}</label><select id="jb-site"></select>
+    <label>${T("Address", "Адреса")}</label><input id="jb-addr" value="${esc(j.address || "")}">
+    <div class="grid2">
+      <div><label>${T("Date", "Датум")}</label><input id="jb-date" type="date" value="${j.scheduled_on || ""}"></div>
+      <div><label>${T("Time", "Време")}</label><input id="jb-time" type="time" value="${j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : ""}"></div>
+    </div>
+    <label>${T("Who is going", "Кој оди")}</label>
+    <select id="jb-who">
+      ${(state.people || []).map((p) => `<option value="${p.user_id}" ${((j.assigned_to || state.uid) === p.user_id) ? "selected" : ""}>${esc(p.display_name || "—")}</option>`).join("")
+        || `<option value="${state.uid}">${T("Me", "Јас")}</option>`}
+    </select>
+    <label>${T("Note", "Белешка")}</label><input id="jb-note" value="${esc(j.note || "")}">
+
+    ${id ? `<div class="sec">${T("State", "Состојба")}</div>
+      <div class="chips" id="jb-state">
+        ${Object.keys(JOB_STATES).map((k) => `<button class="chip ${j.status === k ? "on" : ""}" data-s="${k}"
+          onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${jobLabel(k)}</button>`).join("")}
+      </div>
+      ${j.done_at ? `<p class="muted" style="font-size:12.5px">${T("Finished", "Завршена")} ${dmyTime(j.done_at)}</p>` : ""}
+
+      <div class="sec">${T("Photos of the work", "Слики од работата")}</div>
+      <div id="jb-img"></div>
+      <input type="file" accept="image/*" capture="environment" id="jb-cam" style="display:none" onchange="pickJobImage(this)">
+      <input type="file" accept="image/*" multiple id="jb-file" style="display:none" onchange="pickJobImage(this)">
+      <div class="grid2" style="margin-top:6px">
+        <button class="btn sm ghost" style="width:100%" onclick="$('jb-cam').click()">${T("Photograph", "Сликај")}</button>
+        <button class="btn sm ghost" style="width:100%" onclick="$('jb-file').click()">${T("From gallery", "Од галерија")}</button>
+      </div>` : ""}
+
+    <button class="btn" onclick="saveJob('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id && j.status !== "done" ? `<button class="btn amber" onclick="finishJob('${id}')">${T("Mark as finished", "Означи како завршена")}</button>` : ""}
+    ${id && j.offer_id ? `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openOfferSheet('${j.offer_id}'),240)">${T("Open the offer", "Отвори ја понудата")}</button>` : ""}
+    ${id ? `<button class="btn danger" onclick="delJob('${id}')">${T("Remove", "Отстрани")}</button>` : ""}
+  `);
+  jbSiteOptions(j.site_id || "");
+  renderJobImg();
+}
+
+function jbSiteOptions(selected) {
+  const sel = $("jb-site");
+  if (!sel) return;
+  const cid = $("jb-client").value;
+  const want = selected !== undefined ? selected : sel.value;
+  sel.innerHTML = `<option value="">${T("No site", "Без локација")}</option>`
+    + state.sites.filter((s) => s.client_id === cid)
+      .map((s) => `<option value="${s.id}" ${want === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("");
+}
+
+function renderJobImg() {
+  const el = $("jb-img");
+  if (!el) return;
+  el.innerHTML = jobPhotos.length
+    ? `<div class="pgrid">${jobPhotos.map((p, i) => `<div class="pcell">
+        <img src="${p.thumb || p.full}" alt="" role="button" tabindex="0" onclick="viewJobPhoto(${i})">
+        <button class="pdel" onclick="event.stopPropagation();removeJobImage(${i})" aria-label="${T("Remove", "Отстрани")}">✕</button>
+        <span class="pnum">${i + 1}</span></div>`).join("")}</div>`
+    : `<p class="muted" style="font-size:12.5px">${T("None yet.", "Сè уште нема.")}</p>`;
+}
+function pickJobImage(input) {
+  const files = [...(input.files || [])];
+  input.value = "";
+  files.forEach((f) => {
+    if (f.size > 12 * 1024 * 1024) return toast(T("One photo was too large", "Една слика беше преголема"));
+    const fr = new FileReader();
+    fr.onload = () => {
+      const im = new Image();
+      im.onload = () => { jobPhotos.push({ thumb: imgResize(im, 110, 0.6), full: imgResize(im, 1400, 0.8), isNew: true }); renderJobImg(); };
+      im.onerror = () => toast(T("Could not read that image", "Не можев да ја прочитам сликата"));
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(f);
+  });
+}
+function removeJobImage(i) {
+  const p = jobPhotos[i];
+  if (!p) return;
+  if (p.id) jobRemoved.push(p.id);
+  jobPhotos.splice(i, 1);
+  renderJobImg();
+}
+async function viewJobPhoto(i) {
+  const p = jobPhotos[i];
+  if (!p) return;
+  if (!p.full && p.id) {
+    try {
+      const { data } = await db.from("job_photos").select("data").eq("id", p.id).maybeSingle();
+      if (data && data.data) p.full = data.data;
+    } catch (e) { console.warn("job photo", e); }
+  }
+  const src = p.full || p.thumb, back = jobOpenId;
+  openSheet(`<h2>${T("Photo", "Слика")} ${i + 1} ${T("of", "од")} ${jobPhotos.length}</h2>
+    <img src="${src}" alt="" style="width:100%;border-radius:11px;background:#ECECEC">
+    ${jobPhotos.length > 1 ? `<div class="grid2" style="margin-top:8px">
+      <button class="btn sm ghost" style="width:100%" ${i === 0 ? "disabled" : ""} onclick="viewJobPhoto(${i - 1})">‹ ${T("Previous", "Претходна")}</button>
+      <button class="btn sm ghost" style="width:100%" ${i === jobPhotos.length - 1 ? "disabled" : ""} onclick="viewJobPhoto(${i + 1})">${T("Next", "Следна")} ›</button>
+    </div>` : ""}
+    ${back ? `<button class="btn ghost" onclick="openJobSheet('${back}')">${T("Back to the job", "Назад кон работата")}</button>` : ""}`);
+}
+
+async function saveJob(id, forceStatus) {
+  const row = {
+    title: $("jb-title").value.trim(),
+    client_id: $("jb-client").value || null,
+    site_id: $("jb-site").value || null,
+    address: $("jb-addr").value.trim() || null,
+    scheduled_on: $("jb-date").value || null,
+    scheduled_time: $("jb-time").value || null,
+    assigned_to: $("jb-who") ? $("jb-who").value : state.uid,
+    note: $("jb-note").value.trim() || null,
+  };
+  if (!row.title) return toast(T("What is the work?", "Што е работата?"));
+  const stateEl = $("jb-state") && $("jb-state").querySelector(".chip.on");
+  const status = forceStatus || (stateEl ? stateEl.dataset.s : "scheduled");
+  row.status = status;
+  if (status === "done") row.done_at = new Date().toISOString();
+  if (status === "started" && !row.started_at) row.started_at = new Date().toISOString();
+
+  let saved;
+  try {
+    saved = await dbq(id ? db.from("jobs").update(row).eq("id", id).select().single()
+                        : db.from("jobs").insert(row).select().single(), T("Not saved", "Не е зачувано"));
+    if (jobRemoved.length) await db.from("job_photos").delete().in("id", jobRemoved);
+    const fresh = jobPhotos.filter((p) => p.isNew && p.full);
+    if (fresh.length) {
+      await dbq(db.from("job_photos").insert(fresh.map((p) => ({
+        job_id: saved.id, data: p.full, thumb: p.thumb, sort: jobPhotos.indexOf(p),
+      }))), T("A photo was not saved", "Слика не е зачувана"));
+    }
+  } catch { return; }
+  closeSheet(); await refreshAll(["jobs"]); render(); toast(T("Saved", "Зачувано"));
+  if (!id) setTimeout(() => openJobSheet(saved.id), 240);
+}
+
+async function finishJob(id) {
+  await saveJob(id, "done");
+  toast(T("Finished — time to invoice", "Завршена — време за фактура"));
+}
+
+async function delJob(id) {
+  const j = state.jobs.find((x) => x.id === id);
+  if (!await ask(T("Remove this job?", "Отстрани ја работата?"))) return;
+  await deleteUndoable("jobs", j, T("Job removed", "Работата е отстранета"), ["jobs"]);
+}
 
 /* ---------- what is installed at a site, and how to get into it ---------- */
 const HDD_LIFE_YEARS = 3;      // recorders usually fail at the drive
