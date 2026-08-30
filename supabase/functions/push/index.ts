@@ -362,6 +362,26 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error("policy reminders", e); }
 
+  // ---- 9. somebody has put a task on your list ----
+  // Announced once: the row remembers who it was last announced to, so an
+  // assignment that has not changed is never repeated.
+  try {
+    const { data: fresh } = await db.from("tasks")
+      .select("id, title, context, due_date, due_time, assigned_to, assigned_notified_to, created_by")
+      .not("assigned_to", "is", null).eq("done", false);
+    for (const t of fresh ?? []) {
+      if (t.assigned_to === t.assigned_notified_to) continue;
+      if (t.assigned_to !== t.created_by) {          // no need to tell yourself
+        const when = t.due_date
+          ? (t.due_date === today ? "денес" : t.due_date) + (t.due_time ? " " + String(t.due_time).slice(0, 5) : "")
+          : "без датум";
+        await sendToAll("Нова задача за тебе", `${t.title} · ${when}`,
+          `assign-${t.id}`, (r: any) => r.user_id === t.assigned_to, t.id);
+      }
+      await db.from("tasks").update({ assigned_notified_to: t.assigned_to }).eq("id", t.id);
+    }
+  } catch (e) { console.error("assignment notices", e); }
+
   return new Response("ok");
 });
 
