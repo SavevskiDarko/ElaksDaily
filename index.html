@@ -568,7 +568,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
-  accounts: [], policies: [], polPays: [], statements: [], docs: [], stayPays: [],
+  accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], stayPays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null };
@@ -666,6 +666,7 @@ const LOADERS = {
   payments:   { need: () => state.perm.elaks,   q: () => db.from("offer_payments").select("*").order("paid_on", { ascending: false }).limit(400) },
   purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
+  sites:      { need: () => state.perm.elaks,   q: () => db.from("sites").select("*").eq("active", true).order("name") },
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
   docs:       { need: () => state.perm.elaks,   q: () => db.from("documents").select("*").order("doc_date", { ascending: false }).limit(400) },
   policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
@@ -739,7 +740,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260828-221742";
+const BUILD = "20260830-060401";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1488,6 +1489,8 @@ function renderInv() {
       <span class="muted">Order list${lowN ? ` (${lowN})` : ""}</span><b>›</b></div>
     ${warrN ? `<div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openWarranties()">
       <span class="muted">Warranties ending</span><b style="color:var(--amber)">${warrN} ›</b></div>` : ""}
+    <div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openSerialSearch()">
+      <span class="muted">${T("Find by serial", "Најди по сериски")}</span><b>›</b></div>
     ${dupN ? `<div class="row" style="justify-content:space-between;margin-top:4px" role="button" tabindex="0" onclick="openDuplicates()">
       <span class="muted">Possible duplicates</span><b class="hflag">${dupN} ›</b></div>` : ""}
   </div>`;
@@ -4395,6 +4398,7 @@ function openClientSheet(id) {
     ${id && c.active === false
       ? `<button class="btn ghost" onclick="unhideClient('${id}')">${T("Bring back into the list", "Врати во листата")}</button>`
       : id ? `<button class="btn danger" onclick="delClient('${id}')">${T("Remove client", "Отстрани клиент")}</button>` : ""}
+    ${id ? sitesBlock(id) : ""}
     ${id ? installsBlock(id) : ""}
     ${id ? docsBlock(id) : ""}
     ${id ? relatedTasks("client_id", id) : ""}
@@ -6918,6 +6922,164 @@ const expiringSoon = () => state.installs.filter((i) => {
   return d !== null && d >= 0 && d <= 90;
 });
 
+/* ---------- what is installed at a site, and how to get into it ---------- */
+const HDD_LIFE_YEARS = 3;      // recorders usually fail at the drive
+function hddAge(s) {
+  if (!s.hdd_installed_on) return null;
+  return Math.round(((Date.parse(todayStr()) - Date.parse(s.hdd_installed_on)) / 31557600000) * 10) / 10;
+}
+
+function sitesBlock(clientId) {
+  const list = state.sites.filter((s) => s.client_id === clientId);
+  return `<div class="sec">${T("Sites", "Локации")}</div>
+    ${list.map((s) => {
+      const age = hddAge(s);
+      return `<div class="card row tapp" role="button" tabindex="0" onclick="openSiteSheet('${s.id}')">
+        <div style="flex:1;min-width:0"><b>${esc(s.name)}</b>
+          <div class="muted">${[s.recorder, s.channels ? s.channels + "ch" : "",
+            s.camera_count ? s.camera_count + " " + T("cameras", "камери") : ""].filter(Boolean).map(esc).join(" · ")}</div>
+          ${age !== null ? `<div style="font-size:12.5px;color:${age >= HDD_LIFE_YEARS ? "var(--danger)" : age >= HDD_LIFE_YEARS - 1 ? "var(--amber)" : "var(--muted)"}">
+            ${T("Drive", "Диск")} ${s.hdd_tb ? s.hdd_tb + "TB · " : ""}${age} ${T("years old", "години")}${
+              age >= HDD_LIFE_YEARS ? " · " + T("worth replacing", "вреди да се замени") : ""}</div>` : ""}
+        </div><span class="muted">›</span></div>`;
+    }).join("") || `<p class="muted">${T("No site recorded yet.", "Сè уште нема локација.")}</p>`}
+    <button class="btn sm ghost" onclick="openSiteSheet(null, '${clientId}')">+ ${T("Add a site", "Додај локација")}</button>`;
+}
+
+function openSiteSheet(id, clientId) {
+  const s = id ? state.sites.find((x) => x.id === id) : { client_id: clientId };
+  if (id && !s) return;
+  const cid = s.client_id || clientId || "";
+  const age = id ? hddAge(s) : null;
+  const copyRow = (label, val) => val
+    ? `<div class="mov tapp" role="button" tabindex="0" onclick="copyText('${String(val).replace(/'/g, "\\'")}')">
+         <span class="muted">${label}</span>
+         <span><b class="mono">${esc(val)}</b> <span class="muted">${T("copy", "копирај")}</span></span></div>`
+    : "";
+  const anyAccess = s.access_user || s.access_pass || s.remote_app || s.remote_id || s.network_note;
+
+  openSheet(`
+    <h2>${id ? esc(s.name) : T("New site", "Нова локација")}</h2>
+    ${id && anyAccess ? `<div class="sec">${T("Getting in", "Пристап")}</div>
+      <div class="card">
+        ${copyRow(T("User", "Корисник"), s.access_user)}
+        ${copyRow(T("Password", "Лозинка"), s.access_pass)}
+        ${copyRow(T("App", "Апликација"), s.remote_app)}
+        ${copyRow(T("Device / account", "Уред / сметка"), s.remote_id)}
+      </div>
+      ${s.network_note ? `<p class="muted" style="font-size:12.5px">${esc(s.network_note)}</p>` : ""}` : ""}
+
+    <label>${T("Site name", "Име на локација")}</label>
+    <input id="st-name" value="${esc(s.name || "")}" placeholder="${T("e.g. shop, house, warehouse", "на пр. продавница, куќа, магацин")}">
+    <label>${T("Address", "Адреса")}</label><input id="st-addr" value="${esc(s.address || "")}">
+    <label>${T("Client", "Клиент")}</label>
+    <select id="st-client"><option value="">${T("No client", "Без клиент")}</option>
+      ${state.clients.filter((c) => c.active !== false || cid === c.id)
+        .map((c) => `<option value="${c.id}" ${cid === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+    </select>
+
+    <div class="sec">${T("The system", "Системот")}</div>
+    <label>${T("Recorder (DVR / NVR)", "Рекордер (DVR / NVR)")}</label>
+    <input id="st-rec" value="${esc(s.recorder || "")}" placeholder="Hikvision DS-7208HQHI">
+    <div class="grid2">
+      <div><label>${T("Channels", "Канали")}</label>
+        <input id="st-ch" type="number" inputmode="numeric" value="${s.channels ?? ""}"></div>
+      <div><label>${T("Cameras", "Камери")}</label>
+        <input id="st-cam" type="number" inputmode="numeric" value="${s.camera_count ?? ""}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>${T("Drive (TB)", "Диск (TB)")}</label>
+        <input id="st-hdd" type="number" inputmode="decimal" step="any" value="${s.hdd_tb ?? ""}"></div>
+      <div><label>${T("Drive fitted on", "Диск ставен на")}</label>
+        <input id="st-hddate" type="date" value="${s.hdd_installed_on || ""}"></div>
+    </div>
+    ${age !== null ? `<p class="muted" style="font-size:12.5px">${T("The drive is", "Дискот е")} ${age} ${T("years old", "години стар")}${
+      age >= HDD_LIFE_YEARS ? " — " + T("drives usually fail around three, so this is worth offering to replace.",
+        "дисковите обично откажуваат околу три, па вреди да се понуди замена.") : "."}</p>` : ""}
+
+    <div class="sec">${T("Getting in", "Пристап")}</div>
+    <div class="grid2">
+      <div><label>${T("User", "Корисник")}</label><input id="st-user" value="${esc(s.access_user || "")}"></div>
+      <div><label>${T("Password", "Лозинка")}</label><input id="st-pass" value="${esc(s.access_pass || "")}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>${T("App", "Апликација")}</label>
+        <input id="st-app" value="${esc(s.remote_app || "")}" placeholder="Hik-Connect"></div>
+      <div><label>${T("Device / account", "Уред / сметка")}</label>
+        <input id="st-rid" value="${esc(s.remote_id || "")}"></div>
+    </div>
+    <label>${T("Network note (router, SIM, ports)", "Мрежа (рутер, SIM, портови)")}</label>
+    <input id="st-net" value="${esc(s.network_note || "")}">
+    <label>${T("Note", "Белешка")}</label><input id="st-note" value="${esc(s.note || "")}">
+
+    <button class="btn" onclick="saveSite('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? `<div class="sec">${T("Equipment here", "Опрема тука")}</div>
+      ${state.installs.filter((i) => i.site_id === id).map((i) => `<div class="mov tapp" role="button" tabindex="0" onclick="openInstallSheet('${i.id}')">
+        <span>${esc(i.name)}${i.serial ? " · SN " + esc(i.serial) : ""}</span><span class="muted">›</span></div>`).join("")
+        || `<p class="muted">${T("Nothing filed here yet.", "Сè уште ништо тука.")}</p>`}
+      <button class="btn danger" onclick="delSite('${id}')">${T("Remove site", "Отстрани локација")}</button>` : ""}
+  `);
+}
+
+async function saveSite(id) {
+  const row = {
+    name: $("st-name").value.trim(), address: $("st-addr").value.trim() || null,
+    client_id: $("st-client").value || null,
+    recorder: $("st-rec").value.trim() || null,
+    channels: parseInt($("st-ch").value) || null,
+    camera_count: parseInt($("st-cam").value) || null,
+    hdd_tb: parseFloat($("st-hdd").value) || null,
+    hdd_installed_on: $("st-hddate").value || null,
+    access_user: $("st-user").value.trim() || null,
+    access_pass: $("st-pass").value.trim() || null,
+    remote_app: $("st-app").value.trim() || null,
+    remote_id: $("st-rid").value.trim() || null,
+    network_note: $("st-net").value.trim() || null,
+    note: $("st-note").value.trim() || null,
+  };
+  if (!row.name) return toast(T("Give the site a name", "Дај име на локацијата"));
+  try {
+    await dbq(id ? db.from("sites").update(row).eq("id", id)
+                 : db.from("sites").insert(row), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["sites"]); render(); toast(T("Saved", "Зачувано"));
+  if (row.client_id) setTimeout(() => openClientSheet(row.client_id), 240);
+}
+
+async function delSite(id) {
+  const s = state.sites.find((x) => x.id === id);
+  if (!await ask(T("Remove this site? The equipment filed here stays.", "Отстрани ја локацијата? Опремата останува."))) return;
+  await deleteUndoable("sites", s, T("Site removed", "Локацијата е отстранета"), ["sites", "installs"]);
+}
+
+// A faulty camera in your hand: type the serial and find out whose it is.
+function openSerialSearch() {
+  openSheet(`<h2>${T("Find by serial", "Најди по сериски")}</h2>
+    <input class="search" id="sn-q" placeholder="${T("Serial number or name…", "Сериски број или име…")}"
+      oninput="renderSerialSearch()" autocomplete="off">
+    <div id="sn-list"></div>`);
+  setTimeout(() => { const el = $("sn-q"); if (el) el.focus(); }, 80);
+  renderSerialSearch();
+}
+function renderSerialSearch() {
+  const q = (($("sn-q") || {}).value || "").trim().toLowerCase();
+  const el = $("sn-list");
+  if (!el) return;
+  if (!q) return (el.innerHTML = `<p class="muted">${T("Type a serial number to find where it is installed.",
+    "Внеси сериски број за да видиш каде е вградено.")}</p>`);
+  const hits = state.installs.filter((i) =>
+    [i.serial, i.name, i.location].some((v) => String(v || "").toLowerCase().includes(q))).slice(0, 30);
+  const clientName = (id) => (state.clients.find((c) => c.id === id) || {}).name || T("no client", "без клиент");
+  const siteName = (id) => (state.sites.find((s) => s.id === id) || {}).name || "";
+  el.innerHTML = hits.length ? hits.map((i) => `<div class="card row tapp" role="button" tabindex="0" onclick="openInstallSheet('${i.id}')">
+    <div style="flex:1;min-width:0"><b>${esc(i.name)}</b>
+      <div class="muted">${i.serial ? "SN " + esc(i.serial) + " · " : ""}${esc(clientName(i.client_id))}${
+        i.site_id ? " · " + esc(siteName(i.site_id)) : ""}${i.location ? " · " + esc(i.location) : ""}</div>
+      <div style="font-size:12.5px">${warrantyLabel(i)}</div></div>
+    <span class="muted">›</span></div>`).join("")
+    : `<p class="muted">${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”</p>`;
+}
+
 function installsBlock(clientId) {
   const list = state.installs.filter((i) => i.client_id === clientId);
   return `<div class="sec">Installed equipment</div>
@@ -6928,6 +7090,17 @@ function installsBlock(clientId) {
       <span class="muted">›</span></div>`).join("")
       || '<p class="muted">Nothing recorded yet.</p>'}
     <button class="btn sm ghost" onclick="openInstallSheet(null, '${clientId}')">+ Add installed equipment</button>`;
+}
+
+// only the chosen client's sites, refreshed when the client changes
+function inSiteOptions(selected) {
+  const sel = $("in-site");
+  if (!sel) return;
+  const cid = $("in-client").value;
+  const want = selected !== undefined ? selected : sel.value;
+  const list = state.sites.filter((s) => s.client_id === cid);
+  sel.innerHTML = `<option value="">${T("No site", "Без локација")}</option>`
+    + list.map((s) => `<option value="${s.id}" ${want === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("");
 }
 
 function openInstallSheet(id, clientId) {
@@ -6948,13 +7121,16 @@ function openInstallSheet(id, clientId) {
     </div>
     ${id && i.warranty_until ? `<p class="muted" style="font-size:12.5px">${warrantyLabel(i)}</p>` : ""}
     <label>Client</label>
-    <select id="in-client"><option value="">No client</option>
+    <select id="in-client" onchange="inSiteOptions('')"><option value="">No client</option>
       ${state.clients.map((c) => `<option value="${c.id}" ${cid === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
     </select>
+    <label>${T("Site", "Локација")}</label>
+    <select id="in-site"></select>
     <label>Note</label><input id="in-note" value="${esc(i.notes || "")}">
     <button class="btn" onclick="saveInstall('${id || ""}')">Save</button>
     ${id ? `<button class="btn danger" onclick="delInstall('${id}')">Remove</button>` : ""}
   `);
+  inSiteOptions(i.site_id || "");
 }
 async function saveInstall(id) {
   const row = {
@@ -6964,6 +7140,7 @@ async function saveInstall(id) {
     installed_on: $("in-date").value || todayStr(),
     warranty_months: parseInt($("in-warr").value) || 0,
     client_id: $("in-client").value || null,
+    site_id: $("in-site").value || null,
     notes: $("in-note").value.trim() || null,
   };
   if (!row.name) return toast("What is it?");
