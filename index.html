@@ -415,6 +415,10 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="pur-summary"></div>
       <div id="pur-list"></div>
     </div>
+    <div id="el-body-work" style="display:none">
+      <div class="chips" id="work-filter" style="margin-bottom:10px"></div>
+      <div id="work-list"></div>
+    </div>
     <div id="el-body-job" style="display:none">
       <div class="chips" id="job-filter" style="margin-bottom:10px"></div>
       <div id="job-list"></div>
@@ -574,7 +578,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true },
-  elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
+  elaksView: "work", workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), skipSet: new Set(), templates: [], settings: [], installs: [],
@@ -758,7 +762,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-191400";
+const BUILD = "20260830-233409";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2218,13 +2222,14 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["job", T("Jobs", "Работи")], ["inv2", T("Invoices", "Фактури")], ["pur", "Purchases"],
+  $("elaks-tabs").innerHTML = [["work", T("Work", "Работа")], ["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"],
     ["doc", T("Documents", "Документи")], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
   $("el-body-off").style.display = state.elaksView === "off" ? "" : "none";
   $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
   $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
+  const wkEl = $("el-body-work"); if (wkEl) wkEl.style.display = state.elaksView === "work" ? "" : "none";
   const jobEl = $("el-body-job"); if (jobEl) jobEl.style.display = state.elaksView === "job" ? "" : "none";
   const invEl = $("el-body-inv2"); if (invEl) invEl.style.display = state.elaksView === "inv2" ? "" : "none";
   const docEl = $("el-body-doc"); if (docEl) docEl.style.display = state.elaksView === "doc" ? "" : "none";
@@ -2232,6 +2237,7 @@ function renderElaks() {
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
   else if (state.elaksView === "pur") renderPurchases();
+  else if (state.elaksView === "work") renderWork();
   else if (state.elaksView === "job") renderJobs();
   else if (state.elaksView === "inv2") renderInvoices();
   else if (state.elaksView === "doc") renderDocs();
@@ -7244,6 +7250,145 @@ const expiringSoon = () => state.installs.filter((i) => {
   const d = warrantyDaysLeft(i);
   return d !== null && d >= 0 && d <= 90;
 });
+
+/* ---------- the work, from asking a price to being paid ----------
+   Nothing new is stored here. A piece of work is an offer, whatever job was
+   scheduled for it and whatever invoice came out of it — this reads those
+   three and works out the one thing that has to happen next. */
+
+const WORK_STAGES = {
+  quote:    { en: "quote out",    mk: "понуда",        colour: "var(--muted)" },
+  schedule: { en: "to schedule",  mk: "за закажување", colour: "var(--amber)" },
+  booked:   { en: "scheduled",    mk: "закажана",      colour: "var(--work)" },
+  invoice:  { en: "to invoice",   mk: "за фактура",    colour: "var(--amber)" },
+  unpaid:   { en: "not paid",     mk: "неплатена",     colour: "var(--danger)" },
+  paid:     { en: "paid",         mk: "платена",       colour: "var(--personal)" },
+};
+
+function workItem(o) {
+  const job = state.jobs.find((j) => j.offer_id === o.id && j.status !== "cancelled");
+  const inv = state.invoices.find((i) => i.offer_id === o.id && !i.cancelled);
+  let stage = "quote";
+  if (inv && inv.paid_on) stage = "paid";
+  else if (inv) stage = "unpaid";
+  else if (o.status === "accepted" && job && job.status === "done") stage = "invoice";
+  else if (o.status === "accepted" && job) stage = "booked";
+  else if (o.status === "accepted") stage = "schedule";
+  return { o, job, inv, stage };
+}
+
+function renderWork() {
+  const items = state.offers
+    .filter((o) => o.status !== "rejected")
+    .map(workItem)
+    .filter((w) => w.stage !== "quote" || w.o.status === "sent" || w.o.status === "draft");
+
+  const counts = {
+    schedule: items.filter((w) => w.stage === "schedule").length,
+    booked: items.filter((w) => w.stage === "booked").length,
+    invoice: items.filter((w) => w.stage === "invoice").length,
+    unpaid: items.filter((w) => w.stage === "unpaid").length,
+  };
+  const active = (w) => w.stage !== "paid";
+  $("work-filter").innerHTML = [
+    ["active", T("In progress", "Во тек")],
+    ["schedule", T("To schedule", "За закажување")],
+    ["booked", T("Scheduled", "Закажани")],
+    ["invoice", T("To invoice", "За фактура")],
+    ["unpaid", T("Not paid", "Неплатени")],
+    ["all", T("All", "Сите")],
+  ].map(([v, l]) => `<button class="chip ${state.workFilter === v ? "on" : ""}"
+    onclick="state.workFilter='${v}';renderWork()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
+
+  let list = items;
+  if (state.workFilter === "active") list = items.filter(active);
+  else if (state.workFilter !== "all") list = items.filter((w) => w.stage === state.workFilter);
+
+  // the things waiting on you first, then by when they are booked
+  const order = { invoice: 0, unpaid: 1, schedule: 2, booked: 3, quote: 4, paid: 5 };
+  list = list.slice().sort((a, b) => order[a.stage] - order[b.stage]
+    || String(a.job && a.job.scheduled_on || "9999").localeCompare(String(b.job && b.job.scheduled_on || "9999")));
+
+  $("work-list").innerHTML = list.length ? list.map((w) => {
+    const st = WORK_STAGES[w.stage];
+    const sub = [invClient(w.o), w.job && w.job.scheduled_on ? dmy(w.job.scheduled_on) : "",
+      w.inv ? T("Фактура", "Фактура") + " " + w.inv.number : ""].filter(Boolean);
+    return `<div class="card offer row" role="button" tabindex="0" onclick="openWorkSheet('${w.o.id}')">
+      <span class="led" style="background:${st.colour}"></span>
+      <div style="flex:1;min-width:0"><b>${esc(w.o.title || w.o.number)}</b>
+        <div class="o-num">${esc(w.o.number)}${sub.length ? " · " + sub.map(esc).join(" · ") : ""}</div></div>
+      <div style="text-align:right;flex:none">
+        <div class="mono">${fmt(w.o.grand_total)}</div>
+        <div style="font-size:11.5px;color:${st.colour}">${T(st.en, st.mk)}</div></div>
+    </div>`;
+  }).join("") : (state.loading ? SKEL(3)
+    : `<div class="empty">${T("Nothing here.<br>Start with an offer.", "Ништо тука.<br>Почни со понуда.")}</div>`);
+}
+
+// One screen for one piece of work: the three steps, where it has got to,
+// and the single button that moves it on.
+function openWorkSheet(offerId) {
+  const o = state.offers.find((x) => x.id === offerId);
+  if (!o) return;
+  const w = workItem(o);
+  const c = state.clients.find((x) => x.id === o.client_id);
+
+  const step = (n, title, state_, body, action) => `
+    <div class="card" style="border-left:3px solid ${state_ === "done" ? "var(--personal)" : state_ === "now" ? "var(--amber)" : "var(--line)"}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <b>${n}. ${title}</b>
+          <div class="muted" style="font-size:12.5px">${body}</div>
+        </div>
+        ${state_ === "done" ? '<span style="color:var(--personal);font-size:16px">✓</span>' : ""}
+      </div>
+      ${action || ""}
+    </div>`;
+
+  openSheet(`
+    <h2>${esc(o.title || o.number)}</h2>
+    <p class="muted">${esc(o.number)}${c ? " · " + esc(c.name) : ""} · ${fmt(o.grand_total)} ден.</p>
+
+    ${step(1, T("The offer", "Понудата"),
+      o.status === "accepted" ? "done" : "now",
+      o.status === "accepted" ? T("Accepted", "Прифатена") : T(STATUS[o.status] || o.status, STATUS[o.status] || o.status),
+      `<button class="btn sm ghost" style="margin-top:8px" onclick="closeSheet();setTimeout(()=>openOfferSheet('${o.id}'),240)">
+         ${T("Open the offer", "Отвори ја понудата")}</button>`)}
+
+    ${step(2, T("The work", "Работата"),
+      w.job && w.job.status === "done" ? "done" : w.job ? "now" : (o.status === "accepted" ? "now" : "wait"),
+      w.job
+        ? `${jobLabel(w.job.status)}${w.job.scheduled_on ? " · " + dmy(w.job.scheduled_on) : " · " + T("no date", "без датум")}${
+            w.job.assigned_to && w.job.assigned_to !== state.uid ? " · " + esc(personName(w.job.assigned_to)) : ""}`
+        : o.status === "accepted" ? T("Not scheduled yet", "Сè уште не е закажана") : T("Waiting for the offer to be accepted", "Се чека прифаќање"),
+      w.job
+        ? `<div class="grid2" style="margin-top:8px">
+             <button class="btn sm ghost" style="width:100%" onclick="closeSheet();setTimeout(()=>openJobSheet('${w.job.id}'),240)">${T("Open", "Отвори")}</button>
+             ${w.job.status !== "done" ? `<button class="btn sm amber" style="width:100%" onclick="closeSheet();finishJob('${w.job.id}')">${T("Finished", "Завршена")}</button>` : ""}
+           </div>`
+        : o.status === "accepted"
+          ? `<button class="btn sm amber" style="margin-top:8px" onclick="closeSheet();setTimeout(()=>openJobSheet(null,'${o.id}'),240)">${T("Schedule it", "Закажи ја")}</button>`
+          : "")}
+
+    ${step(3, T("The invoice", "Фактурата"),
+      w.inv && w.inv.paid_on ? "done" : w.inv ? "now" : (o.status === "accepted" ? "now" : "wait"),
+      w.inv
+        ? `${T("Фактура", "Фактура")} ${esc(w.inv.number)} · ${w.inv.paid_on
+            ? T("paid", "платена") + " " + dmy(w.inv.paid_on)
+            : (w.inv.due_date ? T("due", "рок") + " " + dmy(w.inv.due_date) : T("not paid", "неплатена"))}`
+        : o.status === "accepted" ? T("Not issued yet", "Сè уште не е издадена") : T("After the offer is accepted", "По прифаќање на понудата"),
+      w.inv
+        ? `<div class="grid2" style="margin-top:8px">
+             <button class="btn sm ghost" style="width:100%" onclick="closeSheet();setTimeout(()=>openInvoiceSheet('${w.inv.id}'),240)">${T("Open", "Отвори")}</button>
+             <button class="btn sm ghost" style="width:100%" onclick="printInvoice('${w.inv.id}')">PDF</button>
+           </div>`
+        : o.status === "accepted"
+          ? `<button class="btn sm amber" style="margin-top:8px" onclick="closeSheet();setTimeout(()=>newInvoiceFromOffer('${o.id}'),240)">${T("Make the invoice", "Направи фактура")}</button>`
+          : "")}
+
+    ${w.stage === "paid" ? `<p class="muted" style="text-align:center;margin-top:12px">${T("Finished and paid.", "Завршено и платено.")}</p>` : ""}
+  `);
+}
 
 /* ---------- фактури ---------- */
 async function printInvoice(id) {
