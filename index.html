@@ -227,6 +227,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hnote.warn{color:var(--danger)}
 .htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
+.xtag{background:var(--line);color:var(--muted);border-radius:5px;padding:1px 6px;
+  font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
 .bank-big{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.05;letter-spacing:-.01em}
 .bank-lbl{font-size:12.5px;color:var(--muted);margin-top:2px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
@@ -747,7 +749,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-103346";
+const BUILD = "20260830-184510";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1066,6 +1068,58 @@ const searchRow = (today) => (t) => {
     <span class="t-time">${when}</span>
   </div>`;
 };
+// The day is not only tasks: there is work booked at a client's site and
+// guests coming and going. Those live in other tabs, which meant no single
+// screen showed the day. They appear here as entries you can open, not tick.
+function dayExtras(today) {
+  const rows = [];
+  const ctxOk = (c) => state.ctxFilter === "all" || state.ctxFilter === c;
+
+  if (state.perm.elaks && ctxOk("elaks")) {
+    for (const j of state.jobs) {
+      if (j.status === "done" || j.status === "cancelled") continue;
+      if (!j.scheduled_on || j.scheduled_on > today) continue;
+      if (state.mineOnly && j.assigned_to && j.assigned_to !== state.uid) continue;
+      rows.push({
+        ctx: "elaks", time: j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : "",
+        late: j.scheduled_on < today,
+        tag: T("job", "работа"), title: j.title,
+        sub: [jobClient(j), jobSite(j), j.address].filter(Boolean).join(" · "),
+        open: `openJobSheet('${j.id}')`,
+      });
+    }
+  }
+
+  if (state.perm.apts && ctxOk("apts")) {
+    for (const s of state.stays) {
+      const apt = (s.apartments && s.apartments.name) || "";
+      if (dOnly(s.check_in) === today && !s.arrived_at) {
+        rows.push({ ctx: "apts", time: "", tag: T("arriving", "пристига"),
+          title: s.guest_name, sub: [apt, s.source].filter(Boolean).join(" · "),
+          open: `openStaySheet('${s.id}')` });
+      }
+      if (dOnly(s.check_out) === today && !stayEnded(s)) {
+        rows.push({ ctx: "apts", time: checkoutTimeFor(s.apartment_id),
+          tag: T("leaving", "заминува"),
+          title: s.guest_name, sub: apt, open: `openStaySheet('${s.id}')` });
+      }
+    }
+  }
+
+  return rows.sort((a, b) => (b.late ? 1 : 0) - (a.late ? 1 : 0)
+    || (a.time || "99:99").localeCompare(b.time || "99:99"));
+}
+
+function extraRow(r) {
+  return `<div class="card row tapp" role="button" tabindex="0" onclick="${r.open}">
+    <span class="led ${r.ctx}"></span>
+    <div style="flex:1;min-width:0"><b>${esc(r.title || "")}</b>
+      <div class="o-num"><span class="xtag">${r.tag}</span>${r.sub ? " " + esc(r.sub) : ""}${
+        r.late ? ` · <span style="color:var(--danger)">${T("overdue", "задоцнето")}</span>` : ""}</div></div>
+    ${r.time ? `<span class="t-time">${r.time}</span>` : ""}
+  </div>`;
+}
+
 function renderToday() {
   const today = todayStr();
   const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
@@ -1105,11 +1159,15 @@ function renderToday() {
     </div>`).join("");
   }
   if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
+  const extras = dayExtras(today);
   if (todays.length) {
     html += (overdue.length || missed.length || inbox.length) ? '<div class="sec">Today</div>' : "";
     html += todays.map(taskRow(today)).join("");
-  } else if (!overdue.length && !missed.length && !inbox.length) {
+  } else if (!overdue.length && !missed.length && !inbox.length && !extras.length) {
     html += state.loading ? SKEL() : emptyToday();
+  }
+  if (extras.length) {
+    html += `<div class="sec">${T("Also today", "Исто денес")}</div>` + extras.map(extraRow).join("");
   }
   if (B.doneToday.length) {
     html += `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
