@@ -747,7 +747,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-061020";
+const BUILD = "20260830-103346";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2699,12 +2699,82 @@ const needsDeduct = (o) => !o.stock_deducted && deductLines(o).length > 0
   && (o.status === "accepted" || offerPaid(o) > 0);
 
 // Offered right after accepting or taking payment, so stock never quietly stays on the shelf.
+// Accepting an offer means two things happen: the kit leaves the shelf and
+// somebody has to go and fit it. Asking about them separately meant two
+// dialogs and a job you had to remember to create, so they are one step.
 async function promptDeduct(id) {
   const o = state.offers.find((x) => x.id === id);
-  if (!o || !needsDeduct(o)) return;
-  const list = deductLines(o).map((it) => `· ${it.name} × ${fmt(it.qty)}`).join("\n");
-  if (!await ask(`Take these off the shelf now?\n\n${list}`)) return;
-  await deductStock(id, true);
+  if (!o) return;
+  const lines = needsDeduct(o) ? deductLines(o) : [];
+  const accepted = o.status === "accepted";
+  const hasJob = state.jobs.some((j) => j.offer_id === id);
+  if (!lines.length && (!accepted || hasJob)) return;
+
+  const cname = (state.clients.find((c) => c.id === o.client_id) || {}).name || "";
+  openSheet(`
+    <h2>${accepted ? T("Offer accepted", "Понудата е прифатена") : T("Payment received", "Примено плаќање")}</h2>
+    <p class="muted">${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}${cname ? " · " + esc(cname) : ""}</p>
+
+    ${lines.length ? `<div class="sec">${T("Off the shelf", "Од магацин")}</div>
+      <div class="card">
+        ${lines.map((it) => `<div class="mov"><span>${esc(it.name)}</span>
+          <span class="mono">× ${fmt(it.qty)}</span></div>`).join("")}
+        <div class="row" style="margin-top:10px">
+          <button class="clbox on" id="ac-deduct"
+            onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">✓</button>
+          <span>${T("Take these out of stock now", "Разниже ги сега")}</span>
+        </div>
+      </div>` : ""}
+
+    ${accepted && !hasJob ? `<div class="sec">${T("The work", "Работата")}</div>
+      <div class="grid2">
+        <div><label>${T("Date", "Датум")}</label><input id="ac-date" type="date" value=""></div>
+        <div><label>${T("Time", "Време")}</label><input id="ac-time" type="time" value=""></div>
+      </div>
+      <label>${T("Who is going", "Кој оди")}</label>
+      <select id="ac-who">
+        ${(state.people || []).map((p) => `<option value="${p.user_id}" ${p.user_id === state.uid ? "selected" : ""}>${esc(p.display_name || "—")}</option>`).join("")
+          || `<option value="${state.uid}">${T("Me", "Јас")}</option>`}
+      </select>
+      <p class="muted" style="font-size:12.5px">${T(
+        "The job is created either way — leave the date empty if it is not agreed yet and it will wait under To do.",
+        "Работата се создава во секој случај — остави го датумот празен ако не е договорен и ќе чека под За работа.")}</p>` : ""}
+
+    <button class="btn" onclick="finishAccept('${id}')">${T("Done", "Готово")}</button>
+    <button class="btn ghost" onclick="closeSheet()">${T("Not now", "Не сега")}</button>
+  `);
+}
+
+async function finishAccept(id) {
+  const o = state.offers.find((x) => x.id === id);
+  if (!o) return closeSheet();
+  const deduct = $("ac-deduct") && $("ac-deduct").classList.contains("on");
+  const wantJob = !!$("ac-who");
+  const date = ($("ac-date") || {}).value || null;
+  const time = ($("ac-time") || {}).value || null;
+  const who = ($("ac-who") || {}).value || state.uid;
+  closeSheet();
+
+  let jobMade = false;
+  if (deduct) await deductStock(id, true);
+  if (wantJob) {
+    // if the client has exactly one site, it is the obvious place
+    const sites = state.sites.filter((s) => s.client_id === o.client_id);
+    try {
+      await dbq(db.from("jobs").insert({
+        title: o.title || o.number, offer_id: id, client_id: o.client_id || null,
+        site_id: sites.length === 1 ? sites[0].id : null,
+        scheduled_on: date, scheduled_time: time, assigned_to: who, status: "scheduled",
+      }), T("The job was not created", "Работата не е создадена"));
+      jobMade = true;
+    } catch { /* the message is already shown */ }
+    await refreshAll(["jobs"]); render();
+  }
+  // one message covering both, since deducting shows its own on the way past
+  const bits = [];
+  if (deduct) bits.push(T("stock taken out", "разнижено"));
+  if (jobMade) bits.push(date ? T("job on ", "работа на ") + dmy(date) : T("job added, no date yet", "работа додадена, без датум"));
+  if (bits.length) toast(bits.join(" · "));
 }
 async function deductStock(id, silent) {
   const o = state.offers.find((x) => x.id === id);
