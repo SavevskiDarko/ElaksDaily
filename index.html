@@ -573,7 +573,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   elaksView: "inv", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
-  tasks: [], completions: [], doneSet: new Set(), templates: [], settings: [], installs: [],
+  tasks: [], completions: [], doneSet: new Set(), skipSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
   accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], jobs: [],
   jobFilter: "upcoming", stayPays: [],
@@ -664,7 +664,7 @@ const backMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n, 1
 const LOADERS = {
   people:     { need: () => true,               q: () => db.from("team_members").select("*") },
   settings:   { need: () => true,               q: () => db.from("app_settings").select("key, value") },
-  completions:{ need: () => true,               q: () => db.from("task_completions").select("task_id, done_on").gte("done_on", backDays(180)) },
+  completions:{ need: () => true,               q: () => db.from("task_completions").select("task_id, done_on, skipped").gte("done_on", backDays(180)) },
   templates:  { need: () => true,               q: () => db.from("task_templates").select("*").order("name") },
   tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
   stock:      { need: () => state.perm.elaks,   q: () => db.from("article_stock").select("*").eq("active", true).order("name") },
@@ -700,7 +700,10 @@ async function refreshAll(only) {
     if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
     if (LOADERS[k].scalar) state[k] = (r.data && r.data.balance != null) ? parseFloat(r.data.balance) : 0;
     else state[k] = r.data ?? [];
-    if (k === "completions") state.doneSet = new Set((r.data ?? []).map((c) => c.task_id + ":" + c.done_on));
+    if (k === "completions") {
+      state.doneSet = new Set((r.data ?? []).filter((c) => !c.skipped).map((c) => c.task_id + ":" + c.done_on));
+      state.skipSet = new Set((r.data ?? []).filter((c) => c.skipped).map((c) => c.task_id + ":" + c.done_on));
+    }
   });
   if (failed.length) {
     $("loadmsg").textContent = "Could not load: " + failed.join(", ") + ". Data shown may be incomplete.";
@@ -749,7 +752,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-184510";
+const BUILD = "20260830-184953";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1030,7 +1033,8 @@ function missedDates(t, today, lookback = 30) {
   for (let i = 1; i <= lookback; i++) {
     d.setDate(d.getDate() - 1);
     const ds = d.toLocaleDateString("sv-SE");
-    if (occursOn(t, ds) && !isDoneOn(t, ds)) out.push(ds);
+    // done or deliberately skipped — either way it is settled
+    if (occursOn(t, ds) && !isDoneOn(t, ds) && !state.skipSet.has(t.id + ":" + ds)) out.push(ds);
     if (out.length >= 5) break;
   }
   return out;
@@ -1150,12 +1154,17 @@ function renderToday() {
   const inbox = B.undated;
   let html = "";
   if (overdue.length || missed.length) {
-    html += '<div class="sec" style="color:var(--danger)">Overdue</div>' + overdue.map(taskRow(today)).join("");
+    html += `<div class="sec" style="color:var(--danger);display:flex;justify-content:space-between;align-items:center">
+      <span>${T("Overdue", "Задоцнети")}</span>
+      ${overdue.length ? `<button class="chip" onclick="moveAllOverdue()">${T("Move all to today", "Помести ги на денес")}</button>` : ""}
+    </div>` + overdue.map(taskRow(today)).join("");
     html += missed.map(({ t, dates }) => `<div class="card task">
       <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}')" aria-label="done"></button>
       <span class="led ${t.context}"></span>
       <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
         <span class="rec"> missed ${dmy(dates[0])}${dates.length > 1 ? ` +${dates.length - 1}` : ""}</span></span>
+      <span class="t-time tapp" role="button" tabindex="0" title="${T("Did not happen", "Не се случи")}"
+        onclick="event.stopPropagation();skipOccurrence('${t.id}','${dates[0]}')">✕</span>
     </div>`).join("");
   }
   if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
@@ -1210,6 +1219,59 @@ function renderToday() {
   if (!week.includes("class=\"sec\"")) week += '<div class="empty">Nothing scheduled.</div>';
   $("week-list").innerHTML = week;
 }
+// Things slip. Recording that should cost one tap, or the overdue list stops
+// being read at all.
+function moveTaskSheet(id) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const d = (n) => { const x = new Date(todayStr() + "T12:00"); x.setDate(x.getDate() + n); return x.toLocaleDateString("sv-SE"); };
+  const opt = (label, date) => `<button class="btn sm ghost" style="width:100%"
+    onclick="moveTask('${id}','${date}')">${label}</button>`;
+  openSheet(`
+    <h2>${esc(t.title)}</h2>
+    <p class="muted">${t.due_date ? T("Due", "Рок") + " " + dmy(t.due_date) : T("No date", "Без датум")}</p>
+    <div class="grid2">
+      ${opt(T("Today", "Денес"), todayStr())}
+      ${opt(T("Tomorrow", "Утре"), d(1))}
+      ${opt(T("In 2 days", "За 2 дена"), d(2))}
+      ${opt(T("Next week", "Следна недела"), d(7))}
+    </div>
+    <label>${T("Or pick a date", "Или избери датум")}</label>
+    <input id="mv-date" type="date" value="${t.due_date || todayStr()}">
+    <button class="btn" onclick="moveTask('${id}', $('mv-date').value)">${T("Move", "Помести")}</button>
+    <button class="btn ghost" onclick="moveTask('${id}','')">${T("Take the date off", "Тргни го датумот")}</button>
+  `);
+}
+async function moveTask(id, date) {
+  try { await dbq(db.from("tasks").update({ due_date: date || null }).eq("id", id), T("Not moved", "Не е поместено")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["tasks"]); render();
+  toast(date ? T("Moved to ", "Поместено на ") + dmy(date) : T("Date removed", "Датумот е тргнат"));
+}
+
+// the morning triage: everything that slipped, brought forward at once
+async function moveAllOverdue() {
+  const B = taskBuckets(todayStr(), state.ctxFilter);
+  const ids = B.overdue.map((t) => t.id);
+  if (!ids.length) return;
+  if (!await ask(T(`Move ${ids.length} overdue task(s) to today?`, `Помести ${ids.length} задоцнети задачи на денес?`))) return;
+  try { await dbq(db.from("tasks").update({ due_date: todayStr() }).in("id", ids), T("Not moved", "Не е поместено")); }
+  catch { return; }
+  await refreshAll(["tasks"]); render();
+  toast(T(`${ids.length} moved to today`, `${ids.length} поместени на денес`));
+}
+
+// a recurring day that simply did not happen — settled, but not done
+async function skipOccurrence(id, day) {
+  try {
+    await dbq(db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid, skipped: true },
+      { onConflict: "task_id,done_on" }), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  state.skipSet.add(id + ":" + day);
+  await refreshAll(["completions"]); render();
+  toast(T("Marked as missed", "Означено како пропуштено"));
+}
+
 const taskRow = (today) => (t) => {
   const done = isDoneOn(t, today);
   return `<div class="card task ${done ? "done" : ""}">
@@ -1220,7 +1282,14 @@ const taskRow = (today) => (t) => {
         ? " " + recurDays(t).map((i) => ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][i]).join("") : ""}</span>` : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
     ${t.photo_thumb ? `<img class="thumb" style="width:30px;height:30px" src="${t.photo_thumb}" alt="">` : ""}
     ${t.assigned_to ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
-    ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}
+    ${(() => {
+      const late = !t.recurrence && !t.done && t.due_date && t.due_date < today;
+      const label = late ? dm(t.due_date) : (t.due_time ? t.due_time.slice(0, 5) : "");
+      if (!label && t.recurrence) return "";
+      return `<span class="t-time tapp" role="button" tabindex="0" title="${T("Move", "Помести")}"
+        style="${late ? "color:var(--danger)" : ""}"
+        onclick="event.stopPropagation();moveTaskSheet('${t.id}')">${label || "⋯"}</span>`;
+    })()}
   </div>`;
 };
 async function toggleTask(id, onDate) {
