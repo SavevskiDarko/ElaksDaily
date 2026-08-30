@@ -752,7 +752,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-184953";
+const BUILD = "20260830-185401";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1054,10 +1054,61 @@ function emptyToday() {
     <button class="btn sm ghost" style="margin-top:10px;display:inline-flex;width:auto"
       onclick="state.ctxFilter='all';state.mineOnly=false;renderToday()">Show everything</button></div>`;
 }
+// Assigning work is only half of delegating — you also have to be able to see
+// what each person is holding. Personal tasks never appear here: the database
+// hides other people's, so they are not in this list to begin with.
+function personWork(uid) {
+  const t = todayStr();
+  const mine = state.tasks.filter((x) => x.assigned_to === uid && !x.done);
+  return {
+    all: mine,
+    overdue: mine.filter((x) => !x.recurrence && x.due_date && x.due_date < t),
+    today: mine.filter((x) => occursOn(x, t) && !isDoneOn(x, t)),
+  };
+}
+
+function openTeamWork() {
+  const people = (state.people || []).filter((p) => p.user_id);
+  const unassigned = state.tasks.filter((x) => !x.assigned_to && !x.done && x.context !== "personal");
+  openSheet(`<h2>${T("Who has what", "Кој што има")}</h2>
+    ${people.map((p) => {
+      const w = personWork(p.user_id);
+      if (!w.all.length && p.user_id !== state.uid) return "";
+      return `<div class="card row tapp" role="button" tabindex="0" onclick="openPersonWork('${p.user_id}')">
+        <span class="who">${initials(p.display_name)}</span>
+        <div style="flex:1;min-width:0"><b>${esc(p.display_name || "—")}</b>
+          <div class="muted">${w.all.length} ${T("open", "отворени")}${
+            w.today.length ? ` · ${w.today.length} ${T("today", "денес")}` : ""}</div></div>
+        ${w.overdue.length ? `<span class="hflag">${w.overdue.length} ${T("late", "задоцнети")}</span>` : ""}
+      </div>`;
+    }).join("")}
+    ${unassigned.length ? `<div class="sec">${T("Nobody has these", "Никој не ги презел")}</div>
+      ${unassigned.slice(0, 12).map(taskRow(todayStr())).join("")}` : ""}`);
+}
+
+function openPersonWork(uid) {
+  const w = personWork(uid);
+  const t = todayStr();
+  const later = w.all.filter((x) => !w.overdue.includes(x) && !w.today.includes(x));
+  openSheet(`<h2>${esc(personName(uid) || T("Team member", "Член на тимот"))}</h2>
+    <div class="acct-grid" style="margin-top:4px">
+      <div class="acct" style="cursor:default"><span>${T("Open", "Отворени")}</span><b>${w.all.length}</b></div>
+      <div class="acct" style="cursor:default"><span>${T("Today", "Денес")}</span><b>${w.today.length}</b></div>
+      <div class="acct" style="cursor:default"><span>${T("Late", "Задоцнети")}</span>
+        <b style="${w.overdue.length ? "color:var(--danger)" : ""}">${w.overdue.length}</b></div>
+    </div>
+    ${w.overdue.length ? `<div class="sec" style="color:var(--danger)">${T("Overdue", "Задоцнети")}</div>` + w.overdue.map(taskRow(t)).join("") : ""}
+    ${w.today.length ? `<div class="sec">${T("Today", "Денес")}</div>` + w.today.map(taskRow(t)).join("") : ""}
+    ${later.length ? `<div class="sec">${T("Later", "Подоцна")}</div>` + later.map(taskRow(t)).join("") : ""}
+    ${!w.all.length ? `<p class="muted">${T("Nothing on their list.", "Ништо на нивната листа.")}</p>` : ""}`);
+}
+
 function renderCtxChips() {
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
     `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("")
-    + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`;
+    + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`
+    + ((state.perm.owner && (state.people || []).length > 1)
+        ? `<button class="chip" onclick="openTeamWork()">${T("Team", "Тим")} ›</button>` : "");
 }
 // A search result needs its date and, if finished, when — the plain row shows neither.
 const searchRow = (today) => (t) => {
