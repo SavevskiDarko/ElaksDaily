@@ -420,6 +420,10 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="job-list"></div>
       <button class="btn ghost" onclick="openJobSheet()">+ New job</button>
     </div>
+    <div id="el-body-inv2" style="display:none">
+      <div class="chips" id="inv-filter" style="margin-bottom:10px"></div>
+      <div id="inv-list"></div>
+    </div>
     <div id="el-body-doc" style="display:none">
       <input class="search" id="doc-search" placeholder="Search number, client or note…" oninput="renderDocs()">
       <div class="chips" id="doc-kind" style="margin-bottom:6px"></div>
@@ -575,7 +579,8 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), skipSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
-  accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], jobs: [],
+  accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], jobs: [], invoices: [],
+  invFilter: "todo",
   jobFilter: "upcoming", stayPays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
@@ -676,6 +681,7 @@ const LOADERS = {
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   sites:      { need: () => state.perm.elaks,   q: () => db.from("sites").select("*").eq("active", true).order("name") },
   jobs:       { need: () => state.perm.elaks,   q: () => db.from("jobs").select("*").gte("scheduled_on", backDays(180)).order("scheduled_on") },
+  invoices:   { need: () => state.perm.elaks,   q: () => db.from("invoices").select("*").order("invoice_date", { ascending: false }).limit(300) },
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
   docs:       { need: () => state.perm.elaks,   q: () => db.from("documents").select("*").order("doc_date", { ascending: false }).limit(400) },
   policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
@@ -752,7 +758,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-185401";
+const BUILD = "20260830-191400";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2212,7 +2218,7 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["job", T("Jobs", "Работи")], ["pur", "Purchases"],
+  $("elaks-tabs").innerHTML = [["inv", "Stock"], ["off", "Offers"], ["job", T("Jobs", "Работи")], ["inv2", T("Invoices", "Фактури")], ["pur", "Purchases"],
     ["doc", T("Documents", "Документи")], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
@@ -2220,12 +2226,14 @@ function renderElaks() {
   $("el-body-cli").style.display = state.elaksView === "cli" ? "" : "none";
   $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
   const jobEl = $("el-body-job"); if (jobEl) jobEl.style.display = state.elaksView === "job" ? "" : "none";
+  const invEl = $("el-body-inv2"); if (invEl) invEl.style.display = state.elaksView === "inv2" ? "" : "none";
   const docEl = $("el-body-doc"); if (docEl) docEl.style.display = state.elaksView === "doc" ? "" : "none";
   const supEl = $("el-body-sup"); if (supEl) supEl.style.display = state.elaksView === "sup" ? "" : "none";
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
   else if (state.elaksView === "pur") renderPurchases();
   else if (state.elaksView === "job") renderJobs();
+  else if (state.elaksView === "inv2") renderInvoices();
   else if (state.elaksView === "doc") renderDocs();
   else if (state.elaksView === "sup") renderSuppliers();
   else renderClients();
@@ -2309,6 +2317,14 @@ async function openOfferSheet(id) {
              <span class="muted">›</span></div>`
         : `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openJobSheet(null,'${id}'),240)">
              ${T("Schedule the work", "Закажи ја работата")}</button>`;
+    })() : ""}
+    ${id && o.status === "accepted" ? (() => {
+      const inv = state.invoices.find((x) => x.offer_id === id && !x.cancelled);
+      return inv
+        ? `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openInvoiceSheet('${inv.id}'),240)">
+             <span>${T("Фактура", "Фактура")} ${esc(inv.number)}${inv.paid_on ? " · " + T("paid", "платена") : ""}</span>
+             <span class="muted">›</span></div>`
+        : `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>newInvoiceFromOffer('${id}'),240)">${T("Make the invoice", "Направи фактура")}</button>`;
     })() : ""}
     ${id ? paymentsBlock(o) : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
@@ -4955,8 +4971,32 @@ function openSetSheet(kind) {
     openSheet(`<h2>Checklist templates</h2><div id="tpl-list"></div>
       <p class="muted" style="font-size:12.5px">Build a checklist on any task, then use "Save this checklist as a template" to reuse it.</p>`);
     renderTemplates();
+  } else if (kind === "company") {
+    openSheet(`<h2>${T("Company details", "Податоци за фирма")}</h2>
+      <p class="muted" style="font-size:12.5px">${T("These appear on every invoice you issue.", "Ова се појавува на секоја фактура.")}</p>
+      <label>${T("Name", "Име")}</label><input id="co-name" value="${esc(setting("co_name", ""))}">
+      <label>${T("Address", "Адреса")}</label><input id="co-address" value="${esc(setting("co_address", ""))}">
+      <div class="grid2">
+        <div><label>ЕДБ</label><input id="co-edb" value="${esc(setting("co_edb", ""))}"></div>
+        <div><label>ЕМБС</label><input id="co-embs" value="${esc(setting("co_embs", ""))}"></div>
+      </div>
+      <div class="grid2">
+        <div><label>${T("Phone", "Телефон")}</label><input id="co-phone" value="${esc(setting("co_phone", ""))}"></div>
+        <div><label>${T("E-mail", "Е-пошта")}</label><input id="co-email" value="${esc(setting("co_email", ""))}"></div>
+      </div>
+      <label>${T("Bank", "Банка")}</label><input id="co-bank" value="${esc(setting("co_bank", ""))}">
+      <label>${T("Account number", "Сметка")}</label><input id="co-account" value="${esc(setting("co_account", ""))}">
+      <label>${T("Payment terms (days)", "Рок на плаќање (дена)")}</label>
+      <input id="co-due" type="number" min="0" max="120" value="${esc(setting("invoice_due_days", "15"))}">
+      <button class="btn" onclick="saveCompany()">${T("Save", "Зачувај")}</button>`);
   } else if (kind === "elaks") {
-    openSheet(`<h2>Elaks</h2><div class="sec">Export as CSV</div>
+    openSheet(`<h2>Elaks</h2>
+      <div class="setrow" role="button" tabindex="0" onclick="openSetSheet('company')">
+        <span class="ico">&#127970;</span>
+        <span class="txt"><b>${T("Company details", "Податоци за фирма")}</b>
+          <span>${setting("co_name", "") ? esc(setting("co_name", "")) : T("Needed before you can invoice", "Потребни се за фактурирање")}</span></span>
+        <span class="chev">›</span></div>
+      <div class="sec">Export as CSV</div>
       <button class="btn ghost" onclick="exportCsv('articles')">Articles and stock</button>
       <button class="btn ghost" onclick="exportCsv('movements')">Stock movements</button>
       <button class="btn ghost" onclick="exportCsv('offers')">Offers</button>
@@ -5135,6 +5175,15 @@ async function removeAiKey() {
   try { await dbq(db.rpc("clear_secret", { p_name: "anthropic_api_key" }), "Not removed"); }
   catch { return; }
   closeSheet(); await refreshAll(["settings"]); render(); toast("Key removed");
+}
+
+async function saveCompany() {
+  const rows = [["co_name", "co-name"], ["co_address", "co-address"], ["co_edb", "co-edb"],
+    ["co_embs", "co-embs"], ["co_phone", "co-phone"], ["co_email", "co-email"],
+    ["co_bank", "co-bank"], ["co_account", "co-account"], ["invoice_due_days", "co-due"]]
+    .map(([key, el]) => ({ key, value: ($(el).value || "").trim() }));
+  try { await dbq(db.from("app_settings").upsert(rows, { onConflict: "key" }), T("Not saved", "Не е зачувано")); } catch { return; }
+  closeSheet(); await refreshAll(["settings"]); render(); toast(T("Saved", "Зачувано"));
 }
 
 async function saveAptSettings() {
@@ -7196,6 +7245,204 @@ const expiringSoon = () => state.installs.filter((i) => {
   return d !== null && d >= 0 && d <= 90;
 });
 
+/* ---------- фактури ---------- */
+async function printInvoice(id) {
+  const i = state.invoices.find((x) => x.id === id);
+  if (!i) return;
+  const c = state.clients.find((x) => x.id === i.client_id) || {};
+  const co = (k) => esc(setting(k, ""));
+  const rows = (i.items || []).map((it, n) => {
+    const gross = (it.qty || 0) * (it.price || 0);
+    const rate = it.vat ?? it.vat_rate ?? 18;
+    const net = netOf(gross, rate);
+    return `<tr>
+      <td class="c">${n + 1}</td>
+      <td>${esc(it.name)}</td>
+      <td class="c">${it.qty ? fmt(it.qty) : ""}</td>
+      <td class="r">${fmt(netOf(it.price || 0, rate))}</td>
+      <td class="c">${rate}%</td>
+      <td class="r">${fmt(net)}</td>
+      <td class="r">${fmt(gross)}</td>
+    </tr>`;
+  }).join("");
+  const vb = vatBreakdown(i.items || []);
+
+  await printDoc(`
+    <div class="rp-h1">Фактура бр. ${esc(i.number)}</div>
+    <div class="rp-sub">Датум: ${dmy(i.invoice_date)}${i.due_date ? " · Рок на плаќање: " + dmy(i.due_date) : ""}${
+      i.cancelled ? " · СТОРНИРАНА" : ""}</div>
+
+    <table class="rp-tbl" style="margin-bottom:4mm">
+      <tr><th style="width:50%">Издавач</th><th>Купувач</th></tr>
+      <tr><td>
+        <b>${co("co_name")}</b><br>${co("co_address")}<br>
+        ${setting("co_edb", "") ? "ЕДБ: " + co("co_edb") + "<br>" : ""}
+        ${setting("co_embs", "") ? "ЕМБС: " + co("co_embs") + "<br>" : ""}
+        ${setting("co_phone", "") ? co("co_phone") : ""}
+      </td><td>
+        <b>${esc(c.name || "")}</b><br>${esc(c.address || "")}<br>
+        ${esc(c.contact || "")}${c.phone ? "<br>" + esc(c.phone) : ""}
+      </td></tr>
+    </table>
+
+    <table class="rp-tbl">
+      <thead><tr><th>#</th><th>Опис</th><th class="c">Кол.</th><th class="r">Цена без ДДВ</th>
+        <th class="c">ДДВ</th><th class="r">Основа</th><th class="r">Со ДДВ</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <table class="rp-tbl" style="margin-top:4mm">
+      <tr><th>Основа</th><td class="r">${fmt(vb.net)} ден.</td></tr>
+      ${VAT_RATES.filter((r) => vb.byRate[r]).map((r) => `<tr><th>ДДВ ${r}%</th><td class="r">${fmt(vb.byRate[r])} ден.</td></tr>`).join("")}
+      <tr><th>Вкупно за плаќање</th><td class="r"><b>${fmt(i.total)} ден.</b></td></tr>
+    </table>
+
+    ${setting("co_account", "") ? `<div class="rp-sub" style="margin-top:4mm">
+      Плаќање на сметка ${co("co_account")}${setting("co_bank", "") ? " · " + co("co_bank") : ""}<br>
+      Повикување на број: ${esc(i.number)}</div>` : ""}
+    ${i.note ? `<div class="rp-sub">${esc(i.note)}</div>` : ""}`);
+}
+
+const invPaid = (i) => !!i.paid_on;
+const invClient = (i) => (state.clients.find((c) => c.id === i.client_id) || {}).name || "";
+
+async function nextInvoiceNumber() {
+  const y = new Date().getFullYear();
+  try {
+    const { data } = await db.from("invoices").select("number").like("number", y + "-%")
+      .order("number", { ascending: false }).limit(1);
+    const last = (data && data[0]) ? (parseInt(String(data[0].number).split("-")[1]) || 0) : 0;
+    return `${y}-${String(last + 1).padStart(3, "0")}`;
+  } catch {
+    const nums = state.invoices.map((i) => i.number || "").filter((n) => n.startsWith(y + "-"))
+      .map((n) => parseInt(n.split("-")[1]) || 0);
+    return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
+  }
+}
+
+// work that has been delivered but never billed — the list that answers
+// "what am I owed but never asked for"
+function awaitingInvoice() {
+  const billed = new Set(state.invoices.filter((i) => !i.cancelled).map((i) => i.offer_id).filter(Boolean));
+  return state.offers.filter((o) => o.status === "accepted" && !billed.has(o.id));
+}
+
+function renderInvoices() {
+  const todo = awaitingInvoice();
+  const unpaid = state.invoices.filter((i) => !i.cancelled && !invPaid(i));
+  const counts = { todo: todo.length, unpaid: unpaid.length, all: state.invoices.length };
+  $("inv-filter").innerHTML = [["todo", T("To invoice", "За фактурирање")],
+    ["unpaid", T("Unpaid", "Неплатени")], ["all", T("All", "Сите")]]
+    .map(([v, l]) => `<button class="chip ${state.invFilter === v ? "on" : ""}"
+      onclick="state.invFilter='${v}';renderInvoices()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
+
+  if (state.invFilter === "todo") {
+    $("inv-list").innerHTML = `
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><span class="muted">${T("Delivered, not yet billed", "Испорачано, нефактурирано")}</span>
+          <b class="mono">${fmt(sumBy(todo, (o) => o.grand_total))} ден.</b></div>
+      </div>
+      ${todo.length ? todo.map((o) => {
+        const j = state.jobs.find((x) => x.offer_id === o.id);
+        return `<div class="card offer row" role="button" tabindex="0" onclick="newInvoiceFromOffer('${o.id}')">
+          <div style="flex:1;min-width:0"><b>${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}</b>
+            <div class="o-num">${[invClient(o), j ? (j.status === "done" ? T("work finished", "работата е завршена") : jobLabel(j.status)) : ""]
+              .filter(Boolean).map(esc).join(" · ")}</div></div>
+          <span class="o-total mono">${fmt(o.grand_total)}</span>
+        </div>`;
+      }).join("") : `<div class="empty">${T("Everything accepted has been invoiced.", "Сè прифатено е фактурирано.")}</div>`}`;
+    return;
+  }
+
+  const list = (state.invFilter === "unpaid" ? unpaid : state.invoices);
+  $("inv-list").innerHTML = list.length ? list.map((i) => {
+    const late = !invPaid(i) && i.due_date && i.due_date < todayStr();
+    return `<div class="card offer row ${i.cancelled ? "done" : ""}" role="button" tabindex="0" onclick="openInvoiceSheet('${i.id}')">
+      <div style="flex:1;min-width:0"><b>${T("Фактура", "Фактура")} ${esc(i.number)}</b>
+        <div class="o-num">${dmy(i.invoice_date)}${invClient(i) ? " · " + esc(invClient(i)) : ""}${
+          i.cancelled ? ` · <span class="muted">${T("cancelled", "сторнирана")}</span>`
+          : invPaid(i) ? ` · <span style="color:var(--personal)">${T("paid", "платена")} ${dmy(i.paid_on)}</span>`
+          : late ? ` · <span style="color:var(--danger)">${T("overdue", "задоцнета")} ${dmy(i.due_date)}</span>`
+          : i.due_date ? ` · ${T("due", "рок")} ${dmy(i.due_date)}` : ""}</div></div>
+      <span class="o-total mono">${fmt(i.total)}</span>
+    </div>`;
+  }).join("") : `<div class="empty">${T("No invoices yet.", "Нема фактури.")}</div>`;
+}
+
+async function newInvoiceFromOffer(offerId) {
+  const o = state.offers.find((x) => x.id === offerId);
+  if (!o) return;
+  if (!setting("co_name", "")) {
+    return say(T("Fill in your company details first — Settings → Elaks → Company details. They have to appear on the invoice.",
+      "Прво пополни ги податоците за фирмата — Поставки → Елакс → Податоци за фирма. Мора да се на фактурата."));
+  }
+  const days = parseInt(setting("invoice_due_days", "15")) || 15;
+  const due = new Date(todayStr() + "T12:00"); due.setDate(due.getDate() + days);
+  const vb = vatBreakdown(o.items || []);
+  const j = state.jobs.find((x) => x.offer_id === offerId);
+  let made;
+  try {
+    made = await dbq(db.from("invoices").insert({
+      number: await nextInvoiceNumber(), invoice_date: todayStr(),
+      due_date: due.toLocaleDateString("sv-SE"),
+      client_id: o.client_id || null, offer_id: o.id, job_id: j ? j.id : null,
+      items: o.items || [], total: o.grand_total || 0, net: vb.net, vat: (o.grand_total || 0) - vb.net,
+    }).select().single(), T("Not created", "Не е создадена"));
+  } catch { return; }
+  await refreshAll(["invoices"]); render();
+  setTimeout(() => openInvoiceSheet(made.id), 200);
+  toast(T("Invoice ", "Фактура ") + made.number);
+}
+
+function openInvoiceSheet(id) {
+  const i = state.invoices.find((x) => x.id === id);
+  if (!i) return;
+  const c = state.clients.find((x) => x.id === i.client_id);
+  openSheet(`
+    <h2>${T("Фактура", "Фактура")} ${esc(i.number)}</h2>
+    <p class="muted">${dmy(i.invoice_date)}${c ? " · " + esc(c.name) : ""}${i.cancelled ? " · " + T("cancelled", "сторнирана") : ""}</p>
+
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Net", "Основа")}</span>
+        <span class="mono">${fmt(i.net)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">ДДВ</span><span class="mono">${fmt(i.vat)} ден.</span></div>
+      <div class="row bankrow" style="border-top:1px solid var(--line);padding-top:8px">
+        <span class="muted nw">${T("Total", "Вкупно")}</span>
+        <span class="mono"><b>${fmt(i.total)}</b> ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Payment", "Плаќање")}</span>
+        <span class="mono" style="color:${invPaid(i) ? "var(--personal)" : "var(--amber)"}">${
+          invPaid(i) ? T("paid", "платена") + " " + dmy(i.paid_on) : (i.due_date ? T("due", "рок") + " " + dmy(i.due_date) : T("not paid", "неплатена"))}</span></div>
+    </div>
+
+    <div class="sec">${T("Lines", "Ставки")}</div>
+    ${(i.items || []).map((it, n) => `<div class="mov"><span>${n + 1}. ${esc(it.name)}${
+      it.qty ? ` × ${fmt(it.qty)}` : ""}</span><span class="mono">${fmt((it.qty || 0) * (it.price || 0))}</span></div>`).join("")}
+
+    <button class="btn" onclick="printInvoice('${i.id}')">${T("Print / Save as PDF", "Печати / Зачувај PDF")}</button>
+    ${!invPaid(i) && !i.cancelled ? `<label>${T("Paid on", "Платена на")}</label>
+      <input id="iv-paid" type="date" value="${todayStr()}">
+      <button class="btn amber" onclick="markInvoicePaid('${i.id}')">${T("Mark as paid", "Означи како платена")}</button>` : ""}
+    ${i.offer_id ? `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openOfferSheet('${i.offer_id}'),240)">${T("Open the offer", "Отвори ја понудата")}</button>` : ""}
+    ${!i.cancelled ? `<button class="btn danger" onclick="cancelInvoice('${i.id}')">${T("Cancel this invoice", "Сторнирај")}</button>` : ""}
+  `);
+}
+
+async function markInvoicePaid(id) {
+  try { await dbq(db.from("invoices").update({ paid_on: $("iv-paid").value || todayStr() }).eq("id", id), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["invoices"]); render(); toast(T("Marked as paid", "Означена како платена"));
+}
+
+// an issued invoice is never deleted — it is cancelled, so the numbering
+// stays continuous and the record of what was issued survives
+async function cancelInvoice(id) {
+  if (!await ask(T("Cancel this invoice? It stays on the list, marked as cancelled.",
+    "Сторнирај ја фактурата? Останува на листата, означена како сторнирана."))) return;
+  try { await dbq(db.from("invoices").update({ cancelled: true }).eq("id", id), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["invoices"]); render();
+}
+
 /* ---------- jobs: the visit between an accepted offer and the money ---------- */
 const JOB_STATES = { scheduled: ["scheduled", "закажана"], started: ["on site", "во тек"],
                      done: ["done", "завршена"], cancelled: ["cancelled", "откажана"] };
@@ -7304,6 +7551,14 @@ async function openJobSheet(id, fromOffer) {
 
     <button class="btn" onclick="saveJob('${id || ""}')">${T("Save", "Зачувај")}</button>
     ${id && j.status !== "done" ? `<button class="btn amber" onclick="finishJob('${id}')">${T("Mark as finished", "Означи како завршена")}</button>` : ""}
+    ${id && j.offer_id ? (() => {
+      const inv = state.invoices.find((x) => x.offer_id === j.offer_id && !x.cancelled);
+      return inv
+        ? `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openInvoiceSheet('${inv.id}'),240)">
+             ${T("Фактура", "Фактура")} ${esc(inv.number)} ›</button>`
+        : `<button class="btn amber" onclick="closeSheet();setTimeout(()=>newInvoiceFromOffer('${j.offer_id}'),240)">
+             ${T("Make the invoice", "Направи фактура")}</button>`;
+    })() : ""}
     ${id && j.offer_id ? `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openOfferSheet('${j.offer_id}'),240)">${T("Open the offer", "Отвори ја понудата")}</button>` : ""}
     ${id ? `<button class="btn danger" onclick="delJob('${id}')">${T("Remove", "Отстрани")}</button>` : ""}
   `);
