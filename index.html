@@ -762,7 +762,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260830-233409";
+const BUILD = "20260831-164710";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1821,6 +1821,17 @@ const cashBal = () => parseFloat(state.cashTotal) || 0;
 const stayStarted = (s) => !!s.check_in && s.check_in <= todayStr();
 // Guests pay at different moments — on arrival, part-way through, on the way
 // out — so the money counts when it is received, not when they turn up.
+// A booking is not worth its price: the platform keeps a share, and somebody
+// has to clean afterwards. This is what it actually leaves you.
+function commissionRates() {
+  const raw = setting("source_commission", "");
+  if (!raw) return {};
+  try { return typeof raw === "object" ? raw : JSON.parse(raw); } catch { return {}; }
+}
+const rateFor = (source) => parseFloat(commissionRates()[source || "Direct"]) || 0;
+const stayCost = (s) => (parseFloat(s.commission) || 0) + (parseFloat(s.cleaning_cost) || 0);
+const stayNet = (s) => (parseFloat(s.amount) || 0) - stayCost(s);
+
 const stayPaysOf = (s) => state.stayPays.filter((p) => p.stay_id === s.id);
 const stayPaid = (s) => sumBy(stayPaysOf(s), (p) => p.amount);
 const stayBalance = (s) => (parseFloat(s.amount) || 0) - stayPaid(s);
@@ -5009,6 +5020,16 @@ function openSetSheet(kind) {
       <p class="muted" style="font-size:12.5px">Opens in Excel — useful for your accountant, or for checking figures outside the app.</p>`);
   } else if (kind === "apts") {
     openSheet(`<h2>Apartments</h2>
+      <div class="sec" style="margin-top:0">${T("What the platforms keep", "Што задржуваат платформите")}</div>
+      <div class="grid2">
+        ${["Booking.com", "Airbnb", "Direct", "Other"].map((s) => `<div>
+          <label>${s} %</label>
+          <input id="cm-${s.replace(/[^a-z]/gi, "")}" type="number" inputmode="decimal" step="any"
+            value="${commissionRates()[s] ?? 0}"></div>`).join("")}
+      </div>
+      <p class="muted" style="font-size:12.5px">${T(
+        "If they take their cut before paying you, record the guest's full price and this shows your real net. If they invoice you separately, leave it at 0 and record that invoice as an expense instead.",
+        "Ако си го земаат делот пред да ти платат, внеси ја целата цена и ова го покажува вистинскиот нето. Ако ти фактурираат посебно, остави 0 и внеси ја фактурата како трошок.")}</p>
       <label>Guests leave by (check-out)</label>
       <input id="apt-checkout" type="time" value="${setting("checkout_time", "11:00")}">
       <p class="muted" style="font-size:12.5px">After this time a stay moves from "Currently staying" to "Past". A single apartment can override it.</p>
@@ -5193,7 +5214,12 @@ async function saveCompany() {
 }
 
 async function saveAptSettings() {
+  const rates = {};
+  for (const s of ["Booking.com", "Airbnb", "Direct", "Other"]) {
+    rates[s] = parseFloat($("cm-" + s.replace(/[^a-z]/gi, "")).value) || 0;
+  }
   const rows = [
+    { key: "source_commission", value: JSON.stringify(rates) },
     { key: "checkout_time", value: $("apt-checkout").value || "11:00" },
     { key: "stay_remind_time", value: $("stay-time").value || "09:00" },
     { key: "bills_day", value: String(parseInt($("bills-day").value) || 5) },
@@ -5370,8 +5396,13 @@ function renderApt() {
   const curM = new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0");
   const yr = String(new Date().getFullYear());
   const inM = (d, m) => (d || "").slice(0, 7) === m;
-  const incM = sumBy(state.stays.filter((s) => inM(s.check_in, curM)), (s) => s.amount);
-  const incY = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 4) === yr), (s) => s.amount);
+  // what the month earned after the platform and the cleaner, not before
+  const staysM = state.stays.filter((s) => inM(s.check_in, curM));
+  const staysY = state.stays.filter((s) => (s.check_in || "").slice(0, 4) === yr);
+  const incM = sumBy(staysM, stayNet);
+  const expM = sumBy(state.expenses.filter((e) => inM(e.spent_on, curM)), (e) => e.amount);
+  const expY = sumBy(state.expenses.filter((e) => (e.spent_on || "").slice(0, 4) === yr), (e) => e.amount);
+  const incY = sumBy(staysY, stayNet);
   const recAll = sumBy(state.stayPays, (p) => p.amount);
   const openAll = sumBy(state.apartments, (a) => a.opening_balance);
   const bilAll = sumBy(state.bills, (b) => b.amount);
@@ -5402,8 +5433,8 @@ function renderApt() {
 
     <div class="stat-row">
       <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='bills';renderApt()">
-        <span>${T("This month", "Овој месец")}</span><b>${fmt(incM - bilM)}</b></div>
-      <div class="stat"><span>${T("This year", "Оваа година")}</span><b>${fmt(incY - bilY)}</b></div>
+        <span>${T("This month", "Овој месец")}</span><b>${fmt(incM - bilM - expM)}</b></div>
+      <div class="stat"><span>${T("This year", "Оваа година")}</span><b>${fmt(incY - bilY - expY)}</b></div>
       <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();openUnpaidStays()">
         <span>${T("To collect", "За наплата")}</span>
         <b class="${soon ? "hflag" : "muted"}">${fmt(soon)}</b></div>
@@ -5708,6 +5739,15 @@ function openStaySheet(id, pre) {
       </select></div>
       <div><label>Amount paid (ден.)</label><input id="st-amt" type="number" inputmode="decimal" value="${s.amount ?? ""}" oninput="this.dataset.touched=1"></div>
     </div>
+    <div class="grid2">
+      <div><label>${T("The platform keeps", "Платформата задржува")}</label>
+        <input id="st-comm" type="number" inputmode="decimal" step="any" value="${s.commission ?? ""}"
+          ${s.commission ? 'data-touched="1"' : ""} oninput="this.dataset.touched='1';stayNetHint()"></div>
+      <div><label>${T("Cleaning", "Чистење")}</label>
+        <input id="st-clean" type="number" inputmode="decimal" step="any" value="${s.cleaning_cost ?? ""}"
+          ${s.cleaning_cost ? 'data-touched="1"' : ""} oninput="this.dataset.touched='1';stayNetHint()"></div>
+    </div>
+    <p class="muted" id="st-net-hint" style="font-size:12.5px"></p>
     <label>${T("Money went to", "Парите одат во")}</label>
     <select id="st-acct" onchange="this.dataset.touched=1">
       ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
@@ -5750,6 +5790,36 @@ function stayAcct() {
   const id = accountFor({ source: $("st-src").value });
   if (id) sel.value = id;
 }
+// the platform's share follows the source and the cleaning follows the flat,
+// until you type your own figure
+function stayCostDefaults() {
+  const comm = $("st-comm");
+  if (comm && !comm.dataset.touched) {
+    const pct = rateFor(($("st-src") || {}).value);
+    const amt = parseFloat(($("st-amt") || {}).value) || 0;
+    comm.value = pct && amt ? Math.round(amt * pct) / 100 : "";
+  }
+  const cl = $("st-clean");
+  if (cl && !cl.dataset.touched) {
+    const a = state.apartments.find((x) => x.id === ($("st-apt") || {}).value);
+    cl.value = a && a.cleaning_cost ? a.cleaning_cost : "";
+  }
+  stayNetHint();
+}
+function stayNetHint() {
+  const el = $("st-net-hint");
+  if (!el) return;
+  const amt = parseFloat(($("st-amt") || {}).value) || 0;
+  const comm = parseFloat(($("st-comm") || {}).value) || 0;
+  const clean = parseFloat(($("st-clean") || {}).value) || 0;
+  const pct = rateFor(($("st-src") || {}).value);
+  el.innerHTML = amt
+    ? `${T("You keep", "Ти остануваат")} <b>${fmt(amt - comm - clean)} ден.</b>`
+      + (comm ? ` · ${T("platform", "платформа")} ${fmt(comm)}${pct ? ` (${pct}%)` : ""}` : "")
+      + (clean ? ` · ${T("cleaning", "чистење")} ${fmt(clean)}` : "")
+    : "";
+}
+
 function stayCalc() {
   const n = nightsBetween($("st-in").value, $("st-out").value);
   const a = state.apartments.find((x) => x.id === $("st-apt").value);
@@ -5801,6 +5871,9 @@ async function saveStay(id) {
     apartment_id: $("st-apt").value, guest_name: $("st-guest").value.trim(),
     check_in: $("st-in").value, check_out: $("st-out").value,
     amount: parseFloat($("st-amt").value) || 0, source: $("st-src").value,
+    account_id: ($("st-acct") || {}).value || null,
+    commission: parseFloat(($("st-comm") || {}).value) || 0,
+    cleaning_cost: parseFloat(($("st-clean") || {}).value) || 0,
     notes: $("st-notes").value.trim() || null,
   };
   if (!row.apartment_id) return toast("Add an apartment first");
@@ -5841,6 +5914,80 @@ function shiftAptMonth(dir) {
 function billOf(aptId, type) {
   return state.bills.find((b) => b.apartment_id === aptId && (b.month || "").slice(0, 7) === state.aptMonth && b.type === type);
 }
+const EXP_CATS = [["repair", "поправка"], ["furniture", "опрема"], ["supplies", "потрошни"],
+                  ["cleaning", "чистење"], ["platform", "платформа"], ["other", "друго"]];
+const expLabel = (c) => { const f = EXP_CATS.find((x) => x[0] === c); return f ? T(f[0], f[1]) : c; };
+
+function expensesBlock(month) {
+  const list = state.expenses.filter((e) => (e.spent_on || "").slice(0, 7) === month && inAptFilter(e));
+  const apt = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+  return `<div class="sec" style="display:flex;justify-content:space-between;align-items:center">
+      <span>${T("One-off spending", "Еднократни трошоци")}</span>
+      <button class="chip" onclick="openExpenseSheet()">+ ${T("Add", "Додај")}</button></div>
+    ${list.length ? list.map((e) => `<div class="mov tapp" role="button" tabindex="0" onclick="openExpenseSheet('${e.id}')">
+      <span><b>${esc(e.description)}</b>
+        <div class="muted" style="font-size:12px">${expLabel(e.category)}${e.apartment_id ? " · " + esc(apt(e.apartment_id)) : ""} · ${dmy(e.spent_on)}</div></span>
+      <span class="mono">${fmt(e.amount)} ›</span></div>`).join("")
+      + `<div class="row bankrow"><span class="muted nw">${T("Total", "Вкупно")}</span>
+          <span class="mono"><b>${fmt(sumBy(list, (e) => e.amount))}</b> ден.</span></div>`
+      : `<p class="muted" style="font-size:12.5px">${T("Nothing this month — the plumber, a new mattress, restocking all belong here.",
+          "Ништо овој месец — водоводџија, нов душек, потрошни работи одат тука.")}</p>`}`;
+}
+
+function openExpenseSheet(id) {
+  const e = id ? state.expenses.find((x) => x.id === id) : { spent_on: todayStr(), category: "repair" };
+  if (id && !e) return;
+  openSheet(`
+    <h2>${id ? T("Expense", "Трошок") : T("New expense", "Нов трошок")}</h2>
+    <label>${T("What was it", "Што беше")}</label>
+    <input id="ex-desc" value="${esc(e.description || "")}" placeholder="${T("e.g. plumber, new mattress", "на пр. водоводџија, нов душек")}">
+    <label>${T("Kind", "Вид")}</label>
+    <div class="chips" id="ex-cat">
+      ${EXP_CATS.map(([k]) => `<button class="chip ${(e.category || "repair") === k ? "on" : ""}" data-k="${k}"
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${expLabel(k)}</button>`).join("")}
+    </div>
+    <div class="grid2">
+      <div><label>${T("Amount (ден.)", "Износ (ден.)")}</label>
+        <input id="ex-amt" type="number" inputmode="decimal" step="any" value="${e.amount ?? ""}"></div>
+      <div><label>${T("Date", "Датум")}</label><input id="ex-date" type="date" value="${e.spent_on || todayStr()}"></div>
+    </div>
+    <label>${T("Apartment", "Стан")}</label>
+    <select id="ex-apt"><option value="">${T("All / none", "Сите / ниту еден")}</option>
+      ${state.apartments.map((a) => `<option value="${a.id}" ${e.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+    </select>
+    <label>${T("Paid from", "Платено од")}</label>
+    <select id="ex-acct">
+      ${state.accounts.map((a) => `<option value="${a.id}" ${e.account_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+    </select>
+    <button class="btn" onclick="saveExpense('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? `<button class="btn danger" onclick="delExpense('${id}')">${T("Remove", "Отстрани")}</button>` : ""}
+  `);
+}
+
+async function saveExpense(id) {
+  const row = {
+    description: $("ex-desc").value.trim(),
+    category: ($("ex-cat").querySelector(".chip.on") || {}).dataset?.k || "other",
+    amount: parseFloat($("ex-amt").value) || 0,
+    spent_on: $("ex-date").value || todayStr(),
+    apartment_id: $("ex-apt").value || null,
+    account_id: $("ex-acct").value || null,
+  };
+  if (!row.description) return toast(T("What was it?", "Што беше?"));
+  if (!row.amount) return toast(T("Enter the amount", "Внеси износ"));
+  try {
+    await dbq(id ? db.from("apt_expenses").update(row).eq("id", id)
+                 : db.from("apt_expenses").insert(row), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["expenses", "aptCash"]); render(); toast(T("Saved", "Зачувано"));
+}
+
+async function delExpense(id) {
+  const e = state.expenses.find((x) => x.id === id);
+  if (!await ask(T("Remove this expense?", "Отстрани го трошокот?"))) return;
+  await deleteUndoable("apt_expenses", e, T("Expense removed", "Трошокот е отстранет"), ["expenses", "aptCash"]);
+}
+
 function renderBills() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
   const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -5875,6 +6022,7 @@ function renderBills() {
     </div>`;
   }
   html += `<div class="totalbar"><span>All bills · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
+  html += expensesBlock(state.aptMonth);
   $("apt-body").innerHTML = html;
 }
 function setBillAccount(id) { state.billAccount = id; renderApt(); }
@@ -5961,6 +6109,8 @@ function openAptSheet(id) {
     </div>
     <label>Anything else worth remembering</label>
     <input id="ap-access" value="${esc(a.access_note || "")}" placeholder="bins on Tuesday · parking spot 4">
+    <label>${T("Cleaning normally costs (ден.)", "Чистењето обично чини (ден.)")}</label>
+    <input id="ap-clean" type="number" inputmode="decimal" step="any" value="${a.cleaning_cost ?? 0}">
     <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
     <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
@@ -6040,6 +6190,7 @@ async function saveApt(id) {
     size_m2: parseFloat($("ap-size").value) || null, nightly_rate: parseFloat($("ap-rate").value) || null,
     opening_balance: parseFloat($("ap-open").value) || 0,
     checkout_time: $("ap-checkout").value || null,
+    cleaning_cost: parseFloat($("ap-clean").value) || 0,
     keybox_code: $("ap-keybox").value.trim() || null,
     alarm_code: $("ap-alarm").value.trim() || null,
     wifi_name: $("ap-wifiname").value.trim() || null,
