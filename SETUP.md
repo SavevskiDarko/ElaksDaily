@@ -8,14 +8,29 @@ sw.js                           service worker (offline + push)
 manifest.json                   PWA install config
 icon-192.png / icon-512.png     app icons
 Ponuda_TEMPLATE.docx            your tagged offer template  ← put it here
-schema.sql                      database
+supabase/migrations/            the database, as migration files
+supabase/EXPECTED.md            what the database must contain, generated from the code
 supabase/functions/push/index.ts   push notification sender
 ```
+
+> **Before a first install can work, the database has to be in this repository.**
+> Right now it is not — it lives only inside the Supabase project, and step 2
+> below cannot run without it. See `supabase/migrations/README.md`; it is one
+> command, and it is the single most important thing in this file.
 
 ## 1. Supabase project (free tier is enough)
 
 1. Go to https://supabase.com → New project. Pick a region close to Macedonia (eu-central).
-2. **SQL Editor** → paste the whole `schema.sql` → Run.
+2. Apply the schema. From the project folder, with the Supabase CLI installed:
+
+   ```bash
+   supabase link --project-ref <your-project-ref>
+   supabase db push
+   ```
+
+   This needs `supabase/migrations/` to contain the schema. If it is empty, stop
+   and read `supabase/migrations/README.md` — the schema has not been captured
+   from the live project yet, and there is nothing here to apply.
 3. **Authentication → Users → Add user** → your email + a strong password. This is your login.
 4. **Project Settings → API** → copy the **Project URL** and the **anon public key**.
 
@@ -48,10 +63,19 @@ Install the Supabase CLI (https://supabase.com/docs/guides/cli), then from the p
 supabase login
 supabase link --project-ref <your-project-ref>
 supabase secrets set VAPID_PUBLIC_KEY="<public key>" VAPID_PRIVATE_KEY="<private key>" VAPID_SUBJECT="mailto:you@example.com"
+supabase secrets set PUSH_SECRET="$(openssl rand -hex 32)"   # required — see below
 supabase functions deploy push --no-verify-jwt
 ```
 
-Then schedule it: Dashboard → **Edge Functions → push → Schedules** (or Database → Cron) → new schedule, expression `*/5 * * * *` (every 5 minutes). That one schedule powers task reminders, low-stock alerts, and the morning digest.
+`PUSH_SECRET` is not optional. The function is deployed with `--no-verify-jwt`,
+so that header is the only thing between the schedule and the open internet;
+without the secret set the function refuses to run and answers `503`.
+
+Then schedule it: Dashboard → **Edge Functions → push → Schedules** (or Database
+→ Cron) → new schedule, expression `*/5 * * * *` (every 5 minutes). **The
+schedule must send the header** `x-push-key: <the same value>` — a schedule
+without it gets `403` and no notification is ever sent. That one schedule powers
+task reminders, low-stock alerts, and the morning digest.
 
 ## 5. Host the app
 
@@ -69,9 +93,20 @@ Any static hosting works — the same server as the Elaks website, Netlify, Clou
 
 Morning: the digest push tells you how many tasks per context. **Денес** shows overdue + today; tap the square to complete; ↻ marks recurring tasks (standup, invoicing). **Лагер**: tap an article → + Прием / − Издавање; amber LED = below minimum (you'll also get a push), red = out of stock. **Понуди**: + creates an offer — search articles to add them (specs come along automatically), per-meter items show "???" and are excluded from the total with the footnote written for you, "Рачна ставка" is for montage/labor. "Зачувај + Генерирај .docx" downloads the finished Word offer. When a client accepts, set status to Прифатена and tap "Одземи од лагер" — the pieces leave inventory with the offer number as reference.
 
+## Before changing the app
+
+```bash
+npm install     # once
+npm run check   # duplicate ids, dead handlers, no-undef over the inline script
+```
+
+CI runs the same two checks on every push. They take a few seconds and catch the
+mistakes this shape of app makes silently — a renamed id that one caller missed,
+a button wired to a function that no longer exists.
+
 ## If something doesn't work
 
 - **Login fails** → check CONFIG values and that the user exists in Authentication.
 - **No push on iPhone** → the app must be installed to the home screen first, iOS 16.4+.
 - **Offer generation error** → Ponuda_TEMPLATE.docx must sit next to index.html on the server.
-- **No digest** → check the Edge Function schedule is active and secrets are set (`supabase secrets list`).
+- **No digest** → check the Edge Function schedule is active and secrets are set (`supabase secrets list`). Then check the function's logs: `503 not configured` means `PUSH_SECRET` is missing, `403 forbidden` means the schedule is not sending the `x-push-key` header.

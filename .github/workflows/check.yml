@@ -1,0 +1,35 @@
+name: Check
+
+on:
+  push:
+    paths: ["index.html", "sw.js", "manifest.json", "scripts/**", "eslint.config.mjs", "package*.json"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Duplicate ids, $("...") that names nothing, handlers with no function.
+      # These are the mistakes a single-file app makes silently.
+      - name: Structure
+        run: node scripts/check-html.mjs index.html
+
+      # no-undef and friends over the inline script. Warnings do not fail the
+      # build — they are the standing list of dead code.
+      - name: Lint
+        run: npm run lint
+
+      - name: Service worker parses
+        run: node --check sw.js
+
+      - name: Manifest is valid JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"

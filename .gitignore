@@ -1,2 +1,5 @@
 .DS_Store
 node_modules/
+
+# lint workspace — the app itself still ships as plain files
+build/

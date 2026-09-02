@@ -1,0 +1,13 @@
+{
+  "name": "centrala",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Centrala — tasks, stock, offers, jobs, insurance and apartments. One HTML file, no build step.",
+  "scripts": {
+    "check": "node scripts/check-html.mjs index.html && npm run lint",
+    "lint": "node scripts/extract-script.mjs index.html build/app.js && eslint build/app.js"
+  },
+  "devDependencies": {
+    "eslint": "^9.13.0"
+  }
+}
