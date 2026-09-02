@@ -50,7 +50,7 @@ from `supabase db pull`; see `supabase/migrations/README.md`.
 | `task_photos` | table | `index.html` | `task_id` |
 | `task_templates` | table | `index.html` | `id` `name` |
 | `tasks` | table | `index.html`, `push` | `assigned_notified_to` `assigned_to` `context` `created_by` `done` `due_date` `due_time` `id` `owner_uid` `recurrence` `remind` `title` |
-| `team_members` | table | `index.html` | _only `*`_ |
+| `team_members` | view | `index.html` | _only `*`_ |
 | `user_roles` | table | `index.html`, `push`, `read-doc` | `role` `see_elaks` `user_id` |
 
 ## Functions called with `rpc()` — 5
