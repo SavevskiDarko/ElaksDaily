@@ -2,6 +2,10 @@ name: Deploy edge functions
 
 on:
   push:
+    # Only main deploys. Without this a push to any branch went straight to the
+    # production project — which is how the push function went live, and the
+    # notifications went quiet, before the pull request had even been opened.
+    branches: [main]
     paths:
       - "supabase/functions/**"
   workflow_dispatch:
