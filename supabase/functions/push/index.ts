@@ -51,8 +51,17 @@ async function sendToAll(title: string, body: string, tag: string, allow: ((r: a
 }
 
 Deno.serve(async (req) => {
+  // The function is deployed with --no-verify-jwt, so this header is the only
+  // thing standing between the schedule and the open internet. Refuse when the
+  // secret is missing: without it anyone could fire notifications at every
+  // phone and burn the once-a-day markers (reminded_on, low_alerted_on,
+  // digest_sent_on, bills_sent_on) so the real reminders never arrive.
   const SECRET = Deno.env.get("PUSH_SECRET");
-  if (SECRET && req.headers.get("x-push-key") !== SECRET) {
+  if (!SECRET) {
+    console.error("PUSH_SECRET is not set — refusing to run. supabase secrets set PUSH_SECRET=...");
+    return new Response("not configured", { status: 503 });
+  }
+  if (req.headers.get("x-push-key") !== SECRET) {
     return new Response("forbidden", { status: 403 });
   }
   const now = nowLocal();

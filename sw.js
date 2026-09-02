@@ -1,4 +1,4 @@
-const CACHE = "centrala-v5";
+const CACHE = "centrala-v6";
 const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./brand-logo.png", "./brand-banner.png", "./brand-footer.png", "./icon-192.png?v=3", "./icon-512.png?v=3"];
 
 self.addEventListener("install", (e) => {

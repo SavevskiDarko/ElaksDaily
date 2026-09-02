@@ -424,9 +424,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
       <div id="job-list"></div>
       <button class="btn ghost" onclick="openJobSheet()">+ New job</button>
     </div>
-    <div id="el-body-inv2" style="display:none">
-      <div class="chips" id="inv-filter" style="margin-bottom:10px"></div>
-      <div id="inv-list"></div>
+    <div id="el-body-invoice" style="display:none">
+      <div class="chips" id="invoice-filter" style="margin-bottom:10px"></div>
+      <div id="invoice-list"></div>
     </div>
     <div id="el-body-doc" style="display:none">
       <input class="search" id="doc-search" placeholder="Search number, client or note…" oninput="renderDocs()">
@@ -636,8 +636,6 @@ async function startApp() {
     }
     applyTabVisibility();
     if (state.perm.owner) loadTeam();
-    if (state.perm.owner && $("apts-settings")) $("apts-settings").style.display = "";
-    if (state.perm.owner && $("data-settings")) $("data-settings").style.display = "";
   } catch (e) { console.warn("permission lookup", e); }
   tab("home");                    // paint skeletons before the data lands
   await refreshAll();
@@ -663,7 +661,7 @@ async function startApp() {
       if (!stored || stored.join(",") !== BILL_TYPES.join(","))
         await db.from("app_settings").upsert({ key: "bill_types", value: BILL_TYPES }, { onConflict: "key" });
     } catch (e) { console.warn("settings", e); }
-  } else if ($("digest-block")) $("digest-block").style.display = "none";
+  }
 }
 
 const backDays = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString("sv-SE"); };
@@ -763,7 +761,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260901-052238";
+const BUILD = "20260902-123030";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -849,20 +847,36 @@ function tab(name, fromBack) {
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("bar-title").textContent = { home: "Home", today: "Tasks", elaks: "Elaks", apt: "Apartments",
     ins: "Insurance", set: "Settings" }[name] || "Home";
-  const fabOn = ["today", "elaks", "apt", "ins"].includes(name);
-  const micOn = ["home", "today"].includes(name);
+  syncFab();
+  render();
+}
+// The + and the microphone, for wherever we now are. The chips inside Elaks
+// and Apartments switch view without going through tab(), so they call this
+// too — otherwise the + keeps offering whatever the previous screen made.
+function syncFab() {
+  const fabOn = ["today", "elaks", "apt", "ins"].includes(state.tab) && !!fabAction();
+  const micOn = ["home", "today"].includes(state.tab);
   $("fab").classList.toggle("on", fabOn);
   $("mic").classList.toggle("on", micOn);
   $("mic").classList.toggle("beside", micOn && fabOn);   // only step aside when the + is there
-  render();
+}
+// What the + makes, per screen. A view missing from here has nothing to
+// create by hand — an invoice comes from an offer, the Work list from both —
+// and on those the button is hidden rather than left to do something random.
+const ELAKS_NEW = {
+  off: openOfferSheet, pur: openPurchaseSheet, cli: openClientSheet,
+  sup: openSupplierSheet, job: openJobSheet, inv: openArticleSheet,
+};
+function fabAction() {
+  if (state.tab === "today") return openTaskSheet;
+  if (state.tab === "ins") return openPolicySheet;
+  if (state.tab === "elaks") return ELAKS_NEW[state.elaksView] || null;
+  if (state.tab === "apt") return state.aptView === "apartments" ? openAptSheet : openStaySheet;
+  return null;
 }
 function fabClick() {
-  if (state.tab === "today") openTaskSheet();
-  else if (state.tab === "ins") openPolicySheet();
-  else if (state.tab === "elaks") (state.elaksView === "off" ? openOfferSheet()
-    : state.elaksView === "pur" ? openPurchaseSheet()
-    : state.elaksView === "cli" ? openClientSheet() : openArticleSheet());
-  else if (state.tab === "apt") (state.aptView === "apartments" ? openAptSheet() : openStaySheet());
+  const fn = fabAction();
+  if (fn) fn();
 }
 function render() {
   updateBadges();
@@ -2234,7 +2248,8 @@ async function delArticle(id) {
 ============================================================ */
 let offerItems = [];
 function renderElaks() {
-  $("elaks-tabs").innerHTML = [["work", T("Work", "Работа")], ["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"],
+  $("elaks-tabs").innerHTML = [["work", T("Work", "Работа")], ["job", T("Jobs", "Работи")],
+    ["invoice", T("Invoices", "Фактури")], ["inv", "Stock"], ["off", "Offers"], ["pur", "Purchases"],
     ["doc", T("Documents", "Документи")], ["cli", "Clients"], ["sup", "Suppliers"]].map(([v, l]) =>
     `<button class="chip ${state.elaksView === v ? "on" : ""}" onclick="state.elaksView='${v}';renderElaks()">${l}</button>`).join("");
   $("el-body-inv").style.display = state.elaksView === "inv" ? "" : "none";
@@ -2243,15 +2258,16 @@ function renderElaks() {
   $("el-body-pur").style.display = state.elaksView === "pur" ? "" : "none";
   const wkEl = $("el-body-work"); if (wkEl) wkEl.style.display = state.elaksView === "work" ? "" : "none";
   const jobEl = $("el-body-job"); if (jobEl) jobEl.style.display = state.elaksView === "job" ? "" : "none";
-  const invEl = $("el-body-inv2"); if (invEl) invEl.style.display = state.elaksView === "inv2" ? "" : "none";
+  const invEl = $("el-body-invoice"); if (invEl) invEl.style.display = state.elaksView === "invoice" ? "" : "none";
   const docEl = $("el-body-doc"); if (docEl) docEl.style.display = state.elaksView === "doc" ? "" : "none";
   const supEl = $("el-body-sup"); if (supEl) supEl.style.display = state.elaksView === "sup" ? "" : "none";
+  syncFab();
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
   else if (state.elaksView === "pur") renderPurchases();
   else if (state.elaksView === "work") renderWork();
   else if (state.elaksView === "job") renderJobs();
-  else if (state.elaksView === "inv2") renderInvoices();
+  else if (state.elaksView === "invoice") renderInvoices();
   else if (state.elaksView === "doc") renderDocs();
   else if (state.elaksView === "sup") renderSuppliers();
   else renderClients();
@@ -4752,7 +4768,6 @@ async function loadTeam() {
   const { data, error } = await db.from("user_roles").select("*").order("role");
   if (error) { console.error(error); toast("Could not load the team list"); return; }
   state.team = data ?? [];
-  const ts = $("team-settings"); if (ts) ts.style.display = "";
   renderTeam();
 }
 function permSummary(r) {
@@ -4864,7 +4879,6 @@ function applyTabVisibility() {
   show('[data-tab="elaks"]', state.perm.elaks);
   show('[data-tab="apt"]', state.perm.apts);
   show('[data-tab="ins"]', state.perm.ins);
-  const bs = $("biz-settings"); if (bs) bs.style.display = state.perm.elaks ? "" : "none";
   // if you just put away the tab you were standing on, step back to Home
   const onHidden = (state.tab === "elaks" && !state.perm.elaks)
     || (state.tab === "apt" && !state.perm.apts)
@@ -5451,6 +5465,7 @@ function renderApt() {
     [["all", T("All", "Сите")]].concat(state.apartments.map((a) => [a.id, a.name]))
       .map(([v, l]) => `<button class="chip ${state.aptFilter === v ? "on" : ""}"
         onclick="state.aptFilter='${v}';renderApt()">${esc(l)}</button>`).join("");
+  syncFab();
   if (state.aptView === "stays") renderStays();
   else if (state.aptView === "calendar") renderCalendar();
   else if (state.aptView === "bills") renderBills();
@@ -7151,7 +7166,7 @@ const MK = {
   "Home": "Дома", "Tasks": "Задачи", "Elaks": "Елакс", "Apts": "Станови",
   "Settings": "Поставки", "Apartments": "Станови", "Stock": "Магацин",
   "Offers": "Понуди", "Purchases": "Набавки", "Clients": "Клиенти",
-  "Stays": "Гости", "Calendar": "Календар", "Bills": "Сметки",
+  "Stays": "Гости", "Calendar": "Календар",
   // task screen
   "Today": "Денес", "Overdue": "Задоцнети", "No date": "Без датум",
   "Next 7 days": "Следни 7 дена", "Next 30 days": "Следни 30 дена",
@@ -7159,32 +7174,32 @@ const MK = {
   "Done today": "Завршени денес", "Completed tasks →": "Завршени задачи →",
   "New task": "Нова задача", "Save task": "Зачувај задача",
   "Edit before saving": "Уреди пред зачувување", "Say it again": "Кажи повторно",
-  "Listening…": "Слушам…", "Done speaking": "Готово", "Cancel": "Откажи",
-  "Search tasks…": "Барај задачи…", "Title": "Наслов", "Notes": "Белешка",
-  "Date": "Датум", "Time": "Време", "Repeat": "Повторувај", "Never": "Никогаш",
+  "Listening…": "Слушам…", "Done speaking": "Готово",
+  "Search tasks…": "Барај задачи…", "Notes": "Белешка",
+  "Time": "Време", "Repeat": "Повторувај", "Never": "Никогаш",
   "Assigned to": "Доделено на", "Anyone": "Секој",
   // common actions
-  "Save": "Зачувај", "Close": "Затвори", "Delete": "Избриши", "Remove": "Отстрани",
+  "Close": "Затвори", "Delete": "Избриши", "Remove": "Отстрани",
   "Edit": "Уреди", "Add": "Додај", "Search": "Барај", "Copy link": "Копирај линк",
   "Copy text": "Копирај текст", "Try again": "Обиди се повторно", "Done": "Готово",
   "Deactivate": "Деактивирај", "Enable": "Вклучи", "Turn off": "Исклучи",
   // money and stock
-  "Cash register": "Каса", "Balance": "Состојба", "Balance now": "Состојба сега",
+  "Balance": "Состојба", "Balance now": "Состојба сега",
   "+ Add cash": "+ Внеси пари", "− Withdraw": "− Извади пари",
   "Low stock": "Мал залихи", "all ok": "сè е во ред", "Total": "Вкупно",
   "Stock value (purchase)": "Вредност (набавна)", "Stock value (sell)": "Вредност (продажна)",
-  "Monthly report": "Месечен извештај", "Order list": "Листа за нарачка",
-  "Possible duplicates": "Можни дупликати", "Warranties ending": "Гаранции што истекуваат",
+  "Order list": "Листа за нарачка",
+  "Warranties ending": "Гаранции што истекуваат",
   "Purchase price": "Набавна цена", "Sell price": "Продажна цена",
   "Purchase price history": "Историја на набавни цени",
   "Recent movements": "Последни движења", "In stock": "На залиха",
   "+ Stock in": "+ Влез", "− Stock out": "− Излез", "Edit article": "Уреди артикл",
-  "Supplier": "Добавувач", "Category": "Категорија", "Code": "Шифра",
+  "Category": "Категорија", "Code": "Шифра",
   "Profit paid this month": "Профит наплатен овој месец",
   "Offers awaiting reply": "Понуди без одговор", "Owed to suppliers": "Долг кон добавувачи",
   "Accepted, not paid yet": "Прифатени, неплатени", "Stock not taken out": "Не е разнижено од магацин",
   "Waiting to arrive": "Се чека испорака", "They arrived →": "Пристигнаа →",
-  "Items": "Ставки", "Payments": "Плаќања", "Mark as paid": "Означи како платено",
+  "Items": "Ставки", "Mark as paid": "Означи како платено",
   // apartments
   "Apartments bank": "Каса за станови", "This month": "Овој месец", "This year": "Оваа година",
   "Cash in hand": "Пари во рака", "Upcoming bookings": "Претстојни резервации",
@@ -7208,7 +7223,7 @@ const MK = {
   "Insurance company": "Осигурителна компанија", "Starts": "Почнува", "Ends": "Завршува",
   "Price (ден.)": "Цена (ден.)", "Payments": "Уплати", "Instalments": "Рати",
   "Price": "Цена", "Paid so far": "Уплатено", "Left to pay": "Останува",
-  "+ Record a payment": "+ Внеси уплата", "Save payment": "Зачувај уплата",
+  "+ Record a payment": "+ Внеси уплата",
   "Remove policy": "Отстрани полиса", "Not paid up": "Недоплатени",
   "Ending soon": "Истекуваат", "still to collect": "останува да се наплати",
   // sheets and forms
@@ -7216,7 +7231,7 @@ const MK = {
   "Amount paid (ден.)": "Платено (ден.)", "Address": "Адреса", "Phone": "Телефон",
   "E-mail": "Е-пошта", "Name": "Име", "Apartment": "Стан", "Guest": "Гостин",
   "Check-in": "Пријава", "Check-out date": "Датум на одјава", "Nights": "Ноќевања",
-  "Add with +": "Додај со +", "Add with + or the microphone": "Додај со + или микрофон",
+  "Add with + or the microphone": "Додај со + или микрофон",
   "Add an apartment first.": "Прво додај стан.", "No offers.": "Нема понуди.",
   "No articles.": "Нема артикли.", "No guests yet.": "Сè уште нема гости.",
   "No apartments.": "Нема станови.", "No purchases yet.": "Нема набавки.",
@@ -7235,7 +7250,7 @@ const MK = {
   "What arrived?": "Што пристигна?", "Book what arrived into stock": "Внеси во магацин",
   "+ Add a line by hand": "+ Додај ставка рачно", "Search an article you already have…": "Барај постоечки артикл…",
   "New purchase": "Нова набавка", "Photograph note": "Сликај испратница",
-  "From gallery": "Од галерија", "Check the note": "Провери ја испратницата",
+  "From gallery": "Од галерија",
   "Open as a purchase": "Отвори како набавка", "Reading the note…": "Ја читам испратницата…",
   "Merge duplicate": "Спој дупликат", "Merge with a duplicate…": "Спој со дупликат…",
   "Minimum stock": "Минимална залиха", "Unit": "Мерка", "Photo (opt.)": "Слика (опц.)",
@@ -7274,7 +7289,7 @@ const MK = {
   "No offers yet.": "Сè уште нема понуди.", "No past stays.": "Нема изминати гости.",
   "No stays this year.": "Нема гости оваа година.", "Printed on the note": "Испишано на документот",
   "Stock movements": "Движења на залиха", "Weeks — pick days": "Недели — избери денови",
-  "Where": "Каде", "Your calendar (give these to the platforms)": "Твој календар (дај им го на платформите)",
+  "Your calendar (give these to the platforms)": "Твој календар (дај им го на платформите)",
   "for Booking.com": "за Booking.com", "For Booking.com": "За Booking.com", "For Airbnb": "За Airbnb",
   "Remove key": "Отстрани клуч", "Replace key": "Замени клуч", "Save key": "Зачувај клуч",
   "Key saved": "Клучот е зачуван", "No key yet": "Сè уште нема клуч",
@@ -7628,13 +7643,13 @@ function renderInvoices() {
   const todo = awaitingInvoice();
   const unpaid = state.invoices.filter((i) => !i.cancelled && !invPaid(i));
   const counts = { todo: todo.length, unpaid: unpaid.length, all: state.invoices.length };
-  $("inv-filter").innerHTML = [["todo", T("To invoice", "За фактурирање")],
+  $("invoice-filter").innerHTML = [["todo", T("To invoice", "За фактурирање")],
     ["unpaid", T("Unpaid", "Неплатени")], ["all", T("All", "Сите")]]
     .map(([v, l]) => `<button class="chip ${state.invFilter === v ? "on" : ""}"
       onclick="state.invFilter='${v}';renderInvoices()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
 
   if (state.invFilter === "todo") {
-    $("inv-list").innerHTML = `
+    $("invoice-list").innerHTML = `
       <div class="card">
         <div class="row" style="justify-content:space-between"><span class="muted">${T("Delivered, not yet billed", "Испорачано, нефактурирано")}</span>
           <b class="mono">${fmt(sumBy(todo, (o) => o.grand_total))} ден.</b></div>
@@ -7652,7 +7667,7 @@ function renderInvoices() {
   }
 
   const list = (state.invFilter === "unpaid" ? unpaid : state.invoices);
-  $("inv-list").innerHTML = list.length ? list.map((i) => {
+  $("invoice-list").innerHTML = list.length ? list.map((i) => {
     const late = !invPaid(i) && i.due_date && i.due_date < todayStr();
     return `<div class="card offer row ${i.cancelled ? "done" : ""}" role="button" tabindex="0" onclick="openInvoiceSheet('${i.id}')">
       <div style="flex:1;min-width:0"><b>${T("Фактура", "Фактура")} ${esc(i.number)}</b>
