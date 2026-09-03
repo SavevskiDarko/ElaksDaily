@@ -83,7 +83,8 @@ for (const file of SOURCES) {
   }
 }
 
-const VIEWS = new Set(["article_stock", "elaks_cash_total", "apt_cash_total"]);
+const VIEWS = new Set(["article_stock", "elaks_cash_total", "apt_cash_total",
+  "team_members", "entry_authors"]);
 const names = [...tables.keys()].sort();
 const short = (f) => f.replace("supabase/functions/", "").replace("/index.ts", "");
 
