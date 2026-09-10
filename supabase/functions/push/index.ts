@@ -108,8 +108,21 @@ Deno.serve(async (req) => {
   const { data: hourRow } = await db.from("app_settings").select("value").eq("key", "digest_hour").single();
   const { data: sentRow } = await db.from("app_settings").select("value").eq("key", "digest_sent_on").single();
   const digestHour = String(hourRow?.value ?? "07:30").replace(/"/g, "");
-  const sentOn = String(sentRow?.value ?? "").replace(/"/g, "");
-  if (hhmm >= digestHour && sentOn !== today) {
+  const sentOn = String(sentRow?.value ?? "").replace(/"/g, "").slice(0, 10);
+
+  // A morning summary that arrives in the evening is worse than none. The rule
+  // used to be "any time at or after the digest hour, if not sent today", so a
+  // run that missed the morning — the schedule slipped, or an earlier query
+  // failed — said "Good morning" at whatever hour it eventually ran. It now has
+  // an upper bound: past the window the day is skipped rather than sent late.
+  const minutesPast = (() => {
+    const [dh, dm] = digestHour.split(":").map(Number);
+    const [nh, nm] = hhmm.split(":").map(Number);
+    return (nh * 60 + nm) - (dh * 60 + dm);
+  })();
+  const DIGEST_WINDOW_MIN = 180;      // three hours
+
+  if (minutesPast >= 0 && minutesPast <= DIGEST_WINDOW_MIN && sentOn !== today) {
     const openToday = (tasks0: any[]) =>
       tasks0.filter((t) => {
         const isToday = t.due_date === today || t.recurrence === "daily" ||
@@ -135,7 +148,7 @@ Deno.serve(async (req) => {
     body += `Work: ${byCtx("work")} · Elaks: ${byCtx("elaks")} · Personal: ${byCtx("personal")} · Apts: ${byCtx("apts")}`;
     if (lowCount) body += ` · Low stock: ${lowCount}`;
     await sendToAll(`Good morning — ${open.length} today`, body, "digest", (r) => r.role === "owner");
-    await db.from("app_settings").update({ value: today }).eq("key", "digest_sent_on");
+    await db.from("app_settings").update({ value: today + "@" + hhmm }).eq("key", "digest_sent_on");
   }
 
 
