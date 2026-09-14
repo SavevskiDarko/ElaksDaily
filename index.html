@@ -761,7 +761,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260902-123030";
+const BUILD = "20260914-205540";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -5401,6 +5401,12 @@ function accountBalances() {
     const id = accountFor(b);
     if (id) bal[id] = (bal[id] || 0) - (parseFloat(b.amount) || 0);
   }
+  // one-off spending leaves the account it was paid from — the plumber, a new
+  // mattress, restocking. This was going into the figures but not out of them.
+  for (const e of (state.expenses || [])) {
+    const id = e.account_id || accountFor(e);
+    if (id) bal[id] = (bal[id] || 0) - (parseFloat(e.amount) || 0);
+  }
   // apartment starting amounts are cash on hand
   const cash = state.accounts.find((a) => /cash|кеш/i.test(a.name));
   if (cash) bal[cash.id] = (bal[cash.id] || 0) + sumBy(state.apartments, (a) => a.opening_balance);
@@ -5421,8 +5427,9 @@ function renderApt() {
   const recAll = sumBy(state.stayPays, (p) => p.amount);
   const openAll = sumBy(state.apartments, (a) => a.opening_balance);
   const bilAll = sumBy(state.bills, (b) => b.amount);
+  const expAll = sumBy(state.expenses || [], (e) => e.amount);
   // the view sums the full history; the local figure is the fallback if it is missing
-  const cashAll = state.aptCash === null ? (recAll + openAll - bilAll) : state.aptCash;
+  const cashAll = state.aptCash === null ? (recAll + openAll - bilAll - expAll) : state.aptCash;
   // everything still to collect, whether the guest has arrived or not
   const soon = sumBy(state.stays.filter((s) => !staySettled(s)), stayBalance);
   const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
