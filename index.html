@@ -761,7 +761,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260916-205145";
+const BUILD = "20260917-200245";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -5576,14 +5576,30 @@ function stayPayBlock(s) {
 }
 
 let stayPayMethod = "cash";
-// the common case in one tap: the whole remaining amount, cash, today
+// Where the money is going: whatever "Money went to" is showing right now,
+// which may have just been changed to Payoneer or Wise and not saved yet.
+// Only if that select is not on screen does the booking's own account decide.
+function stayPayAccount(s) {
+  const sel = $("st-acct");
+  return (sel && sel.value) || accountFor(s) || null;
+}
+// And how it was paid follows from that, rather than being assumed to be cash:
+// money in the hand is cash, money in any other account arrived by transfer.
+// Same reading of an account's name that accountFor and accountBalances use.
+function methodForAccount(id) {
+  const a = state.accounts.find((x) => x.id === id);
+  return (!a || /cash|кеш/i.test(a.name)) ? "cash" : "bank";
+}
+// the common case in one tap: the whole remaining amount, today, into the
+// account showing above the button
 async function quickStayPay(stayId) {
   const s = state.stays.find((x) => x.id === stayId);
   if (!s) return;
+  const acct = stayPayAccount(s);
   try {
     await dbq(db.from("stay_payments").insert({
       stay_id: stayId, amount: Math.round(stayBalance(s) * 100) / 100,
-      method: "cash", account_id: accountFor(s), paid_on: todayStr(),
+      method: methodForAccount(acct), account_id: acct, paid_on: todayStr(),
     }), T("Not saved", "Не е зачувано"));
   } catch { return; }
   closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
@@ -5594,14 +5610,16 @@ async function quickStayPay(stayId) {
 function stayPaySheet(stayId) {
   const s = state.stays.find((x) => x.id === stayId);
   const bal = stayBalance(s);
-  stayPayMethod = "cash";
+  // read the account before openSheet replaces the sheet this was tapped from
+  const acct = stayPayAccount(s);
+  stayPayMethod = methodForAccount(acct);
   openSheet(`
     <h2>${T("Payment", "Плаќање")}</h2>
     <p class="muted">${esc(s.guest_name)} · ${T("still to pay", "останува")} ${fmt(bal)} ден.</p>
     <label>${T("Paid by", "Платено со")}</label>
     <div class="chips">
       ${[["cash", T("Cash", "Кеш")], ["card", T("Card", "Картичка")], ["bank", T("Bank", "Банка")], ["platform", T("Platform", "Платформа")]]
-        .map(([v, l], i) => `<button class="chip ${i === 0 ? "on" : ""}"
+        .map(([v, l]) => `<button class="chip ${v === stayPayMethod ? "on" : ""}"
           onclick="stayPayMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this))">${l}</button>`).join("")}
     </div>
     <label>${T("Amount (ден.)", "Износ (ден.)")}</label>
@@ -5612,7 +5630,7 @@ function stayPaySheet(stayId) {
     </div>
     <label>${T("Into", "Оди во")}</label>
     <select id="sp-acct">
-      ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
+      ${state.accounts.map((x) => `<option value="${x.id}" ${acct === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
     </select>
     <label>${T("Date", "Датум")}</label><input id="sp-date" type="date" value="${todayStr()}">
     <label>${T("Note", "Белешка")}</label><input id="sp-note" placeholder="${T("e.g. deposit", "на пр. аванс")}">
