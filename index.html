@@ -341,7 +341,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .pv-items td.b{font-weight:700}
 .pv-items td img{max-width:100%;max-height:26mm;display:block;margin:0 auto}
 .pv-items .sp{margin-top:1.5mm;line-height:1.35}
-.pv-total{background:#2462AC !important;color:#fff;font-weight:700;font-size:11pt;padding:3mm 4mm !important;text-align:right}
+.pv-total{background:#2462AC !important;color:#fff;font-weight:700;font-size:11pt;padding:3mm 4mm !important;text-align:left}
 .pv-note{color:#C00000;font-weight:700;text-align:center;margin:6mm 0 2mm}
 .pv-valid{color:#C00000;font-weight:700;text-align:center;margin-bottom:8mm}
 .pv-footer{display:block;margin:10mm auto 0;width:57mm;height:auto}
@@ -761,7 +761,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260917-200245";
+const BUILD = "20260919-092518";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1425,7 +1425,21 @@ function openTaskSheet(id) {
           <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Months (that date)</option>
         </select></div>
       <div><label>Reminder</label>
-        <select id="tk-rem"><option value="0">No</option><option value="1" ${t.remind ? "selected" : ""}>Push at the time</option></select></div>
+        <select id="tk-rem" onchange="tkRemChanged()">
+          <option value="0">${T("No", "Не")}</option>
+          <option value="1" ${t.remind ? "selected" : ""}>${T("Yes", "Да")}</option>
+        </select></div>
+    </div>
+    <div id="tk-rem-when" style="display:none">
+      <label>${T("Tell me", "Извести ме")}</label>
+      <div class="chips" id="tk-before">
+        ${[[0, T("at the time", "во тоа време")], [15, "15 " + T("min before", "мин. порано")],
+           [30, "30 " + T("min before", "мин. порано")], [60, "1 " + T("hour before", "час порано")],
+           [120, "2 " + T("hours before", "часа порано")]]
+          .map(([v, l]) => `<button class="chip ${(t.remind_before ?? 0) === v ? "on" : ""}" data-b="${v}"
+            onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${l}</button>`).join("")}
+      </div>
+      <p class="muted" style="font-size:12.5px" id="tk-rem-hint"></p>
     </div>
     <div id="tk-every" style="display:none">
       <div class="grid2">
@@ -1482,6 +1496,7 @@ function openTaskSheet(id) {
   `);
   renderCl(id || "");
   tkRecChanged();
+  tkRemChanged();
   togglePersonalOwner();
   tkImg = { mode: "keep", thumb: t.photo_thumb || null, full: null };
   renderTkImg();
@@ -1544,6 +1559,22 @@ function togglePersonalOwner() {
   const on = ($("tk-ctx").querySelector(".chip.on") || {}).dataset?.c === "personal";
   row.style.display = on ? "block" : "none";
 }
+// the lead time only means anything when there is a reminder and a time
+function tkRemChanged() {
+  const row = $("tk-rem-when");
+  if (!row) return;
+  const on = ($("tk-rem") || {}).value === "1";
+  row.style.display = on ? "block" : "none";
+  const hint = $("tk-rem-hint");
+  if (!hint) return;
+  const time = ($("tk-time") || {}).value;
+  if (!on) return (hint.textContent = "");
+  hint.textContent = time
+    ? ""
+    : T("Give the task a time, otherwise there is nothing to count back from.",
+        "Стави време на задачата, инаку нема од што да се брои наназад.");
+}
+
 function tkRecChanged() {
   const box = $("tk-days");
   if (!box) return;
@@ -1613,6 +1644,7 @@ async function saveTask(id) {
     client_id: ($("tk-client") || {}).value || null,
     apartment_id: ($("tk-apt2") || {}).value || null,
     remind: $("tk-rem").value === "1",
+    remind_before: parseInt((($("tk-before") || {}).querySelector?.(".chip.on") || {}).dataset?.b) || 0,
     assigned_to: $("tk-who").value || null,
     notes: $("tk-notes").value.trim() || null,
     checklist: tkChecklist.filter((it) => it.text.trim()).length ? tkChecklist.filter((it) => it.text.trim()) : null,
@@ -5576,30 +5608,14 @@ function stayPayBlock(s) {
 }
 
 let stayPayMethod = "cash";
-// Where the money is going: whatever "Money went to" is showing right now,
-// which may have just been changed to Payoneer or Wise and not saved yet.
-// Only if that select is not on screen does the booking's own account decide.
-function stayPayAccount(s) {
-  const sel = $("st-acct");
-  return (sel && sel.value) || accountFor(s) || null;
-}
-// And how it was paid follows from that, rather than being assumed to be cash:
-// money in the hand is cash, money in any other account arrived by transfer.
-// Same reading of an account's name that accountFor and accountBalances use.
-function methodForAccount(id) {
-  const a = state.accounts.find((x) => x.id === id);
-  return (!a || /cash|кеш/i.test(a.name)) ? "cash" : "bank";
-}
-// the common case in one tap: the whole remaining amount, today, into the
-// account showing above the button
+// the common case in one tap: the whole remaining amount, cash, today
 async function quickStayPay(stayId) {
   const s = state.stays.find((x) => x.id === stayId);
   if (!s) return;
-  const acct = stayPayAccount(s);
   try {
     await dbq(db.from("stay_payments").insert({
       stay_id: stayId, amount: Math.round(stayBalance(s) * 100) / 100,
-      method: methodForAccount(acct), account_id: acct, paid_on: todayStr(),
+      method: "cash", account_id: accountFor(s), paid_on: todayStr(),
     }), T("Not saved", "Не е зачувано"));
   } catch { return; }
   closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
@@ -5610,16 +5626,14 @@ async function quickStayPay(stayId) {
 function stayPaySheet(stayId) {
   const s = state.stays.find((x) => x.id === stayId);
   const bal = stayBalance(s);
-  // read the account before openSheet replaces the sheet this was tapped from
-  const acct = stayPayAccount(s);
-  stayPayMethod = methodForAccount(acct);
+  stayPayMethod = "cash";
   openSheet(`
     <h2>${T("Payment", "Плаќање")}</h2>
     <p class="muted">${esc(s.guest_name)} · ${T("still to pay", "останува")} ${fmt(bal)} ден.</p>
     <label>${T("Paid by", "Платено со")}</label>
     <div class="chips">
       ${[["cash", T("Cash", "Кеш")], ["card", T("Card", "Картичка")], ["bank", T("Bank", "Банка")], ["platform", T("Platform", "Платформа")]]
-        .map(([v, l]) => `<button class="chip ${v === stayPayMethod ? "on" : ""}"
+        .map(([v, l], i) => `<button class="chip ${i === 0 ? "on" : ""}"
           onclick="stayPayMethod='${v}';[...this.parentNode.children].forEach(b=>b.classList.toggle('on',b===this))">${l}</button>`).join("")}
     </div>
     <label>${T("Amount (ден.)", "Износ (ден.)")}</label>
@@ -5630,7 +5644,7 @@ function stayPaySheet(stayId) {
     </div>
     <label>${T("Into", "Оди во")}</label>
     <select id="sp-acct">
-      ${state.accounts.map((x) => `<option value="${x.id}" ${acct === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
+      ${state.accounts.map((x) => `<option value="${x.id}" ${accountFor(s) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
     </select>
     <label>${T("Date", "Датум")}</label><input id="sp-date" type="date" value="${todayStr()}">
     <label>${T("Note", "Белешка")}</label><input id="sp-note" placeholder="${T("e.g. deposit", "на пр. аванс")}">
