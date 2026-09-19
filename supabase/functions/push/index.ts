@@ -80,8 +80,15 @@ Deno.serve(async (req) => {
       (t.recurrence === "weekly" && ((t.recur_days?.length ? t.recur_days : [t.recur_dow]).includes(dow))) ||
       (t.recurrence === "monthly" && t.recur_dom === dom);
     const doneToday = t.recurrence ? t.last_done === today : t.done;
-    if (isToday && !doneToday && t.reminded_on !== today &&
-        t.due_time.slice(0, 5) <= hhmm) {
+    // Fire ahead of the task by however many minutes it asks for — a reminder
+    // that arrives as something starts is too late to be any use.
+    const lead = Number(t.remind_before) || 0;
+    const fireAt = (() => {
+      const [h, m] = t.due_time.slice(0, 5).split(":").map(Number);
+      const mins = Math.max(0, h * 60 + m - lead);
+      return String(Math.floor(mins / 60)).padStart(2, "0") + ":" + String(mins % 60).padStart(2, "0");
+    })();
+    if (isToday && !doneToday && t.reminded_on !== today && fireAt <= hhmm) {
       // A personal task is private: it goes to whoever it belongs to, and to
       // anyone they have given access to — never to everyone with the context.
       const who = t.context === "personal"
@@ -89,7 +96,11 @@ Deno.serve(async (req) => {
         : t.assigned_to
           ? (r: any) => r.role === "owner" || r.user_id === t.assigned_to
           : (r: any) => r.role === "owner" || (r.task_contexts ?? []).includes(t.context);
-      await sendToAll("Reminder", `${t.title} (${t.due_time.slice(0, 5)})`, `task-${t.id}`, who, t.id);
+      const at = t.due_time.slice(0, 5);
+      const body = lead
+        ? `${t.title} — за ${lead >= 60 ? (lead / 60) + " ч." : lead + " мин."} (${at})`
+        : `${t.title} (${at})`;
+      await sendToAll("Потсетник", body, `task-${t.id}`, who, t.id);
       await db.from("tasks").update({ reminded_on: today }).eq("id", t.id);
     }
   }
