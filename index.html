@@ -630,7 +630,8 @@ async function startApp() {
               elaks: !(r.hide_tabs || []).includes("elaks"),
               apts: !(r.hide_tabs || []).includes("apt"),
               ins: !(r.hide_tabs || []).includes("ins") }
-          : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance };
+          : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance,
+              aptsOwnOnly: !!r.apts_own_only };
         state.perm.personalAccess = r.personal_access || [];
       }
     }
@@ -761,7 +762,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260919-092518";
+const BUILD = "20260925-183622";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -4813,7 +4814,7 @@ function permSummary(r) {
   const parts = [];
   if ((r.task_contexts || []).length) parts.push("Tasks: " + r.task_contexts.map((c) => CTX[c]).join(", "));
   if (r.see_elaks) parts.push("Elaks");
-  if (r.see_apts) parts.push("Apts");
+  if (r.see_apts) parts.push(r.apts_own_only ? T("Apts (own)", "Станови (свои)") : "Apts");
   if (r.see_insurance) parts.push(T("Insurance", "Осигурување"));
   if ((r.personal_access || []).includes(state.uid)) parts.push(T("my personal list", "моја лична листа"));
   return parts.join(" · ") || "No access yet";
@@ -4840,7 +4841,8 @@ function openPermSheet(uid) {
   if (!r) return;
   const owner = r.role === "owner";
   permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts,
-                ins: !!r.see_insurance, hide: [...(r.hide_tabs || [])] };
+                ins: !!r.see_insurance, hide: [...(r.hide_tabs || [])],
+                aptsOwnOnly: !!r.apts_own_only };
   openSheet(`
     <h2>${esc(r.display_name || T("Team member", "Член на тимот"))}${owner ? ` · ${T("owner", "сопственик")}` : ""}</h2>
     <label>${T("Display name", "Име за приказ")}</label><input id="pm-name" value="${esc(r.display_name || "")}">
@@ -4896,7 +4898,10 @@ function renderPermBoxes(owner) {
   ].map(([k, l]) => `
     <div class="row" style="margin-bottom:6px">
       <button class="clbox ${permDraft[k] ? "on" : ""}" onclick="permToggleBiz('${k}')">${permDraft[k] ? "✓" : ""}</button>
-      <span>${l}</span></div>`).join("");
+      <span>${l}</span></div>` + (k !== "apts" || !permDraft.apts ? "" : `
+    <div class="row" style="margin:0 0 6px 26px">
+      <button class="clbox ${permDraft.aptsOwnOnly ? "on" : ""}" onclick="permToggleBiz('aptsOwnOnly')">${permDraft.aptsOwnOnly ? "✓" : ""}</button>
+      <span class="muted">${T("Only the apartments they manage", "Само становите што ги води")}</span></div>`)).join("");
 }
 function permToggleCtx(c) {
   const i = permDraft.ctx.indexOf(c);
@@ -4928,6 +4933,7 @@ async function savePerm(uid) {
         const wants = $("pm-pers") && $("pm-pers").classList.contains("on");
         return { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
                  see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins,
+                 apts_own_only: permDraft.apts && permDraft.aptsOwnOnly,
                  personal_access: wants ? [...had, state.uid] : had };
       })();
   try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), T("Not saved", "Не е зачувано")); } catch { return; }
@@ -5420,9 +5426,15 @@ function moneyArrived(s, acct) {
   d.setDate(d.getDate() + delay);
   return d.toLocaleDateString("sv-SE") <= todayStr();
 }
+// Somebody limited to their own apartments should see their own money. The
+// bookings, bills and spending are already only theirs — the database hands
+// over nothing else — but an account's starting amount is a shared figure and
+// would drag the owner's takings into their total, so it starts at zero.
+const aptsOwnOnly = () => !state.perm.owner && !!state.perm.aptsOwnOnly;
 function accountBalances() {
   const bal = {};
-  for (const a of state.accounts) bal[a.id] = parseFloat(a.opening_balance) || 0;
+  const shared = !aptsOwnOnly();
+  for (const a of state.accounts) bal[a.id] = shared ? (parseFloat(a.opening_balance) || 0) : 0;
   for (const p of state.stayPays) {
     // where the payment went: what was chosen on it, else where that booking pays
     const s = state.stays.find((x) => x.id === p.stay_id);
@@ -5461,7 +5473,10 @@ function renderApt() {
   const bilAll = sumBy(state.bills, (b) => b.amount);
   const expAll = sumBy(state.expenses || [], (e) => e.amount);
   // the view sums the full history; the local figure is the fallback if it is missing
-  const cashAll = state.aptCash === null ? (recAll + openAll - bilAll - expAll) : state.aptCash;
+  // apt_cash_total sums the whole history in one figure, which is not this
+  // person's history when they are limited to their own flats
+  const cashAll = (state.aptCash === null || aptsOwnOnly())
+    ? (recAll + openAll - bilAll - expAll) : state.aptCash;
   // everything still to collect, whether the guest has arrived or not
   const soon = sumBy(state.stays.filter((s) => !staySettled(s)), stayBalance);
   const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
@@ -6169,6 +6184,14 @@ function openAptSheet(id) {
     <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
     <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
+    ${state.perm.owner ? `<label>${T("Managed by", "Го води")}</label>
+    <select id="ap-managed">
+      ${(state.people || []).map((pp) => `<option value="${pp.user_id}" ${
+          (a.managed_by || state.uid) === pp.user_id ? "selected" : ""}>${esc(pp.display_name || "—")}</option>`).join("")}
+    </select>
+    <p class="muted" style="font-size:12.5px">${T(
+      "Anyone limited to their own apartments sees this one only if it is theirs.",
+      "Ограничените на своите станови го гледаат овој само ако е нивни.")}</p>` : ""}
     <label>Notes (opt.)</label><input id="ap-notes" value="${esc(a.notes || "")}">
     <button class="btn" onclick="saveApt('${id || ""}')">Save</button>
     ${id ? outFeedBlock(a) : ""}
@@ -6252,6 +6275,10 @@ async function saveApt(id) {
     wifi_pass: $("ap-wifipass").value.trim() || null,
     access_note: $("ap-access").value.trim() || null,
     notes: $("ap-notes").value.trim() || null };
+  // only the owner is shown the field; for anyone else the column keeps what
+  // it had, or takes its default of whoever is adding the flat
+  const mg = $("ap-managed");
+  if (mg && mg.value) row.managed_by = mg.value;
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
   closeSheet(); await refreshAll(["apartments", "aptCash"]); renderApt(); toast("Saved");
