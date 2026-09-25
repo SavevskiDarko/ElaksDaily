@@ -762,7 +762,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260925-183622";
+const BUILD = "20260925-215335";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -5501,13 +5501,22 @@ function renderApt() {
     </div>` : ""}
 
     <div class="stat-row">
-      <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='bills';renderApt()">
-        <span>${T("This month", "Овој месец")}</span><b>${fmt(incM - bilM - expM)}</b></div>
-      <div class="stat"><span>${T("This year", "Оваа година")}</span><b>${fmt(incY - bilY - expY)}</b></div>
+      <div class="stat" role="button" tabindex="0" title="${T(
+          `Earned ${fmt(incM)} · bills ${fmt(bilM)} · spending ${fmt(expM)}`,
+          `Заработено ${fmt(incM)} · сметки ${fmt(bilM)} · трошоци ${fmt(expM)}`)}"
+        onclick="event.stopPropagation();state.aptView='bills';renderApt()">
+        <span>${T("This month, after costs", "Овој месец, по трошоци")}</span><b>${fmt(incM - bilM - expM)}</b></div>
+      <div class="stat" title="${T(
+          `Earned ${fmt(incY)} · bills ${fmt(bilY)} · spending ${fmt(expY)}`,
+          `Заработено ${fmt(incY)} · сметки ${fmt(bilY)} · трошоци ${fmt(expY)}`)}">
+        <span>${T("This year, after costs", "Оваа година, по трошоци")}</span><b>${fmt(incY - bilY - expY)}</b></div>
       <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();openUnpaidStays()">
         <span>${T("To collect", "За наплата")}</span>
         <b class="${soon ? "hflag" : "muted"}">${fmt(soon)}</b></div>
     </div>
+    <div class="muted" style="font-size:11.5px;margin-top:8px">${T(
+      `Earned ${fmt(incY)} this year, less ${fmt(bilY)} bills and ${fmt(expY)} one-off spending.`,
+      `Заработено ${fmt(incY)} оваа година, минус ${fmt(bilY)} сметки и ${fmt(expY)} еднократни трошоци.`)}</div>
   </div>`;
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
