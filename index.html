@@ -762,7 +762,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20260925-220247";
+const BUILD = "20260925-220833";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -6117,7 +6117,10 @@ function renderBills() {
       <div class="chips">${state.accounts.map((x) =>
         `<button class="chip ${payFrom === x.id ? "on" : ""}" onclick="setBillAccount('${x.id}')">${esc(x.name)}</button>`).join("")}</div>
     </div>` : ""}`;
-  for (const a of shownApartments()) {
+  // With one flat on screen — one apartment, or the filter set to one — the
+  // card's own total and the bar underneath it are the same number twice.
+  const shown = shownApartments();
+  for (const a of shown) {
     const rows = BILL_TYPES.map((tp) => ({ tp, b: billOf(a.id, tp) }));
     const total = sumBy(rows, (r) => r.b?.amount);
     const paidN = rows.filter((r) => r.b && r.b.paid).length;
@@ -6133,8 +6136,9 @@ function renderBills() {
             style="width:96px;text-align:right;padding:7px 8px"
             onchange="setBill('${a.id}','${tp}','amount',parseFloat(this.value)||0)">
         </div>`).join("")}
-      <div class="row" style="justify-content:space-between;margin-top:8px"><span class="muted">Total</span>
-        <b class="mono">${fmt(total)} ден.</b></div>
+      ${shown.length > 1 ? `<div class="row" style="justify-content:space-between;margin-top:8px">
+        <span class="muted">${T("Total", "Вкупно")}</span>
+        <b class="mono">${fmt(total)} ден.</b></div>` : ""}
     </div>`;
   }
   html += `<div class="totalbar"><span>All bills · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
