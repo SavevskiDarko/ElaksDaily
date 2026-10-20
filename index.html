@@ -163,10 +163,14 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 /* ---- offers ---- */
 .offer .o-num{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
 .offer .o-total{font-family:var(--mono);font-weight:600;white-space:nowrap}
-/* In Elaks a row's second line is mostly names — clients, suppliers, sites,
-   statuses — and in monospace those read like code and wrap a line early.
-   Sans with tabular figures keeps the numbers and dates in step without it. */
-#v-elaks .offer .o-num{font-family:var(--sans);font-size:13px;line-height:1.4;font-variant-numeric:tabular-nums}
+/* A row's second line is mostly names — clients, guests, policy holders,
+   suppliers, sites, statuses — and in monospace those read like code and wrap
+   a line early. Sans with tabular figures keeps the numbers and dates in step
+   without it. #sheet takes in the lists that open over a tab: still to
+   collect, no price yet, paid for and not collected. Tasks keeps its own
+   "Also today" rows as they are. */
+#v-elaks .offer .o-num, #v-apt .offer .o-num, #v-ins .offer .o-num,
+#sheet .offer .o-num{font-family:var(--sans);font-size:13px;line-height:1.4;font-variant-numeric:tabular-nums}
 .oitem{display:grid;grid-template-columns:1fr 58px 74px 74px 28px;gap:6px;align-items:center;margin-bottom:6px;font-size:13.5px}
 .oitem input{padding:7px 8px;font-size:14px}
 .oitem .del{color:var(--danger);font-size:18px;text-align:center}
@@ -800,7 +804,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261018-090734";
+const BUILD = "20261020-182041";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
