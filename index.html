@@ -615,6 +615,7 @@ const ICON = (() => {
     image: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-5-5-8.5 8.5"/>'),
     clip: svg('<path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17.5a2 2 0 0 1-3-3l7.5-7.5"/>'),
     doc: svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/>'),
+    share: svg('<path d="M12 3v12"/><path d="m7.5 7.5 4.5-4.5 4.5 4.5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>'),
   };
 })();
 
@@ -804,7 +805,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261020-182041";
+const BUILD = "20261020-220452";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2448,7 +2449,10 @@ async function openOfferSheet(id) {
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
-    <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
+    <div class="grid2">
+      <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
+      <button class="btn ghost" onclick="saveOffer('${id || ""}', false, false, true)">${ICON.share}${T("Save + Share", "Зачувај + Сподели")}</button>
+    </div>
     ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
     ${id && o.status === "accepted" ? (() => {
       const j = state.jobs.find((x) => x.offer_id === id);
@@ -2618,7 +2622,7 @@ function updateTotal() {
   }
   return sum;
 }
-async function saveOffer(id, generate, pdf) {
+async function saveOffer(id, generate, pdf, share) {
   const meters = offerItems.map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m");
   const row = {
     number: id ? state.offers.find((x) => x.id === id).number : await nextOfferNumber(),
@@ -2648,11 +2652,34 @@ async function saveOffer(id, generate, pdf) {
   if (generate) genOk = await generateDocx(saved);
   closeSheet(); renderOffers();
   if (pdf) { await printOffer(saved); setTimeout(() => promptDeduct(saved.id), 500); return; }
+  if (share) { await shareOffer(saved); return; }   // the stock question waits until it has gone
   toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
   setTimeout(() => promptDeduct(saved.id), 400);
 }
-async function printOffer(o) {
-  try {
+// What an offer's file is called once it leaves the app: the title you gave it,
+// as you typed it. Characters a file system refuses become dashes, and an
+// offer with no title falls back to its number.
+function offerFileName(o, ext) {
+  const base = String(o.title || "").replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-")
+    .replace(/\s+/g, " ").trim().slice(0, 90) || `Ponuda ${o.number || ""}`.trim();
+  return `${base}.${ext}`;
+}
+
+// The browser names a "Save as PDF" after the page, which is why every offer
+// came out as Centrala.pdf. Lend the page the document's name while the print
+// dialog is open, then give it back.
+function printTitled(name) {
+  const was = document.title;
+  const back = () => { document.title = was; window.removeEventListener("afterprint", back); };
+  document.title = name;
+  window.addEventListener("afterprint", back);
+  setTimeout(back, 60000);            // for a browser that never says afterprint
+  window.print();
+}
+
+// The offer laid out for paper. Both the print view and the PDF that gets
+// shared are built from this, so what you send is what you would have printed.
+async function offerSheetHtml(o) {
     const client = state.clients.find((c) => c.id === o.client_id);
     const ids = [...new Set((o.items || []).filter((it) => it.article_id).map((it) => it.article_id))];
     const imgOf = {};
@@ -2673,7 +2700,7 @@ async function printOffer(o) {
       <td class="c b">${itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0)}</td>
     </tr>`).join("");
     const fld = (l, v) => v ? `<tr><td>${l}</td><td>${esc(v)}</td></tr>` : "";
-    $("printroot").innerHTML = `<div class="pv">
+    return `<div class="pv">
       <table class="pv-top"><tr>
         <td class="pv-num">Понуда бр. <u>${esc(o.number)}</u></td>
         <td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td>
@@ -2698,15 +2725,135 @@ async function printOffer(o) {
       <div class="pv-valid">Понудата важи ${o.validity} дена.</div>
       <img class="pv-footer" src="brand-footer.png" alt="ELAKS">
     </div>`;
-    const imgs = [...$("printroot").querySelectorAll("img")];
-    await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
+}
+const imagesLoaded = (root) => Promise.all([...root.querySelectorAll("img")]
+  .map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
+
+async function printOffer(o) {
+  try {
+    $("printroot").innerHTML = await offerSheetHtml(o);
+    await imagesLoaded($("printroot"));
     await new Promise((r) => setTimeout(r, 150));
-    window.print();      // never cleared afterwards — see printDoc for why
+    printTitled(offerFileName(o, "pdf").slice(0, -4));   // never cleared afterwards — see printDoc for why
     toast(T('Choose "Save as PDF" in the print dialog', 'Избери „Зачувај како PDF" во дијалогот'));
   } catch (e) {
     console.error(e);
     say("Could not build the PDF view: " + e.message);
   }
+}
+
+// Sharing is two taps on purpose. A phone opens its share sheet — Viber,
+// WhatsApp, Messenger, mail — only straight from a tap, and drawing the PDF
+// takes long enough that the first tap would have expired. So the first one
+// saves and prepares the file, and the second hands it over.
+let offerFile = null;
+async function shareOffer(o) {
+  toast(T("Preparing the PDF…", "Се подготвува PDF…"));
+  // the sheet that just closed hides itself 220 ms later; do not open into that
+  const settled = new Promise((r) => setTimeout(r, 240));
+  try { [offerFile] = await Promise.all([offerPdfFile(o), settled]); }
+  catch (e) { console.error(e); return say(T("Could not make the PDF: ", "Не можев да го направам PDF: ") + e.message); }
+  // the PDF is usually faster than the notice, which would sit on the Share button
+  const tn = $("toast"); clearTimeout(tn._timer); tn.classList.remove("on");
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [offerFile] }));
+  openSheet(`
+    <h2>${T("Offer ready to send", "Понудата е подготвена")}</h2>
+    <div class="card row" style="gap:12px;align-items:center">
+      <span class="thumb ph">${ICON.doc}</span>
+      <div style="flex:1;min-width:0"><b style="overflow-wrap:anywhere">${esc(offerFile.name)}</b>
+        <div class="muted">${esc(o.number)} · ${fmt(o.grand_total)} ден. · ${Math.max(1, Math.round(offerFile.size / 1024))} KB</div></div>
+    </div>
+    ${canShare
+      ? `<button class="btn amber" onclick="sendOfferFile('${o.id}')">${ICON.share}${T("Share — Viber, WhatsApp, Messenger…", "Сподели — Viber, WhatsApp, Messenger…")}</button>
+         <button class="btn ghost" onclick="downloadOfferFile('${o.id}')">${T("Download instead", "Само преземи")}</button>`
+      : `<button class="btn" onclick="downloadOfferFile('${o.id}')">${T("Download", "Преземи")}</button>
+         <p class="muted" style="margin-top:10px">${T(
+           "This browser cannot pass files to other apps. Download it, then send it from Viber or WhatsApp.",
+           "Овој прелистувач не може да праќа датотеки во други апликации. Преземи ја, па испрати ја од Viber или WhatsApp.")}</p>`}`);
+}
+async function sendOfferFile(id) {
+  if (!offerFile) return;
+  try {
+    await navigator.share({ files: [offerFile], title: offerFile.name.replace(/\.pdf$/, "") });
+  } catch (e) {
+    if (e && e.name === "AbortError") return;      // closed the share sheet without choosing
+    console.error(e);
+    return say(T("Could not share: ", "Не може да се сподели: ") + e.message);
+  }
+  closeSheet(); toast(T("Sent", "Испратено"));
+  setTimeout(() => promptDeduct(id), 400);
+}
+function downloadOfferFile(id) {
+  if (!offerFile) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(offerFile); a.download = offerFile.name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  closeSheet(); toast(T("Downloaded", "Преземено"));
+  setTimeout(() => promptDeduct(id), 400);
+}
+
+// Fetched the first time Share is used, so the app itself loads no slower.
+// A failed load is forgotten, so the next tap tries again.
+const scriptOnce = (() => {
+  const seen = {};
+  return (src) => seen[src] || (seen[src] = new Promise((ok, no) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok;
+    s.onerror = () => { delete seen[src]; s.remove();
+      no(new Error(T("no connection to fetch the PDF maker", "нема врска за PDF алатката"))); };
+    document.head.appendChild(s);
+  }));
+})();
+
+// The offer as a real PDF file. The print view cannot be handed to another
+// app — the browser keeps it — so this draws the same layout onto A4 pages
+// here. A page ends under a row, never through one.
+async function offerPdfFile(o) {
+  await Promise.all([
+    scriptOnce("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"),
+    scriptOnce("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"),
+  ]);
+  // A4 less the print margins: 190 by 273 mm, laid out off screen
+  const W = 190, H = 273, host = document.createElement("div");
+  host.style.cssText = `position:absolute;left:-10000px;top:0;width:${W}mm;background:#fff`;
+  host.innerHTML = await offerSheetHtml(o);
+  document.body.appendChild(host);
+  try {
+    await imagesLoaded(host);
+    const scale = 2;
+    const canvas = await window.html2canvas(host, { scale, backgroundColor: "#ffffff", logging: false });
+    const pxPerMm = canvas.width / W, pageH = Math.floor(H * pxPerMm);
+    const top = host.getBoundingClientRect().top;
+    const cuts = [...host.querySelectorAll(".pv > *, .pv-items tr")]
+      .map((el) => Math.round((el.getBoundingClientRect().bottom - top) * scale)).sort((a, b) => a - b);
+    // where the column headings and the item rows sit, so a page that opens
+    // in the middle of the list can carry the headings again, as print does
+    const at = (sel) => { const el = host.querySelector(sel); if (!el) return null;
+      const r = el.getBoundingClientRect(); return { top: Math.round((r.top - top) * scale), bottom: Math.round((r.bottom - top) * scale) }; };
+    const head = at(".pv-items thead"), rows = at(".pv-items tbody");
+    const headH = head ? head.bottom - head.top : 0;
+    const pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
+    for (let y = 0, page = 0; y < canvas.height - 1; page++) {
+      const repeat = page > 0 && headH > 0 && rows && y > rows.top && y < rows.bottom;
+      const lift = repeat ? headH : 0;
+      let end = Math.min(canvas.height, y + pageH - lift);
+      if (end < canvas.height) {
+        const fit = cuts.filter((c) => c > y + 40 && c <= end);
+        if (fit.length) end = fit[fit.length - 1];   // else one row is taller than a page: cut it
+      }
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width; slice.height = lift + (end - y);
+      const g = slice.getContext("2d");
+      g.fillStyle = "#fff"; g.fillRect(0, 0, slice.width, slice.height);
+      if (repeat) g.drawImage(canvas, 0, head.top, canvas.width, headH, 0, 0, canvas.width, headH);
+      g.drawImage(canvas, 0, y, canvas.width, end - y, 0, lift, canvas.width, end - y);
+      if (page) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.92), "JPEG", 10, 12, W, slice.height / pxPerMm);
+      y = end;
+    }
+    return new File([pdf.output("blob")], offerFileName(o, "pdf"), { type: "application/pdf" });
+  } finally { host.remove(); }
 }
 // Puts real pictures where the template left «IMG:n» markers.
 // Done by hand so the document pipeline owns no third-party image library.
@@ -3013,7 +3160,7 @@ async function generateDocx(o) {
     const blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `Ponuda_${o.number}.docx`;
+    a.download = offerFileName(o, "docx");
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
