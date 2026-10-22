@@ -10,6 +10,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
+import { occursOn } from "./occurs.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -67,19 +68,22 @@ Deno.serve(async (req) => {
   const now = nowLocal();
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const hhmm = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const dow = now.getDay();
   const dom = now.getDate();
+
+  // A repeating task is settled for today by a tick for today, or by being
+  // marked as not happening. last_done alone cannot say so: ticking off an
+  // earlier day that was missed moves it to that day, and today's reminder
+  // would come anyway. Read by the reminders and by the morning digest.
+  const { data: comps } = await db.from("task_completions").select("task_id").eq("done_on", today);
+  const settledToday = new Set((comps ?? []).map((c: any) => c.task_id));
+  const doneToday = (t: any) => t.recurrence ? settledToday.has(t.id) || t.last_done === today : !!t.done;
 
   // ---- 1. task reminders ----
   const { data: tasks } = await db.from("tasks").select("*")
     .eq("remind", true).not("due_time", "is", null);
   for (const t of tasks ?? []) {
-    const isToday =
-      t.due_date === today ||
-      t.recurrence === "daily" ||
-      (t.recurrence === "weekly" && ((t.recur_days?.length ? t.recur_days : [t.recur_dow]).includes(dow))) ||
-      (t.recurrence === "monthly" && t.recur_dom === dom);
-    const doneToday = t.recurrence ? t.last_done === today : t.done;
+    // on the days the Tasks tab lists it, by the same rules — see occurs.ts
+    const isToday = occursOn(t, today);
     // Fire ahead of the task by however many minutes it asks for — a reminder
     // that arrives as something starts is too late to be any use.
     const lead = Number(t.remind_before) || 0;
@@ -88,7 +92,7 @@ Deno.serve(async (req) => {
       const mins = Math.max(0, h * 60 + m - lead);
       return String(Math.floor(mins / 60)).padStart(2, "0") + ":" + String(mins % 60).padStart(2, "0");
     })();
-    if (isToday && !doneToday && t.reminded_on !== today && fireAt <= hhmm) {
+    if (isToday && !doneToday(t) && t.reminded_on !== today && fireAt <= hhmm) {
       // A personal task is private: it goes to whoever it belongs to, and to
       // anyone they have given access to — never to everyone with the context.
       const who = t.context === "personal"
@@ -134,14 +138,12 @@ Deno.serve(async (req) => {
   const DIGEST_WINDOW_MIN = 180;      // three hours
 
   if (minutesPast >= 0 && minutesPast <= DIGEST_WINDOW_MIN && sentOn !== today) {
+    // today's as the Tasks tab counts them, and what slipped from earlier days
     const openToday = (tasks0: any[]) =>
       tasks0.filter((t) => {
-        const isToday = t.due_date === today || t.recurrence === "daily" ||
-          (t.recurrence === "weekly" && ((t.recur_days?.length ? t.recur_days : [t.recur_dow]).includes(dow))) ||
-          (t.recurrence === "monthly" && t.recur_dom === dom) ||
+        const isToday = occursOn(t, today) ||
           (t.due_date && t.due_date < today && !t.done && !t.recurrence);
-        const doneToday = t.recurrence ? t.last_done === today : t.done;
-        return isToday && !doneToday;
+        return isToday && !doneToday(t);
       });
     const { data: all } = await db.from("tasks").select("*");
     const { data: ownerRow } = await db.from("user_roles").select("user_id").eq("role", "owner").maybeSingle();
