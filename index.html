@@ -873,6 +873,9 @@ async function refreshAll(only) {
     if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
     if (LOADERS[k].scalar) state[k] = (r.data && r.data.balance != null) ? parseFloat(r.data.balance) : 0;
     else state[k] = r.data ?? [];
+    // tasks.habit arrives with migration 0004; until it is run, every
+    // repeating task counts as a habit and the switch stays out of sight
+    if (k === "tasks" && (r.data || []).length) state.habitCol = "habit" in r.data[0];
     if (k === "completions") {
       state.doneSet = new Set((r.data ?? []).filter((c) => !c.skipped).map((c) => c.task_id + ":" + c.done_on));
       state.skipSet = new Set((r.data ?? []).filter((c) => c.skipped).map((c) => c.task_id + ":" + c.done_on));
@@ -925,7 +928,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261022-190459";
+const BUILD = "20261022-191229";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1443,7 +1446,7 @@ function renderToday() {
       ? `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
           ${T("Done today", "Завршени денес")} · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`
       : "<span></span>"}
-      <span style="display:flex;gap:6px">${state.tasks.some((t) => t.recurrence && vis(t))
+      <span style="display:flex;gap:6px">${state.tasks.some((t) => isHabit(t) && vis(t))
         ? `<button class="chip sm" onclick="openHabits()">${T("Habits", "Навики")} ›</button>` : ""}
       <button class="chip sm" onclick="openHistory()">${T("Completed", "Завршени")} ›</button></span>
     </div>`;
@@ -1571,7 +1574,7 @@ function taskMeta(t, rhythm = true) {
   const bits = [];
   const add = (html, cls) => bits.push(`<span${cls ? ` class="${cls}"` : ""}>${html}</span>`);
   if (t.recurrence && rhythm) {
-    const run = habitStreak(t);
+    const run = isHabit(t) ? habitStreak(t) : 0;
     if (run >= 2) add(ICON.flame + run, "streak");          // a run worth keeping
     add(ICON.repeat + esc(repeatLabel(t)));
   }
@@ -1684,6 +1687,8 @@ async function toggleTask(id, onDate, btn) {
    marked as not happening counts neither way, and today only counts once it
    is done: until midnight it has not been missed. */
 const habitStart = (t) => t.recur_from || t.due_date || null;
+// which repeating tasks are habits is yours to say, once the column is there
+const isHabit = (t) => !!t.recurrence && (state.habitCol ? !!t.habit : true);
 const habitSkipped = (t, d) => state.skipSet.has(t.id + ":" + d);
 function habitStreak(t) {
   let run = 0;
@@ -1753,12 +1758,15 @@ const habitTimes = (n) => `${n}×`;
 function openHabits() {
   const today = todayStr();
   const list = state.tasks
-    .filter((t) => t.recurrence && taskInScope(t, state.ctxFilter) && !(t.recur_until && t.recur_until < today))
+    .filter((t) => isHabit(t) && taskInScope(t, state.ctxFilter) && !(t.recur_until && t.recur_until < today))
     .map((t) => ({ t, s: habitStats(t) }))
     .sort((a, b) => b.s.streak - a.s.streak || (a.t.title || "").localeCompare(b.t.title || ""));
   openSheet(`<h2>${T("Habits", "Навики")}</h2>
-    <p class="muted">${T("Every repeating task, and how it is going. Tap one for its full record.",
-      "Секоја задача што се повторува, и како оди. Допри една за целата историја.")}</p>
+    <p class="muted">${state.habitCol
+      ? T("The repeating tasks you track as habits, and how they are going. Tap one for its full record.",
+          "Задачите што ги следиш како навики, и како одат. Допри една за целата историја.")
+      : T("Every repeating task, and how it is going. Tap one for its full record.",
+          "Секоја задача што се повторува, и како оди. Допри една за целата историја.")}</p>
     ${list.map(({ t, s }) => `<div class="card hb-card tapp" role="button" tabindex="0" onclick="openHabitSheet('${t.id}')" style="margin-top:10px">
       <div class="hb-top"><span class="led ${t.context}"></span><b>${esc(t.title)}</b>
         ${s.streak ? `<span class="hb-fl">${ICON.flame}${s.streak}</span>` : ""}</div>
@@ -1767,8 +1775,11 @@ function openHabits() {
         <span>90 ${T("days", "дена")} <b>${habitTimes(s.q.times)}</b></span>
         <span>${T("Year", "Година")} <b>${habitTimes(s.y.times)}</b></span></div>
       ${habitStrip(t)}
-    </div>`).join("") || `<div class="empty">${T("No repeating tasks yet.<br>Give a task a Repeat and it shows up here.",
-      "Сè уште нема задачи што се повторуваат.<br>Стави Повторувај на задача и ќе се појави тука.")}</div>`}`);
+    </div>`).join("") || `<div class="empty">${state.habitCol
+      ? T("No habits yet.<br>Open a repeating task and turn on “Track as a habit”.",
+          "Сè уште нема навики.<br>Отвори задача што се повторува и вклучи „Следи како навика“.")
+      : T("No repeating tasks yet.<br>Give a task a Repeat and it shows up here.",
+          "Сè уште нема задачи што се повторуваат.<br>Стави Повторувај на задача и ќе се појави тука.")}</div>`}`);
 }
 
 function openHabitSheet(id) {
@@ -1817,7 +1828,7 @@ function openTaskSheet(id) {
   const canTick = id && (t.recurrence ? occursOn(t, today) && !isDoneOn(t, today) : !t.done);
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
-    ${id && t.recurrence ? (() => {
+    ${id && isHabit(t) ? (() => {
       const run = habitStreak(t), n = habitStats(t).m.times;
       return `<button class="hb-link" onclick="openHabitSheet('${id}')">${ICON.flame}<span>${run
         ? `${run} ${T("in a row", "по ред")} · ` : ""}${habitTimes(n)} ${T("in 30 days", "за 30 дена")}</span>
@@ -1861,6 +1872,11 @@ function openTaskSheet(id) {
             <span class="muted nw" id="tk-int-unit"></span></div></div>
         <div><label>Until (opt.)</label><input id="tk-until" type="date" value="${t.recur_until || ""}"></div>
       </div>
+      ${state.habitCol ? `<div class="row" style="margin-top:12px">
+        <button class="clbox ${t.habit ? "on" : ""}" id="tk-habit"
+          onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'✓':''">${t.habit ? "✓" : ""}</button>
+        <span>${T("Track as a habit — a streak, and a record of how often", "Следи како навика — низа и историја колку често")}</span>
+      </div>` : ""}
     </div>
     <div id="tk-days" style="display:none">
       <label>Repeat on</label>
@@ -2101,6 +2117,8 @@ async function saveTask(id) {
     recur_every: rec ? Math.max(1, parseInt(($("tk-int") || {}).value) || 1) : 1,
     recur_from: rec ? ($("tk-date").value || todayStr()) : null,
     recur_until: rec ? (($("tk-until") || {}).value || null) : null,
+    // only a repeating task can be a habit, and the field is only sent once it exists
+    ...(state.habitCol ? { habit: !!rec && !!($("tk-habit") && $("tk-habit").classList.contains("on")) } : {}),
     priority: $("tk-prio").classList.contains("on"),
     client_id: ($("tk-client") || {}).value || null,
     apartment_id: ($("tk-apt2") || {}).value || null,
