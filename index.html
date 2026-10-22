@@ -12,6 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap&subset=cyrillic-ext" rel="stylesheet">
 <style>
 :root{
+  --hb-miss:#C9D0D9;
   --navy:#1E3A5F; --navy-deep:#152A46; --amber:#F5B301; --paper:#F7F8FA;
   --card:#FFFFFF; --ink:#23272E; --muted:#6B7280; --line:#E5E8EC;
   --work:#4C6EF5; --elaks:#1E3A5F; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
@@ -196,6 +197,36 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .tk-day-top svg{width:17px;height:17px;vertical-align:-3px;margin-right:6px}
 #tk-img-prev:empty{display:none}
+/* ---- habits: a repeating task's record ---- */
+.t-meta .streak{color:var(--amber);font-weight:600}
+.hb-link{display:flex;align-items:center;gap:6px;width:100%;margin:6px 0 2px;padding:9px 12px;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface);color:var(--ink);font-size:13.5px;text-align:left}
+.hb-link svg{width:16px;height:16px;color:var(--amber);flex:none}
+.hb-link .chev{margin-left:auto;color:var(--muted)}
+.hb-big{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.15}
+.hb-big svg{width:23px;height:23px;color:var(--amber);vertical-align:-3px;margin-right:4px}
+.hb-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 4px}
+.hb-stat{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px 10px;min-width:0}
+.hb-stat span,.hb-stat small{display:block;font-size:11.5px;color:var(--muted)}
+.hb-stat b{display:block;font-family:var(--cond);font-size:24px;line-height:1.2}
+.hb-grid{display:grid;grid-template-rows:repeat(7,auto);grid-auto-flow:column;gap:3px}
+.hb-grid i,.hb-strip i{display:block;aspect-ratio:1;border-radius:3px;background:var(--line);opacity:.4}
+/* a missed day stands apart from a day that was never one of its days */
+.hb-grid i.due,.hb-strip i.due,.hb-legend i.due{background:var(--hb-miss);opacity:1}
+.hb-grid i.done,.hb-strip i.done{background:var(--personal);opacity:1}
+.hb-grid i.skip,.hb-strip i.skip{background:var(--amber);opacity:.5}
+.hb-grid i.now,.hb-strip i.now{box-shadow:inset 0 0 0 1.5px var(--amber);opacity:1}
+.hb-grid i.later{visibility:hidden}
+.hb-months{display:grid;gap:3px;font-size:10.5px;color:var(--muted);margin-bottom:3px;white-space:nowrap}
+.hb-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted);margin-top:8px}
+.hb-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--line)}
+.hb-card .hb-top{display:flex;align-items:center;gap:9px}
+.hb-card .hb-top b{flex:1;min-width:0;font-weight:600}
+.hb-card .hb-fl{color:var(--amber);font-weight:700;white-space:nowrap}
+.hb-card .hb-fl svg{width:15px;height:15px;vertical-align:-2px;margin-right:2px}
+.hb-nums{display:flex;gap:14px;font-size:12.5px;color:var(--muted);margin:6px 0 7px}
+.hb-nums b{color:var(--ink);font-weight:600}
+.hb-strip{display:grid;grid-template-columns:repeat(30,1fr);gap:2px}
 .who{background:var(--line);color:var(--muted);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700;flex:none}
 .clbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;color:var(--on-dark);font-size:14px;display:flex;align-items:center;justify-content:center}
 .clbox.on{background:var(--personal);border-color:var(--personal)}
@@ -445,7 +476,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
   /* Elaks navy is the colour of the brand, and on a dark card it vanished:
      its dot read as no dot at all. Lighter here, and still apart from Work. */
   :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-    --elaks:#9DB4D6}
+    --elaks:#9DB4D6;--hb-miss:#3A4456}
   .btn.ghost{background:var(--card);color:var(--ink)}
   .tick{border-color:#39424F}
 }
@@ -688,6 +719,7 @@ const ICON = (() => {
     home: svg('<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9.5 21v-7h5v7"/>'),
     calendar: svg('<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>'),
     check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    flame: svg('<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4.1 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'),
     job: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>'),
     arrive: svg('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/>'),
     leave: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
@@ -790,7 +822,20 @@ const backMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n, 1
 const LOADERS = {
   people:     { need: () => true,               q: () => db.from("team_members").select("*") },
   settings:   { need: () => true,               q: () => db.from("app_settings").select("key, value") },
-  completions:{ need: () => true,               q: () => db.from("task_completions").select("task_id, done_on, skipped").gte("done_on", backDays(180)) },
+  // A year and a bit, for a habit's record. Read a page at a time: the server
+  // hands back at most a thousand rows per request, and a few daily habits
+  // pass that in a year — the rest would be dropped without a word.
+  completions:{ need: () => true,               q: async () => {
+    const all = [];
+    for (let at = 0; at < 50000; at += 1000) {
+      const r = await db.from("task_completions").select("task_id, done_on, skipped")
+        .gte("done_on", backDays(400)).order("done_on", { ascending: false }).range(at, at + 999);
+      if (r.error) return r;
+      all.push(...(r.data || []));
+      if ((r.data || []).length < 1000) break;
+    }
+    return { data: all, error: null };
+  } },
   templates:  { need: () => true,               q: () => db.from("task_templates").select("*").order("name") },
   tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
   stock:      { need: () => state.perm.elaks,   q: () => db.from("article_stock").select("*").eq("active", true).order("name") },
@@ -880,7 +925,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261022-183423";
+const BUILD = "20261022-190459";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1398,7 +1443,9 @@ function renderToday() {
       ? `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
           ${T("Done today", "Завршени денес")} · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`
       : "<span></span>"}
-      <button class="chip sm" onclick="openHistory()">${T("Completed tasks", "Завршени задачи")} ›</button>
+      <span style="display:flex;gap:6px">${state.tasks.some((t) => t.recurrence && vis(t))
+        ? `<button class="chip sm" onclick="openHabits()">${T("Habits", "Навики")} ›</button>` : ""}
+      <button class="chip sm" onclick="openHistory()">${T("Completed", "Завршени")} ›</button></span>
     </div>`;
     if (state.showDone) html += B.doneToday.map(row).join("");
   }
@@ -1523,7 +1570,11 @@ const remindLabel = (m) => !m ? T("at the time", "во тоа време")
 function taskMeta(t, rhythm = true) {
   const bits = [];
   const add = (html, cls) => bits.push(`<span${cls ? ` class="${cls}"` : ""}>${html}</span>`);
-  if (t.recurrence && rhythm) add(ICON.repeat + esc(repeatLabel(t)));
+  if (t.recurrence && rhythm) {
+    const run = habitStreak(t);
+    if (run >= 2) add(ICON.flame + run, "streak");          // a run worth keeping
+    add(ICON.repeat + esc(repeatLabel(t)));
+  }
   const cl = t.checklist || [];
   const ticked = cl.filter((x) => x.done).length;
   if (cl.length) add(ICON.list + ticked + "/" + cl.length, ticked === cl.length ? "full" : "");
@@ -1626,6 +1677,129 @@ async function toggleTask(id, onDate, btn) {
     toastUndo(`${name} — ${T("done", "завршено")}`, () => toggleTask(id, day), 6);
   }
 }
+/* ---------- habits ----------
+   A repeating task keeps its own record: every tick is a row in
+   task_completions. Read back, it says how a habit is going — the run you are
+   on, and how often it was done in the last month, quarter and year. A day
+   marked as not happening counts neither way, and today only counts once it
+   is done: until midnight it has not been missed. */
+const habitStart = (t) => t.recur_from || t.due_date || null;
+const habitSkipped = (t, d) => state.skipSet.has(t.id + ":" + d);
+function habitStreak(t) {
+  let run = 0;
+  for (let i = 0; i < 400; i++) {
+    const d = backDays(i);
+    if (!occursOn(t, d) || habitSkipped(t, d)) continue;
+    if (isDoneOn(t, d)) run++;
+    else if (i > 0) break;
+  }
+  return run;
+}
+function habitStats(t) {
+  const win = (n) => {
+    let due = 0, hit = 0, times = 0;
+    for (let i = 0; i < n; i++) {
+      const d = backDays(i), did = isDoneOn(t, d);
+      if (did) times++;                                  // a tick on an extra day still counts as doing it
+      if (!occursOn(t, d) || habitSkipped(t, d) || (i === 0 && !did)) continue;
+      due++; if (did) hit++;
+    }
+    return { due, hit, times };
+  };
+  let best = 0, run = 0;
+  for (let i = 365; i >= 0; i--) {
+    const d = backDays(i);
+    if (!occursOn(t, d) || habitSkipped(t, d)) continue;
+    if (isDoneOn(t, d)) best = Math.max(best, ++run);
+    else if (i > 0) run = 0;
+  }
+  return { streak: habitStreak(t), best, m: win(30), q: win(90), y: win(365) };
+}
+// what a day was: done, due and missed, marked as not happening, or not one of its days
+function habitDay(t, d, today) {
+  if (d > today) return "later";
+  if (isDoneOn(t, d)) return "done";
+  if (habitSkipped(t, d)) return "skip";
+  if (!occursOn(t, d)) return "";
+  return d === today ? "now" : "due";
+}
+// Half a year as a grid: a column a week, Monday at the top, today in the last column.
+function habitGrid(t, weeks = 26) {
+  const today = todayStr();
+  const start = new Date(today + "T12:00");
+  start.setDate(start.getDate() - (start.getDay() + 6) % 7 - (weeks - 1) * 7);
+  let cells = "", months = "", lastM = -1;
+  for (let w = 0; w < weeks; w++) {
+    for (let k = 0; k < 7; k++) {
+      const d = new Date(start); d.setDate(start.getDate() + w * 7 + k);
+      const ds = d.toLocaleDateString("sv-SE");
+      if (k === 0) {
+        const m = d.getMonth();
+        months += `<span>${m !== lastM ? monthName(ds.slice(0, 7)).slice(0, 3) : ""}</span>`;
+        lastM = m;
+      }
+      cells += `<i class="${habitDay(t, ds, today)}"></i>`;
+    }
+  }
+  const cols = `grid-template-columns:repeat(${weeks},1fr)`;
+  return `<div class="hb-months" style="${cols}">${months}</div><div class="hb-grid" style="${cols}">${cells}</div>`;
+}
+const habitStrip = (t) => {
+  const today = todayStr();
+  return `<div class="hb-strip">${Array.from({ length: 30 }, (_, i) => `<i class="${habitDay(t, backDays(29 - i), today)}"></i>`).join("")}</div>`;
+};
+const habitTimes = (n) => `${n}×`;
+
+function openHabits() {
+  const today = todayStr();
+  const list = state.tasks
+    .filter((t) => t.recurrence && taskInScope(t, state.ctxFilter) && !(t.recur_until && t.recur_until < today))
+    .map((t) => ({ t, s: habitStats(t) }))
+    .sort((a, b) => b.s.streak - a.s.streak || (a.t.title || "").localeCompare(b.t.title || ""));
+  openSheet(`<h2>${T("Habits", "Навики")}</h2>
+    <p class="muted">${T("Every repeating task, and how it is going. Tap one for its full record.",
+      "Секоја задача што се повторува, и како оди. Допри една за целата историја.")}</p>
+    ${list.map(({ t, s }) => `<div class="card hb-card tapp" role="button" tabindex="0" onclick="openHabitSheet('${t.id}')" style="margin-top:10px">
+      <div class="hb-top"><span class="led ${t.context}"></span><b>${esc(t.title)}</b>
+        ${s.streak ? `<span class="hb-fl">${ICON.flame}${s.streak}</span>` : ""}</div>
+      <div class="t-meta">${ICON.repeat}${esc(repeatLabel(t))}${t.due_time ? " · " + t.due_time.slice(0, 5) : ""}</div>
+      <div class="hb-nums"><span>30 ${T("days", "дена")} <b>${habitTimes(s.m.times)}</b></span>
+        <span>90 ${T("days", "дена")} <b>${habitTimes(s.q.times)}</b></span>
+        <span>${T("Year", "Година")} <b>${habitTimes(s.y.times)}</b></span></div>
+      ${habitStrip(t)}
+    </div>`).join("") || `<div class="empty">${T("No repeating tasks yet.<br>Give a task a Repeat and it shows up here.",
+      "Сè уште нема задачи што се повторуваат.<br>Стави Повторувај на задача и ќе се појави тука.")}</div>`}`);
+}
+
+function openHabitSheet(id) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const today = todayStr(), s = habitStats(t), start = habitStart(t);
+  const cell = (label, w) => `<div class="hb-stat"><span>${label}</span><b>${habitTimes(w.times)}</b>
+    <small>${w.due ? T(`${w.hit} of ${w.due} planned`, `${w.hit} од ${w.due} планирани`) : T("none planned", "нема планирани")}</small></div>`;
+  const open = occursOn(t, today) && !isDoneOn(t, today);
+  openSheet(`<h2>${esc(t.title)}</h2>
+    <p class="muted">${ICON.repeat.replace("<svg", '<svg style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"')}${esc(repeatLabel(t))}${t.due_time ? " · " + t.due_time.slice(0, 5) : ""}</p>
+    <div class="hb-big" style="margin-top:10px">${ICON.flame}${s.streak} ${T(s.streak === 1 ? "time in a row" : "in a row", "по ред")}</div>
+    <div class="muted">${s.best > s.streak ? T(`Best run this year: ${s.best}`, `Најдобро оваа година: ${s.best}`)
+      : s.streak ? T("Your best run this year", "Најдобро оваа година") : T("Tick it off to start a run", "Штиклирај за да започнеш низа")}</div>
+    <div class="hb-stats">${cell(T("30 days", "30 дена"), s.m)}${cell(T("90 days", "90 дена"), s.q)}${cell(T("1 year", "1 година"), s.y)}</div>
+    ${start && start > backDays(364) ? `<p class="muted" style="font-size:12.5px">${T(`Counted from ${dmy(start)}, when it started.`, `Се брои од ${dmy(start)}, кога започна.`)}</p>` : ""}
+    <div class="sec">${T("The last 26 weeks", "Последните 26 недели")}</div>
+    ${habitGrid(t)}
+    <div class="hb-legend">
+      <span><i style="background:var(--personal)"></i>${T("done", "направено")}</span>
+      <span><i class="due"></i>${T("missed", "пропуштено")}</span>
+      <span><i style="background:var(--amber);opacity:.5"></i>${T("did not happen", "не се случи")}</span>
+      <span><i style="opacity:.4"></i>${T("not one of its days", "не е негов ден")}</span>
+    </div>
+    ${open ? `<button class="btn" onclick="habitTick('${id}')">${ICON.check}${T("Tick off today", "Штиклирај за денес")}</button>` : ""}
+    <button class="btn ghost" onclick="openTaskSheet('${id}')">${T("Edit task", "Уреди задача")}</button>`);
+}
+async function habitTick(id) {
+  await toggleTask(id);
+  openHabitSheet(id);
+}
 let tkChecklist = [];
 function openTaskSheet(id) {
   if (!id && !myCtx().length) return toast("No task access yet");
@@ -1643,6 +1817,12 @@ function openTaskSheet(id) {
   const canTick = id && (t.recurrence ? occursOn(t, today) && !isDoneOn(t, today) : !t.done);
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
+    ${id && t.recurrence ? (() => {
+      const run = habitStreak(t), n = habitStats(t).m.times;
+      return `<button class="hb-link" onclick="openHabitSheet('${id}')">${ICON.flame}<span>${run
+        ? `${run} ${T("in a row", "по ред")} · ` : ""}${habitTimes(n)} ${T("in 30 days", "за 30 дена")}</span>
+        <span class="chev">${T("Record", "Историја")} ›</span></button>`;
+    })() : ""}
     <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras"
       enterkeyhint="done" onkeydown="tkTitleKey(event,'${id || ""}')">
     <label>Context</label>
