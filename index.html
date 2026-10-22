@@ -138,12 +138,64 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
 /* ---- tasks ---- */
 .task{display:flex;align-items:center;gap:11px}
-.task .tick{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff}
-.task.done .tick{background:var(--personal);border-color:var(--personal)}
+/* The box is drawn wherever a task can be ticked, Home included — it used to
+   be styled only inside a task row, which left Home's boxes invisible but
+   still live. It is drawn small and answers a thumb: a near miss used to open
+   the task instead of ticking it. */
+.tick{position:relative;width:24px;height:24px;border-radius:8px;border:2px solid #C3CAD4;flex:none;
+  display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;
+  transition:background .15s,border-color .15s}
+.tick::after{content:"";position:absolute;inset:-10px}
+.tick.on,.task.done .tick{background:var(--personal);border-color:var(--personal)}
+.tick.pop{animation:tickpop .3s ease}
+@keyframes tickpop{0%{transform:scale(.8)}55%{transform:scale(1.15)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.tick.pop{animation:none}}
 .task.done .t-title{text-decoration:line-through;color:var(--muted)}
-.task .t-title{flex:1;font-weight:500}
-.task .t-time{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.task .t-title{flex:1;min-width:0;font-weight:500;overflow-wrap:anywhere}
+/* a row is its title and, underneath, whatever else the task carries */
+.task .t-body{flex:1;min-width:0;cursor:pointer}
+.t-meta{font-size:12.5px;color:var(--muted);line-height:1.35;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-meta > span{margin-right:10px}
+.t-meta > span:last-child{margin-right:0}
+.t-meta svg{width:13px;height:13px;vertical-align:-2px;margin-right:3px}
+.t-meta .late{color:var(--danger)}
+.t-meta .full{color:var(--personal)}
+.star{color:var(--amber)}
+.task .t-time{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.task .t-time.late{color:var(--danger);font-weight:500}
+.task .t-when{flex:none;width:32px;height:32px;margin:-4px -6px -4px 0;display:flex;align-items:center;
+  justify-content:center;color:var(--muted)}
+.task .t-when svg{width:18px;height:18px}
+.task .tk-ico{width:24px;height:24px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.task .tk-ico svg{width:19px;height:19px}
 .task .rec{font-size:11px;color:var(--muted)}
+/* how the day is going: done against all there is, and what is next */
+.tk-day{padding:13px 14px 12px}
+.tk-day-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.tk-day-top b{font-family:var(--cond);font-weight:700;font-size:17px}
+.tk-day.all .tk-day-top b{color:var(--personal)}
+.tk-bar{height:6px;border-radius:3px;background:var(--line);margin:9px 0 0;overflow:hidden}
+.tk-bar i{display:block;height:100%;border-radius:3px;background:var(--personal);transition:width .35s ease}
+.tk-day-sub{display:block;width:100%;text-align:left;margin-top:8px;font-size:13px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tk-day-sub b{color:var(--ink);font-weight:600}
+/* a section heading with the one thing you can do to the whole section */
+.sec-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 8px}
+.sec-row .sec{margin:0}
+.chip.sm{padding:4px 11px;font-size:12.5px}
+.chip .led{width:8px;height:8px;margin-right:6px;vertical-align:1px;box-shadow:0 0 0 1.5px var(--surface)}
+.chip.on .led{box-shadow:0 0 0 1.5px rgba(255,255,255,.85)}
+.tk-daily{display:flex;align-items:center;gap:4px 6px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:0 2px 12px}
+.tk-daily svg{width:14px;height:14px;flex:none}
+.tk-daily button{color:var(--ink);font-size:13px;font-weight:500}
+.btn.mv-opt{width:100%;display:flex;flex-direction:column;align-items:center;gap:1px}
+.mv-opt small{font-weight:400;font-size:12px;color:var(--muted)}
+.task.tapp{cursor:pointer}
+.task.tapp:active{opacity:.7}
+button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
+.tk-day-top svg{width:17px;height:17px;vertical-align:-3px;margin-right:6px}
+#tk-img-prev:empty{display:none}
 .who{background:var(--line);color:var(--muted);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700;flex:none}
 .clbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;color:var(--on-dark);font-size:14px;display:flex;align-items:center;justify-content:center}
 .clbox.on{background:var(--personal);border-color:var(--personal)}
@@ -248,6 +300,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .hnote.warn{color:var(--danger)}
 .htxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tick.sm{width:21px;height:21px;border-radius:7px;font-size:12px}
+/* Home's rows sit close together, so the reach stays inside its own row */
+.tick.sm::after{inset:-4px -8px}
 .xtag{background:var(--line);color:var(--muted);border-radius:5px;padding:1px 6px;
   font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
 .bank-big{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.05;letter-spacing:-.01em}
@@ -388,9 +442,12 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
 @media (prefers-color-scheme: dark){
-  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A}
+  /* Elaks navy is the colour of the brand, and on a dark card it vanished:
+     its dot read as no dot at all. Lighter here, and still apart from Work. */
+  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
+    --elaks:#9DB4D6}
   .btn.ghost{background:var(--card);color:var(--ink)}
-  .task .tick{border-color:#39424F}
+  .tick{border-color:#39424F}
 }
 </style>
 </head>
@@ -420,7 +477,6 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
     <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
-    <button class="btn sm ghost" style="margin:2px 0 14px" onclick="openHistory()">Completed tasks →</button>
     <div id="week-list"></div>
   </div>
 
@@ -600,9 +656,16 @@ function dmyTime(v) {
   const d = v instanceof Date ? v : new Date(v);
   return isNaN(d) ? "" : `${dmy(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
+// Weekday names in the language the app is shown in — written out rather than
+// asked of the phone, which may not carry Macedonian.
+const WD_MK = {
+  short: ["Нед", "Пон", "Вто", "Сре", "Чет", "Пет", "Саб"],
+  long: ["Недела", "Понеделник", "Вторник", "Среда", "Четврток", "Петок", "Сабота"],
+};
 const wd = (v, style = "short") => {
   const d = v == null ? new Date() : (v instanceof Date ? v : new Date(String(v).length === 10 ? v + "T12:00" : v));
-  return isNaN(d) ? "" : d.toLocaleDateString("en-GB", { weekday: style });
+  if (isNaN(d)) return "";
+  return langMk() ? WD_MK[style === "long" ? "long" : "short"][d.getDay()] : d.toLocaleDateString("en-GB", { weekday: style });
 }; // YYYY-MM-DD local
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // Line icons drawn like the tab bar's, for the few buttons that carry one.
@@ -616,6 +679,18 @@ const ICON = (() => {
     clip: svg('<path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17.5a2 2 0 0 1-3-3l7.5-7.5"/>'),
     doc: svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/>'),
     share: svg('<path d="M12 3v12"/><path d="m7.5 7.5 4.5-4.5 4.5 4.5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>'),
+    // what a task row says under its title
+    repeat: svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+    list: svg('<path d="m9 11 3 3 9-9"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
+    bell: svg('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
+    note: svg('<path d="M4 6h16M4 12h16M4 18h10"/>'),
+    client: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 20V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v15"/>'),
+    home: svg('<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9.5 21v-7h5v7"/>'),
+    calendar: svg('<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>'),
+    check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    job: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>'),
+    arrive: svg('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/>'),
+    leave: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
   };
 })();
 
@@ -805,7 +880,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261020-220452";
+const BUILD = "20261022-183423";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1172,9 +1247,12 @@ function openPersonWork(uid) {
     ${!w.all.length ? `<p class="muted">${T("Nothing on their list.", "Ништо на нивната листа.")}</p>` : ""}`);
 }
 
+// Each area carries the colour its tasks are marked with, so the dots in the
+// list explain themselves.
 function renderCtxChips() {
   $("ctx-filter").innerHTML = (myCtx().length > 1 ? ["all", ...myCtx()] : []).map((c) =>
-    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${c === "all" ? "All" : CTX[c]}</button>`).join("")
+    `<button class="chip ${state.ctxFilter === c ? "on" : ""}" onclick="state.ctxFilter='${c}';renderToday()">${
+      c === "all" ? "All" : `<span class="led ${c}"></span>${CTX[c]}`}</button>`).join("")
     + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`
     + ((state.perm.owner && (state.people || []).length > 1)
         ? `<button class="chip" onclick="openTeamWork()">${T("Team", "Тим")} ›</button>` : "");
@@ -1186,9 +1264,9 @@ const searchRow = (today) => (t) => {
     : t.recurrence ? "repeats"
     : t.due_date ? dmy(t.due_date) : "no date";
   return `<div class="card task ${done ? "done" : ""}">
-    <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
+    <button class="tick" onclick="toggleTask('${t.id}',null,this)" aria-label="done">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
-    <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
+    <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span class="star">★</span> ' : ""}${esc(t.title)}</span>
     <span class="t-time">${when}</span>
   </div>`;
 };
@@ -1205,7 +1283,7 @@ function dayExtras(today) {
       if (!j.scheduled_on || j.scheduled_on > today) continue;
       if (state.mineOnly && j.assigned_to && j.assigned_to !== state.uid) continue;
       rows.push({
-        ctx: "elaks", time: j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : "",
+        ctx: "elaks", ico: "job", time: j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : "",
         late: j.scheduled_on < today,
         tag: T("job", "работа"), title: j.title,
         sub: [jobClient(j), jobSite(j), j.address].filter(Boolean).join(" · "),
@@ -1218,12 +1296,12 @@ function dayExtras(today) {
     for (const s of state.stays) {
       const apt = (s.apartments && s.apartments.name) || "";
       if (dOnly(s.check_in) === today && !s.arrived_at) {
-        rows.push({ ctx: "apts", time: "", tag: T("arriving", "пристига"),
+        rows.push({ ctx: "apts", ico: "arrive", time: "", tag: T("arriving", "пристига"),
           title: s.guest_name, sub: [apt, s.source].filter(Boolean).join(" · "),
           open: `openStaySheet('${s.id}')` });
       }
       if (dOnly(s.check_out) === today && !stayEnded(s)) {
-        rows.push({ ctx: "apts", time: checkoutTimeFor(s.apartment_id),
+        rows.push({ ctx: "apts", ico: "leave", time: checkoutTimeFor(s.apartment_id),
           tag: T("leaving", "заминува"),
           title: s.guest_name, sub: apt, open: `openStaySheet('${s.id}')` });
       }
@@ -1234,13 +1312,39 @@ function dayExtras(today) {
     || (a.time || "99:99").localeCompare(b.time || "99:99"));
 }
 
+// Not a task, so there is no box to tick: an icon in its place says what it
+// is, and keeps its name in line with the tasks around it.
 function extraRow(r) {
-  return `<div class="card row tapp" role="button" tabindex="0" onclick="${r.open}">
+  return `<div class="card task tapp" role="button" tabindex="0" onclick="${r.open}">
+    <span class="tk-ico">${ICON[r.ico] || ""}</span>
     <span class="led ${r.ctx}"></span>
-    <div style="flex:1;min-width:0"><b>${esc(r.title || "")}</b>
-      <div class="o-num"><span class="xtag">${r.tag}</span>${r.sub ? " " + esc(r.sub) : ""}${
-        r.late ? ` · <span style="color:var(--danger)">${T("overdue", "задоцнето")}</span>` : ""}</div></div>
+    <div class="t-body">
+      <div class="t-title">${esc(r.title || "")}</div>
+      <div class="t-meta"><span><span class="xtag">${r.tag}</span>${r.sub ? " " + esc(r.sub) : ""}${
+        r.late ? ` · <span class="late">${T("overdue", "задоцнето")}</span>` : ""}</span></div>
+    </div>
     ${r.time ? `<span class="t-time">${r.time}</span>` : ""}
+  </div>`;
+}
+
+// How the day is going, at a glance: what is done against all there is, and
+// what comes next on the clock.
+function dayCard(B) {
+  const done = B.doneToday.length, left = B.todays.length, total = done + left;
+  if (!total) return "";
+  const now = nowHM();
+  const next = B.todays.filter((t) => t.due_time && t.due_time.slice(0, 5) >= now)
+    .sort((a, b) => a.due_time.localeCompare(b.due_time))[0];
+  const head = !left ? T("All done for today", "Сè е завршено за денес")
+    : done ? T(`${done} of ${total} done`, `${done} од ${total} завршени`)
+    : T(`${total} to do today`, `${total} за денес`);
+  const sub = next
+    ? `<button class="tk-day-sub" onclick="openTaskSheet('${next.id}')">${T("Next", "Следно")}: <b>${next.due_time.slice(0, 5)}</b> ${esc(next.title)}</button>`
+    : !left && B.late ? `<div class="tk-day-sub">${T(`${B.late} overdue still open`, `${B.late} задоцнети се уште отворени`)}</div>` : "";
+  return `<div class="card tk-day ${left ? "" : "all"}">
+    <div class="tk-day-top"><b>${left ? "" : ICON.check}${head}</b></div>
+    <div class="tk-bar"><i style="width:${Math.round(done / total * 100)}%"></i></div>
+    ${sub}
   </div>`;
 }
 
@@ -1272,101 +1376,97 @@ function renderToday() {
   const missed = B.missed;
   const todays = B.todays.slice().sort(byPrio);
   const inbox = B.undated;
-  let html = "";
-  if (overdue.length || missed.length) {
-    html += `<div class="sec" style="color:var(--danger);display:flex;justify-content:space-between;align-items:center">
-      <span>${T("Overdue", "Задоцнети")}</span>
-      ${overdue.length ? `<button class="chip" onclick="moveAllOverdue()">${T("Move all to today", "Помести ги на денес")}</button>` : ""}
-    </div>` + overdue.map(taskRow(today)).join("");
-    html += missed.map(({ t, dates }) => `<div class="card task">
-      <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}')" aria-label="done"></button>
-      <span class="led ${t.context}"></span>
-      <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${esc(t.title)}
-        <span class="rec"> missed ${dmy(dates[0])}${dates.length > 1 ? ` +${dates.length - 1}` : ""}</span></span>
-      <span class="t-time tapp" role="button" tabindex="0" title="${T("Did not happen", "Не се случи")}"
-        onclick="event.stopPropagation();skipOccurrence('${t.id}','${dates[0]}')">✕</span>
-    </div>`).join("");
-  }
-  if (inbox.length) html += '<div class="sec">No date</div>' + inbox.map(taskRow(today)).join("");
   const extras = dayExtras(today);
-  if (todays.length) {
-    html += (overdue.length || missed.length || inbox.length) ? '<div class="sec">Today</div>' : "";
-    html += todays.map(taskRow(today)).join("");
-  } else if (!overdue.length && !missed.length && !inbox.length && !extras.length) {
+  const row = taskRow(today);
+  // In the order you would deal with them: what slipped, what is on today,
+  // what else is happening today, and only then what has no day yet — which
+  // used to sit above today and push it off the screen.
+  let html = state.loading ? "" : dayCard(B);
+  if (overdue.length || missed.length) {
+    html += `<div class="sec-row"><div class="sec" style="color:var(--danger)">${T("Overdue", "Задоцнети")} · ${overdue.length + missed.length}</div>
+      ${overdue.length ? `<button class="chip sm" onclick="moveAllOverdue()">${T("Move all to today", "Помести ги на денес")}</button>` : ""}
+    </div>` + overdue.map(row).join("") + missed.map(missedRow).join("");
+  }
+  if (todays.length) html += `<div class="sec">${T("Today", "Денес")} · ${todays.length}</div>` + todays.map(row).join("");
+  if (extras.length) html += `<div class="sec">${T("Also today", "Исто денес")}</div>` + extras.map(extraRow).join("");
+  if (inbox.length) html += `<div class="sec">${T("No date", "Без датум")} · ${inbox.length}</div>` + inbox.map(row).join("");
+  if (!todays.length && !overdue.length && !missed.length && !inbox.length && !extras.length && !B.doneToday.length) {
     html += state.loading ? SKEL() : emptyToday();
   }
-  if (extras.length) {
-    html += `<div class="sec">${T("Also today", "Исто денес")}</div>` + extras.map(extraRow).join("");
-  }
-  if (B.doneToday.length) {
-    html += `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
-      Done today · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`;
-    if (state.showDone) html += B.doneToday.map(taskRow(today)).join("");
+  if (!state.loading) {
+    html += `<div class="sec-row">${B.doneToday.length
+      ? `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
+          ${T("Done today", "Завршени денес")} · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`
+      : "<span></span>"}
+      <button class="chip sm" onclick="openHistory()">${T("Completed tasks", "Завршени задачи")} ›</button>
+    </div>`;
+    if (state.showDone) html += B.doneToday.map(row).join("");
   }
   $("today-list").innerHTML = html;
 
-  // forward view
+  // what is coming
   const horizon = state.horizon || 7;
-  let week = `<div class="chips" style="margin-bottom:8px">
-    ${[7, 30].map((n) => `<button class="chip ${horizon === n ? "on" : ""}" onclick="state.horizon=${n};renderToday()">Next ${n} days</button>`).join("")}
-  </div>`;
-  for (let i = 1; i <= horizon; i++) {
-    const d = new Date(); d.setDate(d.getDate() + i);
-    const ds = d.toLocaleDateString("sv-SE");
-    const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds));
-    if (!list.length) continue;
-    week += `<div class="sec">${wd(d, "long")} · ${dmy(d)}</div>` +
-      list.sort(byPrio).map((t) => `<div class="card task ${isDoneOn(t, ds) ? "done" : ""}">
-        <button class="tick" onclick="toggleTask('${t.id}','${ds}')" aria-label="done">${isDoneOn(t, ds) ? "✓" : ""}</button>
-        <span class="led ${t.context}"></span>
-        <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${esc(t.title)}</span>
-        ${t.due_time ? `<span class="t-time">${t.due_time.slice(0, 5)}</span>` : ""}</div>`).join("");
+  const days = Array.from({ length: horizon }, (_, i) => backDays(-(i + 1)));
+  // Something that comes round every day would put the same row under every
+  // day below. It is said once, above them, instead.
+  const daily = state.tasks.filter((t) => vis(t) && t.recurrence && days.every((ds) => occursOn(t, ds)));
+  let week = `<div class="sec-row"><div class="sec">${T("Upcoming", "Претстојни")}</div><div class="chips">
+    ${[7, 30].map((n) => `<button class="chip sm ${horizon === n ? "on" : ""}" onclick="state.horizon=${n};renderToday()">${n} ${T("days", "дена")}</button>`).join("")}
+  </div></div>`;
+  if (daily.length) {
+    week += `<div class="tk-daily">${ICON.repeat}<span>${T("Every day", "Секој ден")}:</span>${daily.map((t, i) =>
+      `<button onclick="openTaskSheet('${t.id}')">${esc(t.title)}${t.due_time ? ` <span class="muted">${t.due_time.slice(0, 5)}</span>` : ""}</button>${
+        i < daily.length - 1 ? "<span>·</span>" : ""}`).join("")}</div>`;
   }
+  let any = daily.length > 0;
+  days.forEach((ds, i) => {
+    const list = state.tasks.filter((t) => vis(t) && occursOn(t, ds) && !daily.includes(t));
+    if (!list.length) return;
+    any = true;
+    week += `<div class="sec">${i === 0 ? `${T("Tomorrow", "Утре")} · ${wd(ds)} ${dm(ds)}` : `${wd(ds, "long")} · ${dm(ds)}`}</div>`
+      + list.sort(byPrio).map(taskRow(today, ds)).join("");
+  });
   // Everything beyond the forward window — a check-in three weeks away used
   // to be invisible here, which made it look as if no task had been created.
-  const horizonEnd = (() => { const d = new Date(); d.setDate(d.getDate() + horizon); return d.toLocaleDateString("sv-SE"); })();
+  const horizonEnd = days[days.length - 1];
   const later = state.tasks
     .filter((t) => vis(t) && !t.recurrence && !t.done && t.due_date && t.due_date > horizonEnd)
     .sort((a, b) => a.due_date.localeCompare(b.due_date));
   if (later.length) {
-    week += `<div class="sec">Later · ${later.length}</div>` + later.slice(0, 40).map((t) => `<div class="card task">
-      <button class="tick" onclick="toggleTask('${t.id}','${t.due_date}')" aria-label="done"></button>
-      <span class="led ${t.context}"></span>
-      <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span>
-      <span class="t-time">${dmy(t.due_date)}</span>
-    </div>`).join("");
+    any = true;
+    week += `<div class="sec">${T("Later", "Подоцна")} · ${later.length}</div>` + later.slice(0, 40).map(row).join("");
   }
-  if (!week.includes("class=\"sec\"")) week += '<div class="empty">Nothing scheduled.</div>';
+  if (!any) week += `<div class="empty">${T("Nothing scheduled.", "Ништо не е закажано.")}</div>`;
   $("week-list").innerHTML = week;
 }
 // Things slip. Recording that should cost one tap, or the overdue list stops
-// being read at all.
+// being read at all. Each choice says the day it lands on, so "next week"
+// needs no counting.
 function moveTaskSheet(id) {
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return;
-  const d = (n) => { const x = new Date(todayStr() + "T12:00"); x.setDate(x.getDate() + n); return x.toLocaleDateString("sv-SE"); };
-  const opt = (label, date) => `<button class="btn sm ghost" style="width:100%"
-    onclick="moveTask('${id}','${date}')">${label}</button>`;
+  const opt = (label, date) => `<button class="btn sm ghost mv-opt"
+    onclick="moveTask('${id}','${date}')">${label}<small>${wd(date)} ${dm(date)}</small></button>`;
   openSheet(`
     <h2>${esc(t.title)}</h2>
-    <p class="muted">${t.due_date ? T("Due", "Рок") + " " + dmy(t.due_date) : T("No date", "Без датум")}</p>
-    <div class="grid2">
+    <p class="muted">${t.due_date ? T("Due", "Рок") + " " + wd(t.due_date) + " " + dmy(t.due_date) : T("No date", "Без датум")}</p>
+    <div class="grid2" style="margin-top:10px">
       ${opt(T("Today", "Денес"), todayStr())}
-      ${opt(T("Tomorrow", "Утре"), d(1))}
-      ${opt(T("In 2 days", "За 2 дена"), d(2))}
-      ${opt(T("Next week", "Следна недела"), d(7))}
+      ${opt(T("Tomorrow", "Утре"), backDays(-1))}
+      ${opt(T("In 2 days", "За 2 дена"), backDays(-2))}
+      ${opt(T("Next week", "Следна недела"), backDays(-7))}
     </div>
     <label>${T("Or pick a date", "Или избери датум")}</label>
     <input id="mv-date" type="date" value="${t.due_date || todayStr()}">
     <button class="btn" onclick="moveTask('${id}', $('mv-date').value)">${T("Move", "Помести")}</button>
-    <button class="btn ghost" onclick="moveTask('${id}','')">${T("Take the date off", "Тргни го датумот")}</button>
+    ${t.due_date ? `<button class="btn ghost" onclick="moveTask('${id}','')">${T("Take the date off", "Тргни го датумот")}</button>` : ""}
   `);
 }
 async function moveTask(id, date) {
   try { await dbq(db.from("tasks").update({ due_date: date || null }).eq("id", id), T("Not moved", "Не е поместено")); }
   catch { return; }
   closeSheet(); await refreshAll(["tasks"]); render();
-  toast(date ? T("Moved to ", "Поместено на ") + dmy(date) : T("Date removed", "Датумот е тргнат"));
+  toast(date ? T("Moved to ", "Поместено на ") + wd(date) + " " + dmy(date) : T("Date removed", "Датумот е тргнат"));
 }
 
 // the morning triage: everything that slipped, brought forward at once
@@ -1392,60 +1492,163 @@ async function skipOccurrence(id, day) {
   toast(T("Marked as missed", "Означено како пропуштено"));
 }
 
-const taskRow = (today) => (t) => {
-  const done = isDoneOn(t, today);
+// How a task repeats, said the way you would say it.
+const ordEn = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : (["th", "st", "nd", "rd"][n % 10] || "th"));
+const ordMk = (n) => n + "-" + ([11, 12, 17, 18].includes(n % 100) ? "ти" : ({ 1: "ви", 2: "ри", 7: "ми", 8: "ми" }[n % 10] || "ти"));
+function repeatLabel(t) {
+  const n = Math.max(1, parseInt(t.recur_every) || 1);
+  if (t.recurrence === "daily") return n === 1 ? T("Every day", "Секој ден") : T(`Every ${n} days`, `Секои ${n} дена`);
+  if (t.recurrence === "weekly") {
+    const ds = recurDays(t).slice().sort((a, b) => (a + 6) % 7 - (b + 6) % 7);     // Monday first
+    const days = ds.length === 7 ? T("every day", "секој ден")
+      : ds.join() === "1,2,3,4,5" ? T("weekdays", "работни денови")
+      : ds.map((i) => wd(new Date(2026, 0, 4 + i))).join(", ");                    // 4 Jan 2026 was a Sunday
+    return n === 1 ? days.charAt(0).toUpperCase() + days.slice(1) : T(`Every ${n} weeks`, `Секои ${n} недели`) + " · " + days;
+  }
+  if (t.recurrence === "monthly") {
+    const dom = t.recur_dom || parseInt(String(t.recur_from || t.due_date || "").slice(8, 10)) || 1;
+    return n === 1 ? T(`Monthly on the ${ordEn(dom)}`, `Месечно на ${ordMk(dom)}`)
+      : T(`Every ${n} months on the ${ordEn(dom)}`, `Секои ${n} месеци на ${ordMk(dom)}`);
+  }
+  return "";
+}
+const remindLabel = (m) => !m ? T("at the time", "во тоа време")
+  : m < 60 ? `${m} ${T("min before", "мин. порано")}`
+  : `${m / 60} ${m === 60 ? T("hour before", "час порано") : T("hours before", "часа порано")}`;
+
+// What a row says under its title: how it repeats, how far its checklist has
+// got, who or what it is about, when it will remind you and how its notes
+// begin — all of which used to wait behind a tap. Under a day in Upcoming the
+// rhythm goes unsaid: the days themselves show it.
+function taskMeta(t, rhythm = true) {
+  const bits = [];
+  const add = (html, cls) => bits.push(`<span${cls ? ` class="${cls}"` : ""}>${html}</span>`);
+  if (t.recurrence && rhythm) add(ICON.repeat + esc(repeatLabel(t)));
+  const cl = t.checklist || [];
+  const ticked = cl.filter((x) => x.done).length;
+  if (cl.length) add(ICON.list + ticked + "/" + cl.length, ticked === cl.length ? "full" : "");
+  const client = t.client_id && state.clients.find((c) => c.id === t.client_id);
+  if (client) add(ICON.client + esc(client.name));
+  const apt = t.apartment_id && state.apartments.find((a) => a.id === t.apartment_id);
+  if (apt) add(ICON.home + esc(apt.name));
+  if (t.remind && t.due_time) add(ICON.bell + (t.remind_before ? remindLabel(t.remind_before) : ""));   // with no time it never fires
+  const note = (t.notes || "").trim().split("\n")[0];
+  if (note) add(ICON.note + esc(note));
+  return bits.length ? `<div class="t-meta">${bits.join("")}</div>` : "";
+}
+// how late, in a word where a word is shorter
+const dueWord = (d) => d === backDays(1) ? T("Yesterday", "Вчера") : dm(d);
+
+// One row for a task, wherever it is listed. `on` is the day the row stands
+// for — a later day in Upcoming — so ticking it settles that day and no other.
+const taskRow = (today, on) => (t) => {
+  const day = on || today;
+  const done = isDoneOn(t, day);
+  const late = !t.recurrence && !t.done && t.due_date && t.due_date < today;
+  const label = late ? dueWord(t.due_date)
+    : (!t.recurrence && t.due_date && t.due_date > day) ? `${wd(t.due_date)} ${dm(t.due_date)}`
+    : t.due_time ? t.due_time.slice(0, 5) : "";
+  // only a one-off has a day of its own to move; a repeating task keeps its rhythm
+  const movable = !t.recurrence && !done;
+  const side = label
+    ? (movable ? `<button class="t-time ${late ? "late" : ""}" onclick="moveTaskSheet('${t.id}')" title="${T("Move", "Помести")}">${label}</button>`
+      : `<span class="t-time">${label}</span>`)
+    : (movable ? `<button class="t-when" onclick="moveTaskSheet('${t.id}')" aria-label="${
+      t.due_date ? T("Move", "Помести") : T("Give it a date", "Стави датум")}">${ICON.calendar}</button>` : "");
   return `<div class="card task ${done ? "done" : ""}">
-    <button class="tick" onclick="toggleTask('${t.id}')" aria-label="done">${done ? "✓" : ""}</button>
+    <button class="tick" onclick="toggleTask('${t.id}','${day}',this)" aria-label="${T("Done", "Готово")}">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
-    <span class="t-title" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}
-      ${t.recurrence ? `<span class="rec"> ↻${t.recurrence === "weekly" && recurDays(t).length > 1
-        ? " " + recurDays(t).map((i) => ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][i]).join("") : ""}</span>` : ""}${t.checklist && t.checklist.length ? `<span class="rec"> ☑ ${t.checklist.filter((x) => x.done).length}/${t.checklist.length}</span>` : ""}</span>
+    <div class="t-body" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">
+      <div class="t-title">${t.priority ? '<span class="star">★</span> ' : ""}${esc(t.title)}</div>
+      ${taskMeta(t, !on)}
+    </div>
     ${t.photo_thumb ? `<img class="thumb" style="width:30px;height:30px" src="${t.photo_thumb}" alt="">` : ""}
-    ${t.assigned_to ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
-    ${(() => {
-      const late = !t.recurrence && !t.done && t.due_date && t.due_date < today;
-      const label = late ? dm(t.due_date) : (t.due_time ? t.due_time.slice(0, 5) : "");
-      if (!label && t.recurrence) return "";
-      return `<span class="t-time tapp" role="button" tabindex="0" title="${T("Move", "Помести")}"
-        style="${late ? "color:var(--danger)" : ""}"
-        onclick="event.stopPropagation();moveTaskSheet('${t.id}')">${label || "⋯"}</span>`;
-    })()}
+    ${t.assigned_to && t.assigned_to !== state.uid ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
+    ${side}
   </div>`;
 };
-async function toggleTask(id, onDate) {
+// A repeating task that came round and was not ticked. Ticking settles the day
+// it was missed; Skip says it did not happen, which settles it too.
+const missedRow = ({ t, dates }) => {
+  const first = dates[0] === backDays(1) ? T("yesterday", "вчера") : `${wd(dates[0])} ${dm(dates[0])}`;
+  const more = dates.length > 1 ? T(` · +${dates.length - 1} more`, ` · уште ${dates.length - 1}`) : "";
+  return `<div class="card task">
+    <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}',this)" aria-label="${T("Done", "Готово")}"></button>
+    <span class="led ${t.context}"></span>
+    <div class="t-body" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">
+      <div class="t-title">${t.priority ? '<span class="star">★</span> ' : ""}${esc(t.title)}</div>
+      <div class="t-meta"><span class="late">${ICON.repeat}${T("Missed", "Пропуштено")} ${first}${more}</span></div>
+    </div>
+    <button class="chip sm" onclick="skipOccurrence('${t.id}','${dates[0]}')" title="${T("It did not happen", "Не се случи")}">${T("Skip", "Прескокни")}</button>
+  </div>`;
+};
+async function toggleTask(id, onDate, btn) {
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return;
-  const day = onDate || todayStr();
+  // A repeating task is ticked for the day its row stands for. A one-off is
+  // simply done, and done today, whatever day it was listed under — and when
+  // it is un-ticked, the day to clear is the one it was done on.
+  const day = t.recurrence ? (onDate || todayStr()) : todayStr();
   const was = isDoneOn(t, day);
+  const clearOn = !t.recurrence && was ? (t.last_done || day) : day;
+  // the box answers the tap at once; the list catches up once it is saved
+  const tapped = Date.now();
+  if (btn) {
+    btn.classList.toggle("on", !was);
+    btn.classList.toggle("pop", !was);
+    btn.textContent = was ? "" : "✓";
+    const row = btn.closest(".task");
+    if (row) row.classList.toggle("done", !was);
+  }
   const upd = t.recurrence
     ? { last_done: was ? null : day }
     : { done: !was, last_done: !was ? day : null };
   try {
     await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated");
     if (was) {
-      const r = await db.from("task_completions").delete().eq("task_id", id).eq("done_on", day);
-      if (r.error) { console.error(r.error); toast("Could not un-tick that day"); return; }
-      state.doneSet.delete(id + ":" + day);
+      const r = await db.from("task_completions").delete().eq("task_id", id).eq("done_on", clearOn);
+      if (r.error) { console.error(r.error); toast("Could not un-tick that day"); render(); return; }
+      state.doneSet.delete(id + ":" + clearOn);
     } else {
       const r = await db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid }, { onConflict: "task_id,done_on" });
-      if (r.error) { console.error(r.error); toast("Could not record that day"); return; }
+      if (r.error) { console.error(r.error); toast("Could not record that day"); render(); return; }
       state.doneSet.add(id + ":" + day);
     }
-  } catch { return; }
-  Object.assign(t, upd); render();
+  } catch { render(); return; }
+  Object.assign(t, upd);
+  // long enough to see the tick land before the row moves down to Done
+  const wait = 420 - (Date.now() - tapped);
+  if (btn && wait > 0) await new Promise((r) => setTimeout(r, wait));
+  render();
+  // a tick in the wrong row should cost a tap, not a search through Done
+  if (!was) {
+    const name = t.title.length > 30 ? t.title.slice(0, 29) + "…" : t.title;
+    toastUndo(`${name} — ${T("done", "завршено")}`, () => toggleTask(id, day), 6);
+  }
 }
 let tkChecklist = [];
 function openTaskSheet(id) {
   if (!id && !myCtx().length) return toast("No task access yet");
   const t = id ? state.tasks.find((x) => x.id === id) : { context: defaultCtx(), due_date: todayStr() };
   tkChecklist = JSON.parse(JSON.stringify((t && t.checklist) || []));
+  const today = todayStr();
+  // Off, or how long before the time to say so — one row where there were two
+  // controls, a yes/no and then the lead time
+  const remindNow = t.remind ? (t.remind_before ?? 0) : -1;
+  const REMIND = [[-1, T("Off", "Не")], [0, T("At the time", "Во тоа време")],
+    [15, "15 " + T("min", "мин.")], [30, "30 " + T("min", "мин.")],
+    [60, "1 " + T("hour", "час")], [120, "2 " + T("hours", "часа")]];
+  if (!REMIND.some(([v]) => v === remindNow)) REMIND.push([remindNow, remindLabel(remindNow)]);
+  // finishing it from here, once you have read it through, saves going back to the list
+  const canTick = id && (t.recurrence ? occursOn(t, today) && !isDoneOn(t, today) : !t.done);
   openSheet(`
     <h2>${id ? "Edit task" : "New task"}</h2>
-    <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras">
+    <label>Title</label><input id="tk-title" value="${esc(t.title || "")}" placeholder="e.g. Standup · Order cameras"
+      enterkeyhint="done" onkeydown="tkTitleKey(event,'${id || ""}')">
     <label>Context</label>
-    <div class="chips" id="tk-ctx">${myCtx().map((c) =>
+    <div class="chips wrap" id="tk-ctx">${myCtx().map((c) =>
       `<button class="chip ${t.context === c ? "on" : ""}" data-c="${c}"
-        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');togglePersonalOwner()">${CTX[c]}</button>`).join("")}</div>
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');togglePersonalOwner()"><span class="led ${c}"></span>${CTX[c]}</button>`).join("")}</div>
     ${(state.perm.personalAccess || []).length ? `<div id="tk-owner-row" style="display:none">
       <label>${T("Whose personal list", "Чија лична листа")}</label>
       <select id="tk-owner">
@@ -1453,52 +1656,44 @@ function openTaskSheet(id) {
         ${(state.perm.personalAccess || []).map((u) => `<option value="${u}" ${t.owner_uid === u ? "selected" : ""}>${esc(personName(u) || T("shared", "споделена"))}</option>`).join("")}
       </select></div>` : ""}
     <div class="grid2">
-      <div><label>Date</label><input id="tk-date" type="date" value="${t.due_date || todayStr()}"></div>
-      <div><label>Time (opt.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}"></div>
+      <div><label>Date</label><input id="tk-date" type="date" value="${id ? (t.due_date || "") : (t.due_date || today)}" onchange="tkWhenSync()"></div>
+      <div><label>Time (opt.)</label><input id="tk-time" type="time" value="${t.due_time ? t.due_time.slice(0, 5) : ""}" onchange="tkRemChanged()"></div>
     </div>
-    <div class="more" id="tk-more" ${(t.recurrence || t.priority || t.client_id || t.apartment_id || t.photo_thumb || (t.checklist || []).length) ? 'data-open="1"' : ""}>
+    <div class="chips" id="tk-when" style="margin-top:8px">
+      ${[[today, T("Today", "Денес")], [backDays(-1), T("Tomorrow", "Утре")], [backDays(-7), T("Next week", "Следна недела")], ["", T("No date", "Без датум")]]
+        .map(([v, l]) => `<button class="chip sm" data-v="${v}" onclick="tkWhen('${v}')">${l}</button>`).join("")}
+    </div>
+    <div class="more" id="tk-more" ${(t.recurrence || t.remind || t.priority || t.client_id || t.apartment_id || t.photo_thumb || t.assigned_to) ? 'data-open="1"' : ""}>
     <button class="morebtn" role="button" tabindex="0" onclick="toggleMore('tk-more')">
       <span>${T("More options", "Повеќе опции")}</span><span class="chev">▾</span></button>
     <div class="morebody">
-    <div class="grid2">
-      <div><label>Repeat</label>
-        <select id="tk-rec" onchange="tkRecChanged()">
-          <option value="">Never</option>
-          <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>Days</option>
-          <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>Weeks — pick days</option>
-          <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>Months (that date)</option>
-        </select></div>
-      <div><label>Reminder</label>
-        <select id="tk-rem" onchange="tkRemChanged()">
-          <option value="0">${T("No", "Не")}</option>
-          <option value="1" ${t.remind ? "selected" : ""}>${T("Yes", "Да")}</option>
-        </select></div>
-    </div>
-    <div id="tk-rem-when" style="display:none">
-      <label>${T("Tell me", "Извести ме")}</label>
-      <div class="chips" id="tk-before">
-        ${[[0, T("at the time", "во тоа време")], [15, "15 " + T("min before", "мин. порано")],
-           [30, "30 " + T("min before", "мин. порано")], [60, "1 " + T("hour before", "час порано")],
-           [120, "2 " + T("hours before", "часа порано")]]
-          .map(([v, l]) => `<button class="chip ${(t.remind_before ?? 0) === v ? "on" : ""}" data-b="${v}"
-            onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on')">${l}</button>`).join("")}
-      </div>
-      <p class="muted" style="font-size:12.5px" id="tk-rem-hint"></p>
-    </div>
+    <label>Repeat</label>
+    <select id="tk-rec" onchange="tkRecChanged()">
+      <option value="">${T("Never", "Никогаш")}</option>
+      <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>${T("Daily", "Дневно")}</option>
+      <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>${T("Weekly, on the days you pick", "Неделно, во избраните денови")}</option>
+      <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>${T("Monthly, on that date", "Месечно, на тој датум")}</option>
+    </select>
     <div id="tk-every" style="display:none">
       <div class="grid2">
         <div><label>Every</label>
           <div class="row"><input id="tk-int" type="number" min="1" max="99" value="${t.recur_every || 1}" style="flex:1">
-            <span class="muted nw" id="tk-int-unit">days</span></div></div>
+            <span class="muted nw" id="tk-int-unit"></span></div></div>
         <div><label>Until (opt.)</label><input id="tk-until" type="date" value="${t.recur_until || ""}"></div>
       </div>
     </div>
     <div id="tk-days" style="display:none">
       <label>Repeat on</label>
-      <div class="chips wrap" id="tk-dow">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) =>
+      <div class="chips wrap" id="tk-dow">${[1, 2, 3, 4, 5, 6, 0].map((i) =>
         `<button class="chip ${recurDays(t).includes(i) ? "on" : ""}" data-d="${i}"
-          onclick="this.classList.toggle('on')">${d}</button>`).join("")}</div>
+          onclick="this.classList.toggle('on')">${wd(new Date(2026, 0, 4 + i))}</button>`).join("")}</div>
     </div>
+    <label>${T("Remind me, how long before", "Потсети ме, колку порано")}</label>
+    <div class="chips wrap" id="tk-before">
+      ${REMIND.map(([v, l]) => `<button class="chip ${remindNow === v ? "on" : ""}" data-b="${v}"
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');tkRemChanged()">${l}</button>`).join("")}
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:4px" id="tk-rem-hint"></p>
     <div class="row" style="margin-top:12px">
       <button class="clbox ${t.priority ? "on" : ""}" id="tk-prio"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2605':''">${t.priority ? "\u2605" : ""}</button>
@@ -1506,49 +1701,80 @@ function openTaskSheet(id) {
     </div>
     ${state.perm.elaks || state.perm.apts ? `<label>About (opt.)</label>
     <div class="grid2">
-      ${state.perm.elaks ? `<div><select id="tk-client"><option value="">No client</option>
+      ${state.perm.elaks ? `<div><select id="tk-client"><option value="">${T("No client", "Без клиент")}</option>
         ${state.clients.map((c) => `<option value="${c.id}" ${t.client_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
       </select></div>` : '<div><select id="tk-client" style="display:none"></select></div>'}
-      ${state.perm.apts ? `<div><select id="tk-apt2"><option value="">No apartment</option>
+      ${state.perm.apts ? `<div><select id="tk-apt2"><option value="">${T("No apartment", "Без стан")}</option>
         ${state.apartments.map((a) => `<option value="${a.id}" ${t.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
       </select></div>` : '<div><select id="tk-apt2" style="display:none"></select></div>'}
     </div>` : '<select id="tk-client" style="display:none"></select><select id="tk-apt2" style="display:none"></select>'}
     <label>Photo (opt.)</label>
-    <div class="row" style="align-items:flex-start">
+    <input type="file" accept="image/*" id="tk-img-file" style="display:none" onchange="pickTaskImage(this)">
+    <div class="row">
       <div id="tk-img-prev"></div>
-      <div style="flex:1">
-        <input type="file" accept="image/*" id="tk-img-file" onchange="pickTaskImage(this)">
-        <button class="btn sm ghost" style="margin-top:6px" onclick="removeTaskImage()">Remove photo</button>
-      </div>
+      <button class="btn sm ghost" onclick="$('tk-img-file').click()">${ICON.camera}<span id="tk-img-btn">${T("Add a photo", "Додај слика")}</span></button>
+      <button class="btn sm ghost" id="tk-img-rm" style="display:none" onclick="removeTaskImage()">${T("Remove", "Отстрани")}</button>
     </div>
     <label>Assigned to</label>
     <select id="tk-who">
-      <option value="">Anyone</option>
-      ${state.people.map((p) => `<option value="${p.user_id}" ${t.assigned_to === p.user_id ? "selected" : ""}>${esc(p.display_name || "Unnamed")}</option>`).join("")}
+      <option value="">${T("Anyone", "Секој")}</option>
+      ${state.people.map((p) => `<option value="${p.user_id}" ${t.assigned_to === p.user_id ? "selected" : ""}>${esc(p.display_name || T("Unnamed", "Без име"))}</option>`).join("")}
     </select>
     </div></div>
     <label>Checklist (opt.)</label>
-    ${state.templates.length ? `<div class="chips" style="margin-bottom:8px">
-      ${state.templates.map((tp) => `<button class="chip" onclick="applyTemplate('${tp.id}')">${esc(tp.name)}</button>`).join("")}
+    ${state.templates.length ? `<div class="chips" style="margin-bottom:8px;align-items:center">
+      <span class="muted nw">${T("From a template:", "Од шаблон:")}</span>
+      ${state.templates.map((tp) => `<button class="chip sm" onclick="applyTemplate('${tp.id}')">${esc(tp.name)}</button>`).join("")}
     </div>` : ""}
     <div id="tk-cl"></div>
-    <button class="btn sm ghost" onclick="clAdd('${id || ""}')">+ Add item</button>
-    ${'' }<button class="btn sm ghost" onclick="saveAsTemplate()">Save this checklist as a template</button>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <button class="btn sm ghost" onclick="clAdd('${id || ""}')">+ Add item</button>
+      <button class="btn sm ghost" id="tk-tpl" style="display:none" onclick="saveAsTemplate()">${T("Save as a template", "Зачувај како шаблон")}</button>
+    </div>
     <label>Notes (opt.)</label><textarea id="tk-notes" rows="2">${esc(t.notes || "")}</textarea>
     <button class="btn" onclick="saveTask('${id || ""}')">Save</button>
+    ${canTick ? `<button class="btn ghost" onclick="doneFromSheet('${id}')">${ICON.check}${t.recurrence
+      ? T("Save and tick off today", "Зачувај и штиклирај за денес") : T("Save and mark done", "Зачувај и означи завршено")}</button>` : ""}
     ${id ? `<button class="btn danger" onclick="delTask('${id}')">Delete</button>` : ""}
   `);
   renderCl(id || "");
   tkRecChanged();
   tkRemChanged();
+  tkWhenSync();
   togglePersonalOwner();
   tkImg = { mode: "keep", thumb: t.photo_thumb || null, full: null };
   renderTkImg();
+  // a new task starts with its name, so the keyboard is up before you reach for it
+  if (!id) $("tk-title").focus({ preventScroll: true });
+}
+// Enter in the title saves, as in any list app — everything else is optional
+function tkTitleKey(e, id) {
+  if (e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();
+  saveTask(id);
+}
+// the days under the date: one tap instead of a trip through the picker
+function tkWhen(v) {
+  $("tk-date").value = v;
+  tkWhenSync();
+}
+function tkWhenSync() {
+  const v = ($("tk-date") || {}).value || "";
+  document.querySelectorAll("#tk-when .chip").forEach((c) => c.classList.toggle("on", c.dataset.v === v));
+}
+const tkRemindMins = () => {
+  const b = ($("tk-before") || {}).querySelector?.(".chip.on");
+  return b ? parseInt(b.dataset.b) : -1;
+};
+async function doneFromSheet(id) {
+  if (await saveTask(id)) await toggleTask(id);
 }
 let tkImg = { mode: "keep", thumb: null, full: null };
 function renderTkImg() {
   const el = $("tk-img-prev");
   if (el) el.innerHTML = tkImg.thumb ? `<img class="thumb" style="width:60px;height:60px" src="${tkImg.thumb}" alt="">` : "";
+  if ($("tk-img-rm")) $("tk-img-rm").style.display = tkImg.thumb ? "" : "none";
+  if ($("tk-img-btn")) $("tk-img-btn").textContent = tkImg.thumb ? T("Another", "Друга") : T("Add a photo", "Додај слика");
 }
 function pickTaskImage(input) {
   const f = input.files && input.files[0];
@@ -1603,20 +1829,22 @@ function togglePersonalOwner() {
   const on = ($("tk-ctx").querySelector(".chip.on") || {}).dataset?.c === "personal";
   row.style.display = on ? "block" : "none";
 }
-// the lead time only means anything when there is a reminder and a time
+// A reminder needs a time to count back from; with one, say when it will
+// arrive — worked out as the server does, never earlier than midnight.
 function tkRemChanged() {
-  const row = $("tk-rem-when");
-  if (!row) return;
-  const on = ($("tk-rem") || {}).value === "1";
-  row.style.display = on ? "block" : "none";
   const hint = $("tk-rem-hint");
   if (!hint) return;
-  const time = ($("tk-time") || {}).value;
-  if (!on) return (hint.textContent = "");
-  hint.textContent = time
-    ? ""
-    : T("Give the task a time, otherwise there is nothing to count back from.",
-        "Стави време на задачата, инаку нема од што да се брои наназад.");
+  const lead = tkRemindMins(), time = ($("tk-time") || {}).value;
+  if (lead < 0) { hint.textContent = ""; return; }
+  if (!time) {
+    hint.textContent = T("Give the task a time, otherwise there is nothing to count back from.",
+      "Стави време на задачата, инаку нема од што да се брои наназад.");
+    return;
+  }
+  const [h, m] = time.split(":").map(Number);
+  const at = Math.max(0, h * 60 + m - lead);
+  const hm = p2(Math.floor(at / 60)) + ":" + p2(at % 60);
+  hint.textContent = T(`The reminder comes at ${hm}.`, `Потсетникот ќе дојде во ${hm}.`);
 }
 
 function tkRecChanged() {
@@ -1625,7 +1853,7 @@ function tkRecChanged() {
   const rec = $("tk-rec").value;
   const weekly = rec === "weekly";
   if ($("tk-every")) $("tk-every").style.display = rec ? "" : "none";
-  if ($("tk-int-unit")) $("tk-int-unit").textContent = rec === "daily" ? "days" : rec === "weekly" ? "weeks" : "months";
+  if ($("tk-int-unit")) $("tk-int-unit").textContent = rec === "daily" ? T("days", "дена") : rec === "weekly" ? T("weeks", "недели") : T("months", "месеци");
   box.style.display = weekly ? "" : "none";
   if (weekly && !box.querySelector(".chip.on")) {
     const d = new Date(($("tk-date").value || todayStr()) + "T12:00").getDay();
@@ -1638,9 +1866,18 @@ function renderCl(id) {
     <div class="row" style="margin-bottom:6px">
       <button class="clbox ${it.done ? "on" : ""}" onclick="clToggle(${i}, '${id}')">${it.done ? "✓" : ""}</button>
       <input value="${esc(it.text)}" placeholder="item…" oninput="tkChecklist[${i}].text = this.value"
+        enterkeyhint="next" onkeydown="clKey(event, '${id}')"
         style="flex:1;${it.done ? "text-decoration:line-through;color:var(--muted)" : ""}">
       <button style="color:var(--danger);font-size:16px;padding:4px" onclick="tkChecklist.splice(${i}, 1); renderCl('${id}')">✕</button>
     </div>`).join("");
+  // a template is made from a list, so the offer only appears once there is one
+  if ($("tk-tpl")) $("tk-tpl").style.display = tkChecklist.length ? "" : "none";
+}
+// Enter on an item starts the next one, so a list can be typed straight down
+function clKey(e, id) {
+  if (e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();
+  clAdd(id);
 }
 async function clToggle(i, id) {
   tkChecklist[i].done = !tkChecklist[i].done;
@@ -1687,8 +1924,8 @@ async function saveTask(id) {
     priority: $("tk-prio").classList.contains("on"),
     client_id: ($("tk-client") || {}).value || null,
     apartment_id: ($("tk-apt2") || {}).value || null,
-    remind: $("tk-rem").value === "1",
-    remind_before: parseInt((($("tk-before") || {}).querySelector?.(".chip.on") || {}).dataset?.b) || 0,
+    remind: tkRemindMins() >= 0,
+    remind_before: Math.max(0, tkRemindMins()),
     assigned_to: $("tk-who").value || null,
     notes: $("tk-notes").value.trim() || null,
     checklist: tkChecklist.filter((it) => it.text.trim()).length ? tkChecklist.filter((it) => it.text.trim()) : null,
@@ -1704,6 +1941,7 @@ async function saveTask(id) {
     if (tkImg.mode === "remove") await db.from("task_photos").delete().eq("task_id", tid);
   } catch { return; }
   closeSheet(); await refreshAll(["tasks"]); renderToday(); toast("Saved");
+  return true;
 }
 async function delTask(id) {
   const row = state.tasks.find((x) => x.id === id);
@@ -1718,7 +1956,10 @@ function openHistory() {
   }
   rows.sort((a, b) => (b.on || "").localeCompare(a.on || ""));
   const done = rows;
-  const fmtD = (d) => d ? wd(d) + " " + dmy(d) : "Earlier";
+  const fmtD = (d) => !d ? T("Earlier", "Порано")
+    : d === todayStr() ? `${T("Today", "Денес")} · ${wd(d)} ${dm(d)}`
+    : d === backDays(1) ? `${T("Yesterday", "Вчера")} · ${wd(d)} ${dm(d)}`
+    : wd(d) + " " + dmy(d);
   let html = `<h2>Completed tasks</h2>`;
   if (!done.length) html += '<p class="muted">Nothing completed yet.</p>';
   let lastD = null;
@@ -6893,8 +7134,13 @@ function editSpokenTask() {
     openTaskSheet();
     setTimeout(() => {
       if ($("tk-title")) $("tk-title").value = p.title || "";
-      if (p.due_date && $("tk-date")) $("tk-date").value = p.due_date;
+      if (p.due_date && $("tk-date")) { $("tk-date").value = p.due_date; tkWhenSync(); }
       if (p.due_time && $("tk-time")) $("tk-time").value = p.due_time;
+      // saved straight away it would have had a reminder at that time; so it does here
+      if (p.due_time && p.remind !== false) {
+        const b = document.querySelector('#tk-before [data-b="0"]');
+        if (b) b.click();
+      }
       if (p.priority && $("tk-prio")) { $("tk-prio").classList.add("on"); $("tk-prio").textContent = "\u2605"; }
       if (p.context && $("tk-ctx")) {
         const b = [...$("tk-ctx").querySelectorAll(".chip")].find((x) => x.dataset.c === p.context);
@@ -6927,7 +7173,7 @@ function renderHome() {
       B.undated.length ? `${areas.length ? " · " : ""}no date <b>${B.undated.length}</b>` : ""}</div>
     ${upNext.slice(0, 3).map((t) => `<div class="hrow">
       <span style="display:flex;align-items:center;gap:9px;min-width:0">
-        <button class="tick sm" onclick="event.stopPropagation();toggleTask('${t.id}')" aria-label="done"></button>
+        <button class="tick sm" onclick="event.stopPropagation();toggleTask('${t.id}',null,this)" aria-label="done"></button>
         <span class="led ${t.context}"></span>
         <span class="htxt">${t.priority ? '<span style="color:var(--amber)">★ </span>' : ""}${esc(t.title)}</span></span>
       <span class="muted mono" style="display:flex;align-items:center;gap:7px;flex:none">
@@ -7518,9 +7764,8 @@ const MK = {
   "Stays": "Гости", "Calendar": "Календар",
   // task screen
   "Today": "Денес", "Overdue": "Задоцнети", "No date": "Без датум",
-  "Next 7 days": "Следни 7 дена", "Next 30 days": "Следни 30 дена",
   "All": "Сите", "Mine": "Мои", "Work": "Работа", "Personal": "Лично",
-  "Done today": "Завршени денес", "Completed tasks →": "Завршени задачи →",
+  "Done today": "Завршени денес",
   "New task": "Нова задача", "Save task": "Зачувај задача",
   "Edit before saving": "Уреди пред зачувување", "Say it again": "Кажи повторно",
   "Listening…": "Слушам…", "Done speaking": "Готово",
