@@ -794,6 +794,7 @@ async function startApp() {
   render();
   updatePushState();
   handleNotificationIntent();
+  handleShortcut();
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
     if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
   });
@@ -928,7 +929,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261022-191229";
+const BUILD = "20261026-120936";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -959,6 +960,24 @@ document.addEventListener("visibilitychange", () => {
 // "Currently staying" depends on the time of day, so keep it honest while open
 setInterval(() => { if (!document.hidden) render(); }, 5 * 60 * 1000);
 window.addEventListener("focus", checkForUpdate);
+
+// The icon's shortcuts — hold the Centrala icon on the home screen, or drag
+// one out as a button of its own — open the app with ?go= in the address
+// (see "shortcuts" in manifest.json). Done once the data is in, and the
+// address is cleaned so a reload does not do it again.
+function handleShortcut() {
+  const go = new URLSearchParams(location.search).get("go");
+  if (!go) return;
+  history.replaceState({}, "", location.pathname);
+  if (go === "today") return tab("today");
+  if (go === "task") { tab("today"); return openTaskSheet(); }
+  if (go === "voice") { tab("today"); return startVoice(); }
+  if (go === "offer") {
+    if (!state.perm.elaks) return tab("today");     // no Elaks for this person: land on their tasks
+    state.elaksView = "off"; tab("elaks");
+    return openOfferSheet();
+  }
+}
 
 // A notification hands its task over through the URL (or a message when the
 // app is already open); act on it, then clean the address bar.
@@ -9048,6 +9067,11 @@ function updateBadges() {
   const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
   const set = (name, v) => { const e = $("bdg-" + name); if (e) { e.textContent = v; e.classList.toggle("on", v > 0); } };
   set("today", n); set("elaks", low);
+  // The same count on the app's icon, where the phone can show a number —
+  // an iPhone or a computer can; Android shows its own dot instead.
+  if (!state.loading && navigator.setAppBadge) {
+    (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+  }
 }
 
 async function exportCsv(kind) {
