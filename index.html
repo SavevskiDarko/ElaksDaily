@@ -198,6 +198,14 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .tk-day-top svg{width:17px;height:17px;vertical-align:-3px;margin-right:6px}
 #tk-img-prev:empty{display:none}
 .btn.msg-wa{background:#1FA855;color:#fff;margin:0}
+/* rent: six months at a glance, each tappable to record it */
+.rent-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:10px}
+.rent-m{border-radius:8px;padding:6px 0;font-size:12px;font-weight:600;text-align:center;border:1px solid var(--line);color:var(--muted)}
+.rent-m.paid{background:var(--personal);border-color:var(--personal);color:#fff}
+.rent-m.part{background:var(--amber);border-color:var(--amber);color:var(--navy-deep)}
+.rent-m.late{border-color:var(--danger);color:var(--danger)}
+.rent-m.due{border-color:var(--ink);color:var(--ink)}
+.rent-m.off{opacity:.35}
 .btn.msg-vb{background:#7360F2;color:#fff;margin:0}
 /* ---- habits: a repeating task's record ---- */
 .t-meta .streak{color:var(--amber);font-weight:600}
@@ -740,7 +748,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   jobFilter: "upcoming", stayPays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
-  cashTotal: 0, aptCash: null };
+  cashTotal: 0, aptCash: null, leases: [], rentPays: [], hideApts: new Set() };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
 async function dbq(q, failMsg) {
@@ -785,6 +793,9 @@ async function startApp() {
           : { owner: false, ctx: r.task_contexts || [], elaks: !!r.see_elaks, apts: !!r.see_apts, ins: !!r.see_insurance,
               aptsOwnOnly: !!r.apts_own_only };
         state.perm.personalAccess = r.personal_access || [];
+        // the flats I keep off my own screen, and whether the column is there to keep them in
+        state.aptListCol = "hide_apts" in r;
+        state.hideApts = new Set(r.hide_apts || []);
       }
     }
     applyTabVisibility();
@@ -865,7 +876,12 @@ const LOADERS = {
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
   stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
   bills:      { need: () => state.perm.apts,    q: () => db.from("bills").select("*").gte("month", backMonths(24)) },
+  // tenants and their rent — tables that only exist once migration 0006 has run
+  leases:     { need: () => state.perm.apts,    optional: true, q: () => db.from("leases").select("*").order("start_date", { ascending: false }) },
+  rentPays:   { need: () => state.perm.apts,    optional: true, q: () => db.from("rent_payments").select("*").gte("month", backMonths(30)).order("month", { ascending: false }) },
 };
+// a table the database does not have yet, as against a load that failed
+const missingTable = (e) => !!e && (e.code === "42P01" || e.code === "PGRST205" || /does not exist|schema cache/i.test(e.message || ""));
 
 async function refreshAll(only) {
   const keys = (only || Object.keys(LOADERS)).filter((k) => LOADERS[k] && LOADERS[k].need());
@@ -873,12 +889,15 @@ async function refreshAll(only) {
   const failed = [];
   keys.forEach((k, i) => {
     const r = res[i];
+    if (r.error && LOADERS[k].optional && missingTable(r.error)) { state[k] = []; return; }
     if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
     if (LOADERS[k].scalar) state[k] = (r.data && r.data.balance != null) ? parseFloat(r.data.balance) : 0;
     else state[k] = r.data ?? [];
     // tasks.habit arrives with migration 0004; until it is run, every
     // repeating task counts as a habit and the switch stays out of sight
     if (k === "tasks" && (r.data || []).length) state.habitCol = "habit" in r.data[0];
+    // apartments.rent_mode arrives with migration 0006; until then every flat is let by the night
+    if (k === "apartments" && (r.data || []).length) state.rentCol = "rent_mode" in r.data[0];
     // stays.guest_phone arrives with migration 0005; until then the field stays hidden
     if (k === "stays" && (r.data || []).length) state.stayPhoneCol = "guest_phone" in r.data[0];
     if (k === "completions") {
@@ -886,6 +905,7 @@ async function refreshAll(only) {
       state.skipSet = new Set((r.data ?? []).filter((c) => c.skipped).map((c) => c.task_id + ":" + c.done_on));
     }
   });
+  applyAptHiding(keys);
   if (failed.length) {
     $("loadmsg").textContent = "Could not load: " + failed.join(", ") + ". Data shown may be incomplete.";
     $("loadbar").style.display = "flex";
@@ -933,7 +953,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261026-133039";
+const BUILD = "20261026-144923";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1061,7 +1081,8 @@ function fabAction() {
   if (state.tab === "today") return openTaskSheet;
   if (state.tab === "ins") return openPolicySheet;
   if (state.tab === "elaks") return ELAKS_NEW[state.elaksView] || null;
-  if (state.tab === "apt") return state.aptView === "apartments" ? openAptSheet : openStaySheet;
+  if (state.tab === "apt") return state.aptView === "apartments" ? openAptSheet
+    : state.aptView === "rent" ? () => openLeaseSheet() : openStaySheet;
   return null;
 }
 function fabClick() {
@@ -1376,6 +1397,18 @@ function dayExtras(today) {
           tag: T("leaving", "заминува"),
           title: s.guest_name, sub: apt, open: `openStaySheet('${s.id}')` });
       }
+    }
+  }
+
+  // rent that falls due today or is already late this month
+  if (state.perm.apts && ctxOk("apts")) {
+    const m = today.slice(0, 7);
+    for (const l of state.leases || []) {
+      if (rentLeft(l, m) <= 0.005 || rentDueDate(l, m) > today) continue;
+      rows.push({ ctx: "apts", ico: "home", time: "", late: rentDueDate(l, m) < today,
+        tag: T("rent", "кирија"), title: l.tenant_name,
+        sub: [aptName(l.apartment_id), fmt(rentLeft(l, m)) + " ден."].join(" · "),
+        open: `openRentPay('${l.id}','${m}')` });
     }
   }
 
@@ -5508,7 +5541,9 @@ function permSummary(r) {
   const parts = [];
   if ((r.task_contexts || []).length) parts.push("Tasks: " + r.task_contexts.map((c) => CTX[c]).join(", "));
   if (r.see_elaks) parts.push("Elaks");
-  if (r.see_apts) parts.push(r.apts_own_only ? T("Apts (own)", "Станови (свои)") : "Apts");
+  if (r.see_apts) parts.push(!r.apts_own_only ? "Apts"
+    : (r.apt_ids || []).length ? T(`Apts (own + ${r.apt_ids.length})`, `Станови (свои + ${r.apt_ids.length})`)
+    : T("Apts (own)", "Станови (свои)"));
   if (r.see_insurance) parts.push(T("Insurance", "Осигурување"));
   if ((r.personal_access || []).includes(state.uid)) parts.push(T("my personal list", "моја лична листа"));
   return parts.join(" · ") || "No access yet";
@@ -5536,7 +5571,9 @@ function openPermSheet(uid) {
   const owner = r.role === "owner";
   permDraft = { ctx: [...(r.task_contexts || [])], elaks: !!r.see_elaks, apts: !!r.see_apts,
                 ins: !!r.see_insurance, hide: [...(r.hide_tabs || [])],
-                aptsOwnOnly: !!r.apts_own_only };
+                aptsOwnOnly: !!r.apts_own_only,
+                // the exact flats, once the column is there (migration 0006)
+                aptList: "apt_ids" in r, aptIds: [...(r.apt_ids || [])], allApts: null, uid };
   openSheet(`
     <h2>${esc(r.display_name || T("Team member", "Член на тимот"))}${owner ? ` · ${T("owner", "сопственик")}` : ""}</h2>
     <label>${T("Display name", "Име за приказ")}</label><input id="pm-name" value="${esc(r.display_name || "")}">
@@ -5546,6 +5583,9 @@ function openPermSheet(uid) {
       <p class="muted" style="font-size:12.5px">${T(
         "Unticking only puts a tab away — you keep full access and can bring it back here whenever you want.",
         "Отчекирањето само го склонува табот — пристапот останува и можеш да го вратиш кога сакаш.")}</p>
+      ${uid === state.uid && state.aptListCol ? `<button class="tool" style="width:100%;margin-top:6px"
+        onclick="savePermThen('${uid}','openMyApts')"><span>${T("Apartments you see", "Станови што ги гледаш")}${
+          state.hideApts.size ? ` · ${state.hideApts.size} ${T("put away", "склонети")}` : ""}</span><span class="chev">›</span></button>` : ""}
       <button class="btn" onclick="savePerm('${uid}')">${T("Save", "Зачувај")}</button>`
     : `
       <label>${T("Task contexts they can see & create", "Задачи што ги гледа и создава")}</label>
@@ -5565,6 +5605,16 @@ function openPermSheet(uid) {
       <button class="btn danger" onclick="removePerm('${uid}')">${T("Remove all access", "Одземи пристап")}</button>`}
   `);
   renderPermBoxes(owner);
+  // the flats to choose from: all of them, including any put away on my own screen
+  if (!owner && permDraft.aptList) {
+    db.from("apartments").select("id, name, managed_by").eq("active", true).order("name").then(({ data }) => {
+      if (permDraft && permDraft.uid === uid) { permDraft.allApts = data || []; renderPermBoxes(false); }
+    });
+  }
+}
+// open my apartment list from my Team sheet without losing what I changed there
+async function savePermThen(uid, next) {
+  if (await savePerm(uid) !== false && next === "openMyApts") setTimeout(openMyApts, 260);
 }
 function permToggleTab(t) {
   const i = permDraft.hide.indexOf(t);
@@ -5595,7 +5645,24 @@ function renderPermBoxes(owner) {
       <span>${l}</span></div>` + (k !== "apts" || !permDraft.apts ? "" : `
     <div class="row" style="margin:0 0 6px 26px">
       <button class="clbox ${permDraft.aptsOwnOnly ? "on" : ""}" onclick="permToggleBiz('aptsOwnOnly')">${permDraft.aptsOwnOnly ? "✓" : ""}</button>
-      <span class="muted">${T("Only the apartments they manage", "Само становите што ги води")}</span></div>`)).join("");
+      <span class="muted">${permDraft.aptList ? T("Only some apartments", "Само некои станови") : T("Only the apartments they manage", "Само становите што ги води")}</span></div>`
+      + (permDraft.aptList && permDraft.aptsOwnOnly ? permAptList() : ""))).join("");
+}
+// which flats: the ones they manage are always theirs; tick any others they may see
+function permAptList() {
+  const d = permDraft;
+  if (!d.allApts) return `<p class="muted" style="margin-left:52px">${T("Loading…", "Се вчитува…")}</p>`;
+  return `<div style="margin:2px 0 8px 52px">${d.allApts.map((a) => {
+    const own = a.managed_by === d.uid, on = own || d.aptIds.includes(a.id);
+    return `<div class="row" style="margin-bottom:6px">
+      <button class="clbox ${on ? "on" : ""}" ${own ? "disabled" : `onclick="permToggleApt('${a.id}')"`}>${on ? "✓" : ""}</button>
+      <span>${esc(a.name)}${own ? ` <span class="muted">· ${T("they manage it", "го води")}</span>` : ""}</span></div>`;
+  }).join("") || `<p class="muted">${T("No apartments yet.", "Сè уште нема станови.")}</p>`}</div>`;
+}
+function permToggleApt(id) {
+  const i = permDraft.aptIds.indexOf(id);
+  if (i >= 0) permDraft.aptIds.splice(i, 1); else permDraft.aptIds.push(id);
+  renderPermBoxes(false);
 }
 function permToggleCtx(c) {
   const i = permDraft.ctx.indexOf(c);
@@ -5628,9 +5695,10 @@ async function savePerm(uid) {
         return { display_name: $("pm-name").value.trim() || null, task_contexts: permDraft.ctx,
                  see_elaks: permDraft.elaks, see_apts: permDraft.apts, see_insurance: permDraft.ins,
                  apts_own_only: permDraft.apts && permDraft.aptsOwnOnly,
+                 ...(permDraft.aptList ? { apt_ids: permDraft.apts && permDraft.aptsOwnOnly ? permDraft.aptIds : [] } : {}),
                  personal_access: wants ? [...had, state.uid] : had };
       })();
-  try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), T("Not saved", "Не е зачувано")); } catch { return; }
+  try { await dbq(db.from("user_roles").update(row).eq("user_id", uid), T("Not saved", "Не е зачувано")); } catch { return false; }
   if (uid === state.uid && me && me.role === "owner") {
     // my own view — take effect straight away
     state.perm.elaks = !permDraft.hide.includes("elaks");
@@ -6135,6 +6203,12 @@ function accountBalances() {
     const id = p.account_id || (s ? accountFor(s) : null);
     if (id) bal[id] = (bal[id] || 0) + (parseFloat(p.amount) || 0);
   }
+  // rent lands where it was paid to, else where the lease says it goes
+  for (const p of state.rentPays || []) {
+    const l = (state.leases || []).find((x) => x.id === p.lease_id);
+    const id = p.account_id || (l && l.account_id) || accountFor({});
+    if (id) bal[id] = (bal[id] || 0) + (parseFloat(p.amount) || 0);
+  }
   for (const b of state.bills) {
     const id = accountFor(b);
     if (id) bal[id] = (bal[id] || 0) - (parseFloat(b.amount) || 0);
@@ -6158,27 +6232,29 @@ function renderApt() {
   // what the month earned after the platform and the cleaner, not before
   const staysM = state.stays.filter((s) => inM(s.check_in, curM));
   const staysY = state.stays.filter((s) => (s.check_in || "").slice(0, 4) === yr);
-  const incM = sumBy(staysM, stayNet);
+  // a flat let by the month earns its rent for each month, as a booking earns its price
+  const incM = sumBy(staysM, stayNet) + rentEarned(curM);
   const expM = sumBy((state.expenses || []).filter((e) => inM(e.spent_on, curM)), (e) => e.amount);
   const expY = sumBy((state.expenses || []).filter((e) => (e.spent_on || "").slice(0, 4) === yr), (e) => e.amount);
-  const incY = sumBy(staysY, stayNet);
-  const recAll = sumBy(state.stayPays, (p) => p.amount);
+  const incY = sumBy(staysY, stayNet)
+    + Array.from({ length: Number(curM.slice(5, 7)) }, (_, i) => rentEarned(`${yr}-${p2(i + 1)}`)).reduce((a, b) => a + b, 0);
+  const recAll = sumBy(state.stayPays, (p) => p.amount) + sumBy(state.rentPays || [], (p) => p.amount);
   const openAll = sumBy(state.apartments, (a) => a.opening_balance);
   const bilAll = sumBy(state.bills, (b) => b.amount);
   const expAll = sumBy(state.expenses || [], (e) => e.amount);
   // the view sums the full history; the local figure is the fallback if it is missing
   // apt_cash_total sums the whole history in one figure, which is not this
   // person's history when they are limited to their own flats
-  const cashAll = (state.aptCash === null || aptsOwnOnly())
-    ? (recAll + openAll - bilAll - expAll) : state.aptCash;
+  // — nor when some flats are put away; and the view knows nothing of rent yet
+  const cashAll = (state.aptCash === null || aptsOwnOnly() || state.hideApts.size)
+    ? (recAll + openAll - bilAll - expAll) : state.aptCash + sumBy(state.rentPays || [], (p) => p.amount);
   // everything still to collect, whether the guest has arrived or not
-  const soon = sumBy(state.stays.filter((s) => !staySettled(s)), stayBalance);
+  const soon = sumBy(state.stays.filter((s) => !staySettled(s)), stayBalance) + rentOutstanding();
   // bookings the calendars brought in with no price on them yet
   const noPrice = state.stays.filter(stayUnpriced);
   const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
   const bilY = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
-  const t = todayStr();
-  const occ = new Set(state.stays.filter((s) => s.check_in <= t && s.check_out > t).map((s) => s.apartment_id)).size;
+  const occ = occupiedTonight().size;
   const bal = accountBalances();
   const total = state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll;
   $("apt-bank").innerHTML = `<div class="card">
@@ -6219,7 +6295,11 @@ function renderApt() {
         ? T("booking has no price yet", "резервација е без цена")
         : T("bookings have no price yet", "резервации се без цена")} ›</div>` : ""}
   </div>`;
-  $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
+  // Rent only once some flat is let by the month
+  const withRent = state.apartments.some(isMonthly);
+  if (state.aptView === "rent" && !withRent) state.aptView = "stays";
+  $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ...(withRent ? [["rent", T("Rent", "Кирија")]] : []),
+    ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
   // With more than a couple of apartments, stacking every one makes the page
   // unreadable — so choose which you are looking at.
@@ -6233,8 +6313,16 @@ function renderApt() {
   if (state.aptView === "stays") renderStays();
   else if (state.aptView === "calendar") renderCalendar();
   else if (state.aptView === "bills") renderBills();
+  else if (state.aptView === "rent") renderRent();
   else renderAptList();
 }
+// a flat is taken tonight if a guest is in it, or a tenant lives there
+const occupiedTonight = () => {
+  const t = todayStr();
+  const ids = new Set(state.stays.filter((s) => s.check_in <= t && s.check_out > t).map((s) => s.apartment_id));
+  for (const a of state.apartments) if (isMonthly(a) && leaseOn(a.id, t)) ids.add(a.id);
+  return ids;
+};
 
 // which apartments the three lists should show
 const shownApartments = () => state.aptFilter === "all"
@@ -6257,6 +6345,14 @@ function renderCalendar() {
   const headRow = `<div class="cal-head">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
     .map((d, i) => `<span class="${i > 4 ? "we" : ""}">${d}</span>`).join("")}</div>`;
   for (const a of shownApartments()) {
+    if (isMonthly(a)) {
+      const l = leaseOn(a.id, `${state.aptMonth}-${p2(days)}`) || leaseOn(a.id, `${state.aptMonth}-01`);
+      html += `<div class="cal-apt"><span>${esc(a.name)}</span></div>
+        <div class="card tapp" role="button" tabindex="0" onclick="${l ? `openLeaseSheet('${l.id}')` : `openLeaseSheet(null,'${a.id}')`}" style="margin-bottom:6px">
+          <span class="muted">${T("On monthly rent", "Под месечна кирија")} · </span>${l ? `<b>${esc(l.tenant_name)}</b>${
+            l.end_date ? ` <span class="muted">${T("until", "до")} ${dmy(l.end_date)}</span>` : ""}` : `<span class="muted">${T("no tenant", "без закупец")}</span>`}</div>`;
+      continue;
+    }
     const mine = state.stays.filter((s) => s.apartment_id === a.id);
     let cells = '<button class="cal-d pad"></button>'.repeat(lead);
     let nights = 0;
@@ -6445,16 +6541,27 @@ function openUnpaidStays() {
   const list = state.stays.filter((s) => !staySettled(s))
     .sort((a, b) => (a.check_out || "").localeCompare(b.check_out || ""));
   const aptOf = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+  // rent owed: one row per month still open
+  const rent = [];
+  for (const l of state.leases || []) for (const m of rentOwed(l)) rent.push({ l, m });
+  rent.sort((a, b) => a.m.localeCompare(b.m));
   openSheet(`<h2>${T("Still to collect", "За наплата")}</h2>
     <div class="totalbar"><span>${T("Total", "Вкупно")}</span>
-      <span class="mono">${fmt(sumBy(list, stayBalance))} ден.</span></div>
+      <span class="mono">${fmt(sumBy(list, stayBalance) + sumBy(rent, (r) => rentLeft(r.l, r.m)))} ден.</span></div>
+    ${rent.length ? `<div class="sec">${T("Rent", "Кирија")}</div>` + rent.map(({ l, m }) => `<div class="card offer row" role="button" tabindex="0"
+        onclick="openRentPay('${l.id}','${m}')">
+      <div style="flex:1;min-width:0"><b>${esc(l.tenant_name)}</b>
+        <div class="o-num">${esc(aptName(l.apartment_id))} · ${monthName(m)} ${m.slice(0, 4)}${
+          rentLate(l, m) ? ` · <span style="color:var(--danger)">${T("late", "доцни")}</span>` : ""}</div></div>
+      <span class="o-total mono" style="color:var(--amber)">${fmt(rentLeft(l, m))}</span>
+    </div>`).join("") + (list.length ? `<div class="sec">${T("Guests", "Гости")}</div>` : "") : ""}
     ${list.length ? list.map((s) => `<div class="card offer row" role="button" tabindex="0" onclick="openStaySheet('${s.id}')">
       <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
         <div class="o-num">${esc(aptOf(s.apartment_id))} · ${dm(s.check_in)} → ${dm(s.check_out)}${
           stayPartly(s) ? ` · ${T("part paid", "делумно")} ${fmt(stayPaid(s))}` : ""}${
           dOnly(s.check_out) < todayStr() ? ` · <span style="color:var(--danger)">${T("already left", "веќе замина")}</span>` : ""}</div></div>
       <span class="o-total mono" style="color:var(--amber)">${fmt(stayBalance(s))}</span>
-    </div>`).join("") : `<p class="muted">${T("Everyone has paid.", "Сите платиле.")}</p>`}`);
+    </div>`).join("") : rent.length ? "" : `<p class="muted">${T("Everyone has paid.", "Сите платиле.")}</p>`}`);
 }
 
 async function markArrived(id) {
@@ -6677,7 +6784,8 @@ async function syncStayTask(stay, want) {
       context: "apts", due_date: due, due_time: time, remind: true,
       notes: `Arrives ${stay.check_in} · leaves ${stay.check_out} · ${nights} night(s)`
         + (stay.source && stay.source !== "Direct" ? " · " + stay.source : ""),
-      stay_id: stay.id,
+      // the flat as well as the booking, so the task follows who may see that flat
+      stay_id: stay.id, apartment_id: stay.apartment_id,
     };
     if (existing && due > todayStr()) { row.done = false; row.reminded_on = null; }
     // supabase reports errors in the result rather than throwing, so check it
@@ -6832,13 +6940,19 @@ function renderBills() {
   // card's own total and the bar underneath it are the same number twice.
   const shown = shownApartments();
   for (const a of shown) {
-    const rows = BILL_TYPES.map((tp) => ({ tp, b: billOf(a.id, tp) }));
+    const types = billTypesFor(a);
+    if (!types.length) {
+      html += `<div class="card row"><b style="flex:1">${esc(a.name)}</b>
+        <span class="muted">${T("the tenant pays the bills", "закупецот ги плаќа сметките")}</span></div>`;
+      continue;
+    }
+    const rows = types.map((tp) => ({ tp, b: billOf(a.id, tp) }));
     const total = sumBy(rows, (r) => r.b?.amount);
     const paidN = rows.filter((r) => r.b && r.b.paid).length;
     grand += total;
     html += `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
-        <span style="font-weight:600;color:${paidN === BILL_TYPES.length ? "var(--personal)" : "var(--amber)"}">${paidN === BILL_TYPES.length ? "✓ PAID" : paidN + "/" + BILL_TYPES.length + " paid"}</span></div>
+        <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? "✓ PAID" : paidN + "/" + types.length + " paid"}</span></div>
       ${rows.map(({ tp, b }) => `
         <div class="row" style="margin-top:7px">
           <button class="clbox ${b && b.paid ? "on" : ""}" onclick="setBill('${a.id}','${tp}','paid',${!(b && b.paid)})">${b && b.paid ? "✓" : ""}</button>
@@ -6871,11 +6985,20 @@ async function setBill(aptId, type, field, value) {
 }
 
 function renderAptList() {
-  $("apt-body").innerHTML = state.apartments.length ? state.apartments.map((a) => `
+  const how = (a) => {
+    if (!isMonthly(a)) return a.nightly_rate ? " · " + fmt(a.nightly_rate) + " ден./night" : "";
+    const l = leaseOn(a.id);
+    return " · " + T("monthly rent", "месечна кирија") + (l ? " · " + esc(l.tenant_name) : "");
+  };
+  const chooser = state.perm.owner && state.aptListCol
+    ? `<button class="tool" style="width:100%;margin-top:4px" onclick="openMyApts()"><span>${
+        state.hideApts.size ? T(`${state.hideApts.size} put away · choose which apartments you see`, `${state.hideApts.size} склонети · избери кои станови ги гледаш`)
+          : T("Choose which apartments you see", "Избери кои станови ги гледаш")}</span><span class="chev">›</span></button>` : "";
+  $("apt-body").innerHTML = (state.apartments.length ? state.apartments.map((a) => `
     <div class="card row" role="button" tabindex="0" onclick="openAptStatement('${a.id}')">
       <div style="flex:1"><b>${esc(a.name)}</b>
-        <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}${a.nightly_rate ? " · " + fmt(a.nightly_rate) + " ден./night" : ""}</div></div>
-    </div>`).join("") : (state.loading ? SKEL(2) : '<div class="empty">No apartments.<br>Add with +</div>');
+        <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}${how(a)}</div></div>
+    </div>`).join("") : (state.loading ? SKEL(2) : '<div class="empty">No apartments.<br>Add with +</div>')) + chooser;
 }
 function openAptStatement(id, year) {
   const a = state.apartments.find((x) => x.id === id);
@@ -6885,7 +7008,7 @@ function openAptStatement(id, year) {
   let ti = 0, tb = 0, tn = 0, rows = "";
   for (let m = 1; m <= 12; m++) {
     const key = `${y}-${String(m).padStart(2, "0")}`;
-    const inc = sumBy(mine.filter((s) => (s.check_in || "").slice(0, 7) === key), (s) => s.amount);
+    const inc = sumBy(mine.filter((s) => (s.check_in || "").slice(0, 7) === key), (s) => s.amount) + rentEarned(key, id);
     const bil = sumBy(mybills.filter((b) => (b.month || "").slice(0, 7) === key), (b) => b.amount);
     const nights = mine.filter((s) => (s.check_in || "").slice(0, 7) === key)
       .reduce((n, s) => n + nightsBetween(s.check_in, s.check_out), 0);
@@ -6898,6 +7021,8 @@ function openAptStatement(id, year) {
   const bySource = {};
   for (const s of mine.filter((s) => (s.check_in || "").slice(0, 4) === String(y)))
     bySource[s.source || "Direct"] = (bySource[s.source || "Direct"] || 0) + (parseFloat(s.amount) || 0);
+  const rentY = Array.from({ length: 12 }, (_, i) => rentEarned(`${y}-${p2(i + 1)}`, id)).reduce((s2, v) => s2 + v, 0);
+  if (rentY) bySource[T("Rent", "Кирија")] = rentY;
   openSheet(`
     <h2>${esc(a.name)}</h2>
     <div class="row" style="justify-content:center;gap:18px;margin:6px 0 10px">
@@ -6945,6 +7070,18 @@ function openAptSheet(id) {
     <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
     <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
+    ${state.rentCol ? `<label>${T("How it is let", "Како се издава")}</label>
+    <div class="chips" id="ap-mode">${[["short", T("By the night (Booking, Airbnb…)", "По ноќ (Booking, Airbnb…)")], ["monthly", T("Monthly rent", "Месечна кирија")]]
+      .map(([v, l]) => `<button class="chip ${(a.rent_mode || "short") === v ? "on" : ""}" data-v="${v}"
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');aptModeChanged()">${l}</button>`).join("")}</div>
+    <div id="ap-monthly" style="display:none">
+      <div class="row" style="margin-top:10px">
+        <button class="clbox ${a.tenant_pays_bills ? "on" : ""}" id="ap-tpb"
+          onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'✓':''">${a.tenant_pays_bills ? "✓" : ""}</button>
+        <span>${T("The tenant pays the bills — stop asking me for them", "Закупецот ги плаќа сметките — не барај ги од мене")}</span>
+      </div>
+      <p class="muted" style="font-size:12.5px">${T("The tenant and the rent go under Apartments › Rent.", "Закупецот и киријата се во Станови › Кирија.")}</p>
+    </div>` : ""}
     ${state.perm.owner ? `<label>${T("Managed by", "Го води")}</label>
     <select id="ap-managed">
       ${(state.people || []).map((pp) => `<option value="${pp.user_id}" ${
@@ -6959,6 +7096,12 @@ function openAptSheet(id) {
     ${id ? feedBlock(id) : '<p class="muted" style="font-size:12.5px">Save the apartment first, then you can connect Booking.com and Airbnb to it.</p>'}
     ${id ? `<button class="btn danger" onclick="delApt('${id}')">Deactivate</button>` : ""}
   `);
+  aptModeChanged();
+}
+// the tenant-pays switch only means anything for a flat let by the month
+function aptModeChanged() {
+  const box = $("ap-monthly");
+  if (box) box.style.display = (($("ap-mode") || {}).querySelector?.(".chip.on") || {}).dataset?.v === "monthly" ? "" : "none";
 }
 
 // The other direction: what Centrala publishes, so a booking taken here
@@ -6980,6 +7123,320 @@ function outFeedBlock(a) {
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast("Link copied"); }
   catch { await askText("Copy this link", t); }
+}
+
+/* ---------- monthly rent ----------
+   A flat let by the month has a tenant instead of guests, and its money is
+   rent: so much a month, due on a given day. A lease says who, how much and
+   from when; each payment says the month it pays for. leases and
+   rent_payments arrive with migration 0006 — until it is run none of this
+   shows, and the flats behave as before. */
+const isMonthly = (a) => !!a && a.rent_mode === "monthly";
+const ym = (d) => String(d || "").slice(0, 7);
+const curYm = () => todayStr().slice(0, 7);
+const shiftYm = (m, n) => {
+  const [y, mo] = m.split("-").map(Number);
+  const d = new Date(y, mo - 1 + n, 1);
+  return d.getFullYear() + "-" + p2(d.getMonth() + 1);
+};
+// the tenant living in a flat on a day: the latest lease begun and not ended
+const leaseOn = (aptId, day = todayStr()) => (state.leases || [])
+  .filter((l) => l.apartment_id === aptId && l.start_date <= day && (!l.end_date || l.end_date >= day))
+  .sort((a, b) => b.start_date.localeCompare(a.start_date))[0] || null;
+// a lease owes a month's rent for every month it touches
+const leaseInMonth = (l, m) => ym(l.start_date) <= m && (!l.end_date || ym(l.end_date) >= m);
+const rentDue = (l, m) => (leaseInMonth(l, m) ? parseFloat(l.rent) || 0 : 0);
+const rentPaid = (l, m) => sumBy((state.rentPays || []).filter((p) => p.lease_id === l.id && ym(p.month) === m), (p) => p.amount);
+const rentLeft = (l, m) => Math.max(0, rentDue(l, m) - rentPaid(l, m));
+// the day it falls due — the 31st in a short month is that month's last day
+const rentDueDate = (l, m) => {
+  const [y, mo] = m.split("-").map(Number);
+  return `${m}-${p2(Math.min(parseInt(l.due_day) || 1, new Date(y, mo, 0).getDate()))}`;
+};
+const rentLate = (l, m) => rentLeft(l, m) > 0.005 && rentDueDate(l, m) < todayStr();
+// the months still open, from the start of the lease (two years back at most) to this one
+function rentOwed(l) {
+  const out = [], from = shiftYm(curYm(), -24);
+  const last = l.end_date && ym(l.end_date) < curYm() ? ym(l.end_date) : curYm();
+  for (let m = ym(l.start_date) > from ? ym(l.start_date) : from; m <= last; m = shiftYm(m, 1)) {
+    if (rentLeft(l, m) > 0.005) out.push(m);
+  }
+  return out;
+}
+const rentOutstanding = () => sumBy(state.leases || [], (l) => sumBy(rentOwed(l), (m) => rentLeft(l, m)));
+// What the flats on monthly rent earn in a month — owed whether or not it is
+// in yet, as a booking's price counts before the guest has paid it.
+const rentEarned = (m, aptId) => sumBy((state.leases || []).filter((l) => !aptId || l.apartment_id === aptId), (l) => rentDue(l, m));
+// The bills a flat asks you for: none when the tenant pays them, and never
+// the platform's fee on a flat that is not on a platform.
+const billTypesFor = (a) => (isMonthly(a) ? (a.tenant_pays_bills ? [] : BILL_TYPES.filter((t) => t !== "booking")) : BILL_TYPES);
+const monthIn = (lang, m) => (lang === "mk" ? MONTHS_MK[Number(m.slice(5, 7)) - 1]
+  : new Date(m + "-02T12:00").toLocaleDateString("en-GB", { month: "long" }));
+const aptName = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+
+function rentCell(l, m) {
+  const label = monthName(m).slice(0, 3);
+  if (!leaseInMonth(l, m)) return `<span class="rent-m off">${label}</span>`;
+  const left = rentLeft(l, m), cls = left <= 0.005 ? "paid" : rentPaid(l, m) > 0 ? "part" : rentLate(l, m) ? "late" : "due";
+  return `<button class="rent-m ${cls}" onclick="openRentPay('${l.id}','${m}')">${label}</button>`;
+}
+function renderRent() {
+  const flats = shownApartments().filter(isMonthly), m = curYm();
+  if (!flats.length) {
+    $("apt-body").innerHTML = `<div class="empty">${T("No apartment here is on monthly rent.<br>Open one under Apartments and choose Monthly rent.",
+      "Ниту еден стан овде не е под кирија.<br>Отвори стан во Станови и избери Месечна кирија.")}</div>`;
+    return;
+  }
+  $("apt-body").innerHTML = flats.map((a) => {
+    const l = leaseOn(a.id);
+    if (!l) {
+      return `<div class="card"><b>${esc(a.name)}</b>
+        <p class="muted" style="margin-top:2px">${T("No tenant at the moment.", "Моментално нема закупец.")}</p>
+        <button class="btn sm" style="margin-top:8px" onclick="openLeaseSheet(null,'${a.id}')">+ ${T("Add the tenant", "Додај закупец")}</button></div>`;
+    }
+    const left = rentLeft(l, m), paid = rentPaid(l, m), due = rentDueDate(l, m);
+    const status = left <= 0.005 ? `<span class="hok">✓ ${T("paid", "платено")}</span>`
+      : paid > 0.005 ? `<span style="color:var(--amber);font-weight:600">${fmt(paid)} / ${fmt(rentDue(l, m))}</span>`
+      : rentLate(l, m) ? `<span class="hflag">${T("late since", "доцни од")} ${dm(due)}</span>`
+      : `<span class="muted">${T("due", "доспева")} ${dm(due)}</span>`;
+    const earlier = rentOwed(l).filter((x) => x < m);
+    const day = parseInt(l.due_day) || 1;
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
+        <b>${esc(a.name)}</b><span class="nw">${monthName(m)}: ${status}</span></div>
+      <div class="tapp" role="button" tabindex="0" onclick="openLeaseSheet('${l.id}')" style="margin-top:2px">
+        <div class="o-num">${esc(l.tenant_name)}${l.tenant_phone ? " · " + esc(l.tenant_phone) : ""} ·
+          ${fmt(l.rent)} ${T("ден. a month, due on the", "ден. месечно, доспева на")} ${langMk() ? ordMk(day) : ordEn(day)} ›</div></div>
+      <div class="rent-strip">${Array.from({ length: 6 }, (_, i) => rentCell(l, shiftYm(m, i - 5))).join("")}</div>
+      ${earlier.length ? `<div class="hflag" style="font-size:12.5px;margin-top:6px">${T(
+        `${earlier.length} earlier month${earlier.length > 1 ? "s" : ""} still open · ${fmt(sumBy(earlier, (x) => rentLeft(l, x)))} ден.`,
+        `Неплатено од претходно: ${earlier.length} мес. · ${fmt(sumBy(earlier, (x) => rentLeft(l, x)))} ден.`)}</div>` : ""}
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sm" onclick="openRentPay('${l.id}','${left > 0.005 ? m : (earlier[0] || m)}')">${T("Record rent", "Внеси кирија")}</button>
+        <button class="btn sm ghost" onclick="messageTenant('${l.id}')">${ICON.share}${T("Message", "Порака")}</button>
+      </div>
+    </div>`;
+  }).join("") + `<p class="muted" style="font-size:12.5px;margin-top:4px">${T(
+    "Green paid · amber part paid · red late. Tap a month to record its rent.",
+    "Зелено платено · жолто делумно · црвено доцни. Допри месец за да внесеш кирија.")}</p>`;
+}
+
+function openLeaseSheet(id, aptId) {
+  const flats = state.apartments.filter(isMonthly);
+  const l = id ? (state.leases || []).find((x) => x.id === id)
+    : { apartment_id: aptId || (flats.find((a) => !leaseOn(a.id)) || flats[0] || {}).id, start_date: todayStr(), due_day: 1, rent: "", deposit: 0 };
+  if (!l) return;
+  if (!flats.length) return say(T("First set an apartment to Monthly rent — open it under Apartments.",
+    "Прво постави стан на Месечна кирија — отвори го во Станови."));
+  const pays = id ? (state.rentPays || []).filter((p) => p.lease_id === id).sort((a, b) => b.month.localeCompare(a.month) || b.paid_on.localeCompare(a.paid_on)) : [];
+  const acct = l.account_id || accountFor({});
+  openSheet(`<h2>${id ? esc(l.tenant_name) : T("New tenant", "Нов закупец")}</h2>
+    <label>${T("Apartment", "Стан")}</label>
+    <select id="ls-apt">${flats.map((a) => `<option value="${a.id}" ${l.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select>
+    <label>${T("Tenant", "Закупец")}</label><input id="ls-name" value="${esc(l.tenant_name || "")}" placeholder="${T("Full name", "Име и презиме")}">
+    <label>${T("Phone (opt.)", "Телефон (опц.)")}</label><input id="ls-phone" type="tel" inputmode="tel" value="${esc(l.tenant_phone || "")}">
+    <div class="grid2">
+      <div><label>${T("Rent a month (ден.)", "Кирија месечно (ден.)")}</label><input id="ls-rent" type="number" inputmode="decimal" step="any" value="${l.rent ?? ""}"></div>
+      <div><label>${T("Due on day", "Доспева на ден")}</label><input id="ls-day" type="number" inputmode="numeric" min="1" max="31" value="${l.due_day || 1}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>${T("Deposit (ден.)", "Депозит (ден.)")}</label><input id="ls-dep" type="number" inputmode="decimal" step="any" value="${l.deposit ?? 0}"></div>
+      <div><label>${T("Rent goes to", "Киријата оди во")}</label>
+        <select id="ls-acct">${state.accounts.map((x) => `<option value="${x.id}" ${acct === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
+    </div>
+    <div class="grid2">
+      <div><label>${T("From", "Од")}</label><input id="ls-from" type="date" value="${l.start_date || todayStr()}"></div>
+      <div><label>${T("Until (opt.)", "До (опц.)")}</label><input id="ls-to" type="date" value="${l.end_date || ""}"></div>
+    </div>
+    <label>${T("Notes (opt.)", "Белешки (опц.)")}</label><input id="ls-notes" value="${esc(l.notes || "")}">
+    <button class="btn" onclick="saveLease('${id || ""}')">${T("Save", "Зачувај")}</button>
+    ${id ? `<div class="grid2" style="margin-top:10px">
+      <button class="btn sm" style="width:100%" onclick="openRentPay('${id}','${(rentOwed(l)[0]) || curYm()}')">${T("Record rent", "Внеси кирија")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="messageTenant('${id}')">${ICON.share}${T("Message", "Порака")}</button></div>
+    <div class="sec">${T("Payments", "Уплати")}</div>
+    ${pays.length ? pays.map((p) => `<div class="mov"><span>${monthName(ym(p.month))} ${ym(p.month).slice(0, 4)}
+        <span class="muted" style="font-size:12px">· ${dmy(p.paid_on)}${p.account_id ? " · " + esc((state.accounts.find((x) => x.id === p.account_id) || {}).name || "") : ""}</span></span>
+        <span><span class="mono">${fmt(p.amount)}</span>
+        <button style="color:var(--danger);font-size:15px;padding:2px 6px" onclick="delRentPay('${p.id}')" aria-label="${T("Delete", "Избриши")}">✕</button></span></div>`).join("")
+      : `<p class="muted">${T("Nothing recorded yet.", "Сè уште нема уплати.")}</p>`}
+    ${!l.end_date ? `<button class="btn ghost" onclick="endLease('${id}')">${T("The tenant has moved out", "Закупецот се исели")}</button>` : ""}
+    ${!pays.length ? `<button class="btn danger" onclick="delLease('${id}')">${T("Delete", "Избриши")}</button>` : ""}` : ""}`);
+}
+async function saveLease(id) {
+  const row = {
+    apartment_id: $("ls-apt").value, tenant_name: $("ls-name").value.trim(),
+    tenant_phone: $("ls-phone").value.trim() || null,
+    rent: parseFloat($("ls-rent").value) || 0,
+    due_day: Math.min(31, Math.max(1, parseInt($("ls-day").value) || 1)),
+    deposit: parseFloat($("ls-dep").value) || 0,
+    account_id: $("ls-acct").value || null,
+    start_date: $("ls-from").value || todayStr(), end_date: $("ls-to").value || null,
+    notes: $("ls-notes").value.trim() || null,
+  };
+  if (!row.tenant_name) return toast(T("Enter the tenant's name", "Внеси го името на закупецот"));
+  if (!(row.rent > 0)) return toast(T("Enter the monthly rent", "Внеси ја месечната кирија"));
+  if (row.end_date && row.end_date < row.start_date) return toast(T("The end is before the start", "Крајот е пред почетокот"));
+  // one tenant at a time: two leases on the same days would count the rent twice
+  const clash = (state.leases || []).find((x) => x.id !== id && x.apartment_id === row.apartment_id
+    && x.start_date <= (row.end_date || "9999") && row.start_date <= (x.end_date || "9999"));
+  if (clash) return say(T(`${clash.tenant_name} already rents this apartment for some of those days. End that tenancy first.`,
+    `${clash.tenant_name} веќе го изнајмува станот во дел од тие денови. Прво заврши го тој закуп.`));
+  try { await dbq(id ? db.from("leases").update(row).eq("id", id) : db.from("leases").insert(row), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["leases"]); renderApt(); toast(T("Saved", "Зачувано"));
+}
+async function endLease(id) {
+  const l = (state.leases || []).find((x) => x.id === id);
+  if (!l) return;
+  const day = await askText(T(`Last day of ${l.tenant_name}'s tenancy (YYYY-MM-DD)`, `Последен ден од закупот на ${l.tenant_name} (ГГГГ-ММ-ДД)`), todayStr());
+  if (!day) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day.trim()) || day.trim() < l.start_date) return toast(T("That is not a date after the start", "Тоа не е датум по почетокот"));
+  try { await dbq(db.from("leases").update({ end_date: day.trim() }).eq("id", id), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["leases"]); renderApt(); toast(T("Tenancy ended", "Закупот е завршен"));
+}
+async function delLease(id) {
+  const row = (state.leases || []).find((x) => x.id === id);
+  if (!row || !await ask(T("Delete this tenant? Use it for one added by mistake.", "Да се избрише закупецот? За внесен по грешка."))) return;
+  await deleteUndoable("leases", row, T("Tenant deleted", "Закупецот е избришан"), ["leases"]);
+}
+
+function openRentPay(leaseId, m) {
+  const l = (state.leases || []).find((x) => x.id === leaseId);
+  if (!l) return;
+  m = m || curYm();
+  // the months it can be for: the lease's own, the last year of them and the next one
+  const months = [];
+  for (let k = shiftYm(curYm(), 1); k >= shiftYm(curYm(), -12); k = shiftYm(k, -1)) if (leaseInMonth(l, k)) months.push(k);
+  if (!months.includes(m) && leaseInMonth(l, m)) months.push(m);
+  const state_ = (k) => rentLeft(l, k) <= 0.005 ? T("paid", "платено") : rentPaid(l, k) > 0.005 ? T("part paid", "делумно") : T("open", "отворено");
+  openSheet(`<h2>${T("Rent", "Кирија")} · ${esc(l.tenant_name)}</h2>
+    <p class="muted">${esc(aptName(l.apartment_id))} · ${fmt(l.rent)} ${T("ден. a month", "ден. месечно")}</p>
+    <label>${T("For the month", "За месецот")}</label>
+    <select id="rp-month" onchange="rentPayMonth('${leaseId}')">${months.map((k) =>
+      `<option value="${k}" ${k === m ? "selected" : ""}>${monthName(k)} ${k.slice(0, 4)} — ${state_(k)}</option>`).join("")}</select>
+    <div class="grid2">
+      <div><label>${T("Amount (ден.)", "Износ (ден.)")}</label><input id="rp-amt" type="number" inputmode="decimal" step="any" value="${rentLeft(l, m) || l.rent}"></div>
+      <div><label>${T("Paid on", "Платено на")}</label><input id="rp-on" type="date" value="${todayStr()}"></div>
+    </div>
+    <label>${T("Money went to", "Парите одат во")}</label>
+    <select id="rp-acct">${state.accounts.map((x) => `<option value="${x.id}" ${(l.account_id || accountFor({})) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+    <label>${T("Note (opt.)", "Белешка (опц.)")}</label><input id="rp-note">
+    <button class="btn amber" onclick="saveRentPay('${leaseId}')">${T("Save payment", "Зачувај уплата")}</button>`);
+}
+// a different month: suggest what is still owed for it
+function rentPayMonth(leaseId) {
+  const l = (state.leases || []).find((x) => x.id === leaseId);
+  if (l) $("rp-amt").value = rentLeft(l, $("rp-month").value) || l.rent;
+}
+async function saveRentPay(leaseId) {
+  const l = (state.leases || []).find((x) => x.id === leaseId);
+  if (!l) return;
+  const row = {
+    lease_id: l.id, apartment_id: l.apartment_id, month: $("rp-month").value + "-01",
+    amount: parseFloat($("rp-amt").value) || 0, paid_on: $("rp-on").value || todayStr(),
+    account_id: $("rp-acct").value || null, note: $("rp-note").value.trim() || null,
+  };
+  if (!(row.amount > 0)) return toast(T("Enter the amount", "Внеси износ"));
+  try { await dbq(db.from("rent_payments").insert(row), T("Payment not saved", "Уплатата не е зачувана")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["rentPays"]); render();
+  toast(T("Rent recorded", "Киријата е внесена"));
+}
+async function delRentPay(id) {
+  const row = (state.rentPays || []).find((x) => x.id === id);
+  if (!row || !await ask(T("Delete this payment?", "Да се избрише уплатата?"))) return;
+  await deleteUndoable("rent_payments", row, T("Payment deleted", "Уплатата е избришана"), ["rentPays"]);
+}
+
+// A tenant: a reminder that the rent is due, or word that it has arrived.
+function messageTenant(leaseId) {
+  const l = (state.leases || []).find((x) => x.id === leaseId);
+  if (!l) return;
+  const m = curYm(), owed = rentOwed(l);
+  const paidMonths = (state.rentPays || []).filter((p) => p.lease_id === l.id).map((p) => ym(p.month)).sort();
+  const lastPaid = paidMonths[paidMonths.length - 1] || m;
+  const text = (lang, key) => {
+    const mk = lang === "mk", name = firstName(l.tenant_name), apt = aptName(l.apartment_id);
+    if (key === "receipt") {
+      return msgLines(mk
+        ? [`Здраво ${name},`, `потврдувам дека ја примив киријата за ${monthIn("mk", lastPaid)} за ${apt} — ${fmt(rentPaid(l, lastPaid))} ден. Ви благодарам!`, "", myName()]
+        : [`Hello ${name},`, `this is to confirm I have received the rent for ${monthIn("en", lastPaid)} for ${apt} — ${fmt(rentPaid(l, lastPaid))} MKD. Thank you!`, "", myName()]);
+    }
+    const mo = owed.includes(m) ? m : (owed[0] || m), due = rentDueDate(l, mo), late = due < todayStr();
+    const before = owed.filter((x) => x !== mo), extra = sumBy(before, (x) => rentLeft(l, x));
+    return msgLines(mk
+      ? [`Здраво ${name},`, `потсетник за киријата за ${monthIn("mk", mo)} за ${apt} — ${fmt(rentLeft(l, mo) || l.rent)} ден., ${late ? "која доспеа на" : "која доспева на"} ${dmy(due)}.`,
+         extra > 0.005 ? `Од претходните месеци останува уште ${fmt(extra)} ден.` : null, "", "Ви благодарам,", myName()]
+      : [`Hello ${name},`, `a reminder about the rent for ${monthIn("en", mo)} for ${apt} — ${fmt(rentLeft(l, mo) || l.rent)} MKD, ${late ? "which was due on" : "due on"} ${dmy(due)}.`,
+         extra > 0.005 ? `There is also ${fmt(extra)} MKD still open from earlier months.` : null, "", "Thank you,", myName()]);
+  };
+  openMessage({
+    title: T("Message to the tenant", "Порака до закупецот"), to: `${l.tenant_name} · ${aptName(l.apartment_id)}`,
+    phone: l.tenant_phone || "", phone0: l.tenant_phone || "", lang: langFor(l.tenant_name),
+    templates: [["remind", T("Rent reminder", "Потсетник за кирија")], ["receipt", T("Rent received", "Кирија примена")]],
+    key: owed.length ? "remind" : "receipt", text,
+    savePhone: async (v) => {
+      await dbq(db.from("leases").update({ tenant_phone: v }).eq("id", l.id), T("Number not kept", "Бројот не е зачуван"));
+      l.tenant_phone = v;
+    },
+  });
+}
+
+/* ---------- which apartments a person sees ----------
+   Two lists, both from migration 0006. hide_apts is your own screen: the
+   flats you have chosen not to look at, as the owner who sees them all — out
+   of every list and every total here, but nobody loses access to anything.
+   apt_ids is access: the flats beyond their own that a limited person may
+   see, and the database hands them nothing else. */
+function applyAptHiding(keys) {
+  const hid = state.hideApts;
+  if (!hid || !hid.size) return;
+  const keep = (r) => !hid.has(r.apartment_id);
+  // a payment knows its booking, not its flat — so note the hidden bookings first
+  if (keys.includes("stays")) {
+    state.hiddenStays = new Set(state.stays.filter((s) => !keep(s)).map((s) => s.id));
+    state.stays = state.stays.filter(keep);
+  }
+  if (keys.includes("apartments")) state.apartments = state.apartments.filter((a) => !hid.has(a.id));
+  for (const k of ["bills", "expenses", "feeds", "leases", "rentPays"]) if (keys.includes(k)) state[k] = (state[k] || []).filter(keep);
+  if (keys.includes("stayPays")) state.stayPays = state.stayPays.filter((p) => !(state.hiddenStays || new Set()).has(p.stay_id));
+  if (keys.includes("tasks")) state.tasks = state.tasks.filter((t) => (!t.apartment_id || !hid.has(t.apartment_id))
+    && (!t.stay_id || !(state.hiddenStays || new Set()).has(t.stay_id)));
+}
+let myAptsDraft = null;
+async function openMyApts() {
+  let all = [];
+  try { all = await dbq(db.from("apartments").select("id, name, managed_by").eq("active", true).order("name"), T("Could not load", "Не може да се вчита")); }
+  catch { return; }
+  myAptsDraft = { all, hide: new Set(state.hideApts) };
+  renderMyApts();
+}
+function renderMyApts() {
+  const d = myAptsDraft;
+  openSheet(`<h2>${T("Apartments you see", "Станови што ги гледаш")}</h2>
+    <p class="muted">${T("Untick the ones you do not want on your screen — they leave your lists and your totals. Nobody loses access, and you can tick them back here any time.",
+      "Отчекирај ги оние што не сакаш да ги гледаш — излегуваат од твоите листи и збирови. Никој не губи пристап, а можеш да ги вратиш тука кога сакаш.")}</p>
+    <div style="margin-top:10px">${d.all.map((a) => {
+      const on = !d.hide.has(a.id), who = a.managed_by && a.managed_by !== state.uid ? personName(a.managed_by) : "";
+      return `<div class="row" style="margin-bottom:8px">
+        <button class="clbox ${on ? "on" : ""}" onclick="myAptToggle('${a.id}')">${on ? "✓" : ""}</button>
+        <span>${esc(a.name)}${who ? ` <span class="muted">· ${esc(who)}</span>` : ""}</span></div>`;
+    }).join("")}</div>
+    <button class="btn" onclick="saveMyApts()">${T("Save", "Зачувај")}</button>`);
+}
+function myAptToggle(id) {
+  if (myAptsDraft.hide.has(id)) myAptsDraft.hide.delete(id); else myAptsDraft.hide.add(id);
+  renderMyApts();
+}
+async function saveMyApts() {
+  const hide = [...myAptsDraft.hide];
+  try { await dbq(db.from("user_roles").update({ hide_apts: hide }).eq("user_id", state.uid), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  state.hideApts = new Set(hide);
+  state.aptFilter = "all";
+  closeSheet(); await refreshAll(); render();
+  toast(hide.length ? T(`${hide.length} apartment${hide.length > 1 ? "s" : ""} put away`, `${hide.length} стан(ови) склонети`) : T("Showing every apartment", "Се гледаат сите станови"));
 }
 
 /* ---------- messages to clients and guests ----------
@@ -7294,9 +7751,19 @@ async function saveApt(id) {
   // it had, or takes its default of whoever is adding the flat
   const mg = $("ap-managed");
   if (mg && mg.value) row.managed_by = mg.value;
+  // only sent once the columns are there (migration 0006)
+  if (state.rentCol) {
+    row.rent_mode = (($("ap-mode") || {}).querySelector?.(".chip.on") || {}).dataset?.v || "short";
+    row.tenant_pays_bills = row.rent_mode === "monthly" && !!($("ap-tpb") && $("ap-tpb").classList.contains("on"));
+  }
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
   closeSheet(); await refreshAll(["apartments", "aptCash"]); renderApt(); toast("Saved");
+  // a flat just set to monthly rent has no tenant yet: offer to add one
+  const aid = id || (state.apartments.find((a) => a.name === row.name) || {}).id;
+  if (row.rent_mode === "monthly" && aid && (state.leases || []).every((l) => l.apartment_id !== aid)) {
+    setTimeout(() => openLeaseSheet(null, aid), 260);
+  }
 }
 async function delApt(id) {
   if (!await ask("Deactivate this apartment?")) return;
@@ -7717,14 +8184,17 @@ function renderHome() {
   }
 
   if (state.perm.apts) {
-    const occ = new Set(state.stays.filter((s) => s.check_in <= today && s.check_out > today).map((s) => s.apartment_id)).size;
+    const occ = occupiedTonight().size;
     const curM = today.slice(0, 7);
     // bills arrive the month after they cover: in August you are chasing July's
     const billM = prevMonth(curM);
-    const paidN = state.bills.filter((b) => (b.month || "").slice(0, 7) === billM && b.paid).length;
-    const need = state.apartments.length * BILL_TYPES.length;
+    // only the bills that are yours to pay: none for a flat whose tenant pays them
+    const wants = (b) => { const a = state.apartments.find((x) => x.id === b.apartment_id); return !!a && billTypesFor(a).includes(b.type); };
+    const paidN = state.bills.filter((b) => (b.month || "").slice(0, 7) === billM && b.paid && wants(b)).length;
+    const need = sumBy(state.apartments, (a) => billTypesFor(a).length);
     const unpaid = Math.max(0, need - paidN);
-    const inc = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 7) === curM), (s) => s.amount);
+    const rentLateN = (state.leases || []).filter((l) => rentLate(l, curM)).length;
+    const inc = sumBy(state.stays.filter((s) => (s.check_in || "").slice(0, 7) === curM), (s) => s.amount) + rentEarned(curM);
     const bil = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 7) === curM), (b) => b.amount);
     const out = state.stays.filter((s) => s.check_out === today).length;
     const inn = state.stays.filter((s) => s.check_in === today && !s.arrived_at).length;
@@ -7734,6 +8204,8 @@ function renderHome() {
       ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
       <div class="hrow"><span>${T("Bills", "Сметки")} · ${monthName(billM)}</span>
         <b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " " + T("unpaid", "неплатени") : T("all paid", "сите платени")}</b></div>
+      ${rentLateN ? `<div class="hrow"><span>${T("Rent", "Кирија")} · ${monthName(curM)}</span>
+        <b class="hflag">${rentLateN} ${T("late", "доцни")}</b></div>` : ""}
       <div class="hrow"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
     </div>`;
   }

@@ -31,6 +31,17 @@ function nowLocal(): Date {
 }
 const pad = (n: number) => String(n).padStart(2, "0");
 
+// Whether a person sees a flat, as the app shows it to them: the owner sees
+// every one but those they have put away (hide_apts); anyone else needs the
+// Apartments tab, and if limited, the flat must be one they manage or one they
+// have been given (apt_ids). The columns arrive with migration 0006 and read
+// as empty before it, which leaves things as they were.
+const aptVisible = (r: any, a: any) => r.role === "owner"
+  ? !(r.hide_apts ?? []).includes(a.id)
+  : !!r.see_apts && (!r.apts_own_only || a.managed_by === r.user_id || (r.apt_ids ?? []).includes(a.id));
+// the owner hears about a task unless it belongs to a flat they have put away
+const ownerSees = (r: any, t: any) => r.role === "owner" && !(t.apartment_id && (r.hide_apts ?? []).includes(t.apartment_id));
+
 async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null) {
   const { data: subs } = await db.from("push_subscriptions").select("*");
   const { data: rr } = await db.from("user_roles").select("*");
@@ -81,6 +92,17 @@ Deno.serve(async (req) => {
   // ---- 1. task reminders ----
   const { data: tasks } = await db.from("tasks").select("*")
     .eq("remind", true).not("due_time", "is", null);
+  // A limited person hears about a flat's task only if the flat is theirs —
+  // the same rule the database applies to what they can read (migration 0006).
+  const { data: aptRows } = await db.from("apartments").select("*");
+  const { data: stayRows } = await db.from("stays").select("id, apartment_id").gte("check_out", today);
+  const flatOf = (t: any) => t.apartment_id ?? (stayRows ?? []).find((s: any) => s.id === t.stay_id)?.apartment_id ?? null;
+  const flatOk = (r: any, t: any) => {
+    const id = flatOf(t);
+    if (!r.apts_own_only || !id) return true;
+    const a = (aptRows ?? []).find((x: any) => x.id === id);
+    return !!a && (a.managed_by === r.user_id || (r.apt_ids ?? []).includes(a.id));
+  };
   for (const t of tasks ?? []) {
     // on the days the Tasks tab lists it, by the same rules — see occurs.ts
     const isToday = occursOn(t, today);
@@ -98,8 +120,8 @@ Deno.serve(async (req) => {
       const who = t.context === "personal"
         ? (r: any) => r.user_id === t.owner_uid || (r.personal_access ?? []).includes(t.owner_uid)
         : t.assigned_to
-          ? (r: any) => r.role === "owner" || r.user_id === t.assigned_to
-          : (r: any) => r.role === "owner" || (r.task_contexts ?? []).includes(t.context);
+          ? (r: any) => ownerSees(r, t) || r.user_id === t.assigned_to
+          : (r: any) => ownerSees(r, t) || ((r.task_contexts ?? []).includes(t.context) && flatOk(r, t));
       const at = t.due_time.slice(0, 5);
       const body = lead
         ? `${t.title} — за ${lead >= 60 ? (lead / 60) + " ч." : lead + " мин."} (${at})`
@@ -146,12 +168,12 @@ Deno.serve(async (req) => {
         return isToday && !doneToday(t);
       });
     const { data: all } = await db.from("tasks").select("*");
-    const { data: ownerRow } = await db.from("user_roles").select("user_id").eq("role", "owner").maybeSingle();
+    const { data: ownerRow } = await db.from("user_roles").select("*").eq("role", "owner").maybeSingle();
     const ownerId = ownerRow?.user_id ?? null;
     // this message goes to the owner, so somebody else's personal tasks have
-    // no business being counted in it
+    // no business being counted in it — nor tasks for flats they have put away
     const open = openToday((all ?? []).filter((t: any) =>
-      t.context !== "personal" || !t.owner_uid || t.owner_uid === ownerId));
+      (t.context !== "personal" || !t.owner_uid || t.owner_uid === ownerId) && (!ownerRow || ownerSees(ownerRow, t))));
     const byCtx = (c: string) => open.filter((t) => t.context === c).length;
     const lowCount = (stock ?? []).filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
     // the per-area counts already contain these, so name them rather than
@@ -182,26 +204,70 @@ Deno.serve(async (req) => {
     const daysSince = lastSent ? Math.floor((Date.parse(today) - Date.parse(lastSent)) / 86400000) : 999;
     const dueNow = lastMonth !== month || daysSince >= 7;
     if (dom >= billsDay && hhmm >= digestHour && dueNow) {
-      const { data: apts } = await db.from("apartments").select("id").eq("active", true);
-      const { data: bs } = await db.from("bills").select("paid").eq("month", month + "-01");
+      const { data: apts } = await db.from("apartments").select("*").eq("active", true);
+      const { data: bs } = await db.from("bills").select("apartment_id, type, paid").eq("month", month + "-01");
+      const { data: roles } = await db.from("user_roles").select("*");
       // the list of bill types lives in app_settings, written by the app,
       // so adding a type never leaves this count behind
       const rawTypes = (cfg ?? []).find((r: any) => r.key === "bill_types")?.value;
       const typeList = Array.isArray(rawTypes)
         ? rawTypes
         : (() => { try { return JSON.parse(rawTypes); } catch { return null; } })();
-      const TYPES = (typeList && typeList.length) ? typeList.length : 6;
-      const need = (apts ?? []).length * TYPES;
-      const paidN = (bs ?? []).filter((b: any) => b.paid).length;
-      const unpaid = Math.max(0, need - paidN);
-      if (unpaid > 0) {
-        const again = lastMonth === month ? " — still" : "";
-        await sendToAll("Bills to pay", `${unpaid} unpaid for ${label}${again}`, "bills",
-          (r) => r.role === "owner" || !!r.see_apts);
+      const TYPES: string[] = (typeList && typeList.length)
+        ? typeList.map((x: any) => String(x?.key ?? x))
+        : ["electricity", "water", "internet", "building", "heating", "booking"];
+      // what a flat asks for: nothing when its tenant pays the bills, and never
+      // a platform's fee on a flat let by the month
+      const typesFor = (a: any) => a.rent_mode === "monthly" ? (a.tenant_pays_bills ? [] : TYPES.filter((x) => x !== "booking")) : TYPES;
+      // each person is told about the flats they see, so the count is theirs
+      const unpaidFor = (r: any) => {
+        const mine = (apts ?? []).filter((a: any) => aptVisible(r, a));
+        const need = mine.reduce((n: number, a: any) => n + typesFor(a).length, 0);
+        const paidN = (bs ?? []).filter((b: any) => b.paid && mine.some((a: any) => a.id === b.apartment_id && typesFor(a).includes(b.type))).length;
+        return Math.max(0, need - paidN);
+      };
+      const byCount = new Map<number, Set<string>>();
+      for (const r of roles ?? []) {
+        if (r.role !== "owner" && !r.see_apts) continue;
+        const n = unpaidFor(r);
+        if (n > 0) byCount.set(n, (byCount.get(n) ?? new Set()).add(r.user_id));
+      }
+      const again = lastMonth === month ? " — still" : "";
+      for (const [n, who] of byCount) {
+        await sendToAll("Bills to pay", `${n} unpaid for ${label}${again}`, "bills", (r) => who.has(r.user_id));
       }
       await db.from("app_settings").upsert({ key: "bills_sent_on", value: month + "@" + today }, { onConflict: "key" });
     }
   } catch (e) { console.error("bills reminder", e); }
+
+  // ---- 4b. rent that is late ----
+  // A tenant's rent not (fully) in by the day after it fell due — said once a
+  // month per tenant, to whoever sees that flat. leases arrives with migration
+  // 0006; before it the query fails and this is skipped.
+  try {
+    const { data: leases, error: lerr } = await db.from("leases").select("*");
+    if (!lerr && (leases ?? []).length && hhmm >= digestHour) {
+      const m = today.slice(0, 7);
+      const [y, mo] = m.split("-").map(Number);
+      const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      const { data: pays } = await db.from("rent_payments").select("lease_id, amount").eq("month", m + "-01");
+      const { data: apts } = await db.from("apartments").select("*").eq("active", true);
+      for (const l of leases ?? []) {
+        if (String(l.start_date).slice(0, 7) > m || (l.end_date && String(l.end_date).slice(0, 7) < m)) continue;
+        if (l.late_sent_month === m) continue;
+        const due = `${m}-${pad(Math.min(Number(l.due_day) || 1, last))}`;
+        if (today <= due) continue;                      // late from the day after
+        const paid = (pays ?? []).filter((p: any) => p.lease_id === l.id).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+        const left = (Number(l.rent) || 0) - paid;
+        if (left <= 0.005) continue;
+        const apt = (apts ?? []).find((a: any) => a.id === l.apartment_id);
+        if (!apt) continue;
+        await sendToAll("Rent late", `${l.tenant_name} · ${apt.name}: ${Math.round(left).toLocaleString("mk-MK")} ден., due ${due.slice(8)}-${due.slice(5, 7)}`,
+          `rent-${l.id}`, (r) => aptVisible(r, apt));
+        await db.from("leases").update({ late_sent_month: m }).eq("id", l.id);
+      }
+    }
+  } catch (e) { console.error("rent reminder", e); }
 
   // ---- 5. offer follow-up: sent and quiet for 5+ days ----
   try {
@@ -293,7 +359,7 @@ Deno.serve(async (req) => {
                 title: `Check-in: ${name}${apt ? " \u00b7 " + apt.name : ""}`,
                 context: "apts", due_date: due < today ? today : due, due_time: remindAt, remind: true,
                 notes: `Arrives ${ev.start} \u00b7 leaves ${ev.end} \u00b7 ${nights} night(s) \u00b7 ${feed.source}`,
-                stay_id: made.id,
+                stay_id: made.id, apartment_id: feed.apartment_id,
               });
             }
           }
