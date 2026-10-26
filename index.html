@@ -197,6 +197,8 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .tk-day-top svg{width:17px;height:17px;vertical-align:-3px;margin-right:6px}
 #tk-img-prev:empty{display:none}
+.btn.msg-wa{background:#1FA855;color:#fff;margin:0}
+.btn.msg-vb{background:#7360F2;color:#fff;margin:0}
 /* ---- habits: a repeating task's record ---- */
 .t-meta .streak{color:var(--amber);font-weight:600}
 .hb-link{display:flex;align-items:center;gap:6px;width:100%;margin:6px 0 2px;padding:9px 12px;border:1px solid var(--line);
@@ -877,6 +879,8 @@ async function refreshAll(only) {
     // tasks.habit arrives with migration 0004; until it is run, every
     // repeating task counts as a habit and the switch stays out of sight
     if (k === "tasks" && (r.data || []).length) state.habitCol = "habit" in r.data[0];
+    // stays.guest_phone arrives with migration 0005; until then the field stays hidden
+    if (k === "stays" && (r.data || []).length) state.stayPhoneCol = "guest_phone" in r.data[0];
     if (k === "completions") {
       state.doneSet = new Set((r.data ?? []).filter((c) => !c.skipped).map((c) => c.task_id + ":" + c.done_on));
       state.skipSet = new Set((r.data ?? []).filter((c) => c.skipped).map((c) => c.task_id + ":" + c.done_on));
@@ -929,7 +933,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261026-120936";
+const BUILD = "20261026-133039";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3267,15 +3271,21 @@ const scriptOnce = (() => {
 // The offer as a real PDF file. The print view cannot be handed to another
 // app — the browser keeps it — so this draws the same layout onto A4 pages
 // here. A page ends under a row, never through one.
-async function offerPdfFile(o) {
+const offerPdfFile = async (o) => htmlPdfFile(await offerSheetHtml(o), offerFileName(o, "pdf"));
+// Any paper document as a PDF file that can be handed to another app: an
+// offer, an invoice. Laid out off screen at A4 width, photographed, and cut
+// into pages between rows rather than through them.
+async function htmlPdfFile(html, name) {
   await Promise.all([
     scriptOnce("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"),
     scriptOnce("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"),
   ]);
   // A4 less the print margins: 190 by 273 mm, laid out off screen
   const W = 190, H = 273, host = document.createElement("div");
-  host.style.cssText = `position:absolute;left:-10000px;top:0;width:${W}mm;background:#fff`;
-  host.innerHTML = await offerSheetHtml(o);
+  // the paper colours #printroot gives a printout, whatever the phone's theme
+  host.style.cssText = `position:absolute;left:-10000px;top:0;width:${W}mm;background:#fff;`
+    + "--paper:#fff;--card:#fff;--ink:#232323;--line:#CCCCCC;--muted:#555555;--surface:#fff";
+  host.innerHTML = html;
   document.body.appendChild(host);
   try {
     await imagesLoaded(host);
@@ -3283,7 +3293,7 @@ async function offerPdfFile(o) {
     const canvas = await window.html2canvas(host, { scale, backgroundColor: "#ffffff", logging: false });
     const pxPerMm = canvas.width / W, pageH = Math.floor(H * pxPerMm);
     const top = host.getBoundingClientRect().top;
-    const cuts = [...host.querySelectorAll(".pv > *, .pv-items tr")]
+    const cuts = [...host.querySelectorAll(".pv > *, .pv-items tr, .rp-tbl tr")]
       .map((el) => Math.round((el.getBoundingClientRect().bottom - top) * scale)).sort((a, b) => a - b);
     // where the column headings and the item rows sit, so a page that opens
     // in the middle of the list can carry the headings again, as print does
@@ -3310,7 +3320,7 @@ async function offerPdfFile(o) {
       pdf.addImage(slice.toDataURL("image/jpeg", 0.92), "JPEG", 10, 12, W, slice.height / pxPerMm);
       y = end;
     }
-    return new File([pdf.output("blob")], offerFileName(o, "pdf"), { type: "application/pdf" });
+    return new File([pdf.output("blob")], name, { type: "application/pdf" });
   } finally { host.remove(); }
 }
 // Puts real pictures where the template left «IMG:n» markers.
@@ -3537,17 +3547,21 @@ async function printOrder(gi) {
 // content is invisible, and it is replaced at the start of the next document.
 //
 // brand: false for anything that is not Elaks.
-async function printDoc(inner, opts) {
+// the page a document is printed on: the letterhead, the body, the footer
+function docShell(inner, opts) {
   const brand = !opts || opts.brand !== false;
-  const root = $("printroot");
-  try {
-    root.innerHTML = `<div class="pv">
+  return `<div class="pv">
       ${brand
         ? `<table class="pv-top"><tr><td></td><td class="r"><img class="pv-logo" src="brand-logo.png" alt="ELAKS"></td></tr></table>`
         : (opts && opts.heading ? `<div class="pv-plain">${opts.heading}</div>` : "")}
       ${inner}
       ${brand ? `<img class="pv-footer" src="brand-footer.png" alt="ELAKS">` : ""}
     </div>`;
+}
+async function printDoc(inner, opts) {
+  const root = $("printroot");
+  try {
+    root.innerHTML = docShell(inner, opts);
     const imgs = [...root.querySelectorAll("img")];
     await Promise.all(imgs.map((im) => im.complete ? true : new Promise((r) => { im.onload = im.onerror = r; })));
     await new Promise((r) => setTimeout(r, 150));
@@ -4773,6 +4787,7 @@ async function openPolicySheet(id) {
     ${id ? polPaymentsBlock(p) : `<p class="muted" style="font-size:12.5px">${T(
       "Save it first, then you can record what has been paid — in one go or in instalments.",
       "Прво зачувај ја, потоа можеш да внесуваш уплати — одеднаш или на рати.")}</p>`}
+    ${id ? `<button class="btn ghost" onclick="messagePolicy('${id}')">${ICON.share}${T("Message the client about it", "Порака до клиентот")}</button>` : ""}
     ${id ? `<button class="btn amber" onclick="renewPolicy('${id}')">${T("Renew for another term", "Обнови за нов период")}</button>
       <button class="btn danger" onclick="delPolicy('${id}')">${T("Remove policy", "Отстрани полиса")}</button>` : ""}
   `);
@@ -6534,6 +6549,8 @@ function openStaySheet(id, pre) {
     <label>Apartment</label><select id="st-apt" onchange="stayCalc()">${state.apartments.map((a) =>
       `<option value="${a.id}" ${s.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select>
     <label>Guest name</label><input id="st-guest" value="${esc(s.guest_name || "")}">
+    ${state.stayPhoneCol ? `<label>${T("Guest phone (opt.)", "Телефон на гостинот (опц.)")}</label>
+      <input id="st-phone" type="tel" inputmode="tel" value="${esc(s.guest_phone || "")}">` : ""}
     <div class="grid2">
       <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}" onchange="stayCalc()"></div>
       <div><label>Check-out</label><input id="st-out" type="date" value="${s.check_out || ""}" onchange="stayCalc()"></div>
@@ -6567,7 +6584,10 @@ function openStaySheet(id, pre) {
         ? `<p class="muted">${T("Arrived", "Пристигна")} ${dmyTime(s.arrived_at)} ·
              <span role="button" tabindex="0" style="text-decoration:underline"
                onclick="unmarkArrived('${id}')">${T("undo", "врати")}</span></p>` : ""}
-    ${id && s.apartment_id ? `<button class="btn sm ghost" onclick="closeSheet();setTimeout(()=>openCodes('${s.apartment_id}'),240)">${T("Codes and Wi-Fi", "Кодови и Wi-Fi")}</button>` : ""}
+    ${id && s.apartment_id ? `<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">
+      <button class="btn sm" onclick="messageGuest('${id}')">${ICON.share}${T("Message the guest", "Порака до гостинот")}</button>
+      <button class="btn sm ghost" onclick="closeSheet();setTimeout(()=>openCodes('${s.apartment_id}'),240)">${T("Codes and Wi-Fi", "Кодови и Wi-Fi")}</button>
+    </div>` : ""}
     <div class="row" style="margin-top:12px">
       <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${stayHasTask(id) ? "\u2713" : ""}</button>
@@ -6680,6 +6700,8 @@ async function saveStay(id) {
     commission: parseFloat(($("st-comm") || {}).value) || 0,
     cleaning_cost: parseFloat(($("st-clean") || {}).value) || 0,
     notes: $("st-notes").value.trim() || null,
+    // only sent once the column is there, so a save never asks for one that is missing
+    ...(state.stayPhoneCol ? { guest_phone: (($("st-phone") || {}).value || "").trim() || null } : {}),
   };
   if (!row.apartment_id) return toast("Add an apartment first");
   if (!row.guest_name) return toast("Enter guest name");
@@ -6958,6 +6980,260 @@ function outFeedBlock(a) {
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast("Link copied"); }
   catch { await askText("Copy this link", t); }
+}
+
+/* ---------- messages to clients and guests ----------
+   One sheet writes them all: an invoice and the reminder that follows it, a
+   policy coming to an end, a guest's way in and the thank-you after. It opens
+   the chat in WhatsApp or Viber with the words already typed, or hands the
+   words — and the PDF, where there is one — to any app through the phone's
+   share sheet. The words can be changed before they go. */
+let msg = null;
+
+// Macedonian numbers are written 070 123 456 or +389 70 123 456; both chat
+// apps want the international form, digits only
+function intlPhone(raw) {
+  const d = String(raw || "").replace(/[^\d+]/g, "");
+  if (!d) return "";
+  if (d.startsWith("+")) return d.slice(1).replace(/\D/g, "");
+  if (d.startsWith("00")) return d.slice(2);
+  if (d.startsWith("0")) return "389" + d.slice(1);
+  if (d.length === 8) return "389" + d;                 // 70 123 456, the 0 left off
+  return d;
+}
+// a number written into a stay's notes, from before there was a field for it
+const phoneIn = (s) => ((String(s || "").match(/(?:\+|00)?\d[\d\s\/-]{6,}\d/) || [""])[0]).trim();
+const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "";
+const myName = () => personName(state.uid) || "";
+// a guest who writes their name in Cyrillic is written to in Macedonian
+const langFor = (name) => (/[Ѐ-ӿ]/.test(name || "") ? "mk" : "en");
+
+// m: { title, to, phone, templates: [[key, label]], key, lang, text(lang, key),
+//      makeFile() → Promise<File>, savePhone(phone) }
+function openMessage(m) {
+  msg = { lang: "mk", ...m, ready: null };
+  if (m.makeFile) {
+    // drawn while the words are read, so Share has the file the moment it is tapped
+    m.makeFile().then((f) => { if (msg && msg.makeFile === m.makeFile) { msg.ready = f; msgShareReady(); } })
+      .catch((e) => { console.error(e); if (msg) { msg.fileErr = e.message || String(e); msgShareReady(); } });
+  }
+  renderMessage();
+}
+function renderMessage() {
+  const m = msg;
+  openSheet(`<h2>${esc(m.title)}</h2>
+    ${m.to ? `<p class="muted">${esc(m.to)}</p>` : ""}
+    ${m.templates ? `<div class="chips" style="margin-top:10px">${m.templates.map(([k, l]) =>
+      `<button class="chip ${m.key === k ? "on" : ""}" onclick="msgSet('key','${k}')">${l}</button>`).join("")}</div>` : ""}
+    <div class="chips" style="margin-top:8px">${[["mk", "Македонски"], ["en", "English"]].map(([k, l]) =>
+      `<button class="chip sm ${m.lang === k ? "on" : ""}" onclick="msgSet('lang','${k}')">${l}</button>`).join("")}</div>
+    <label>${T("Phone", "Телефон")}</label>
+    <input id="msg-phone" type="tel" inputmode="tel" value="${esc(m.phone || "")}"
+      placeholder="${T("No number — you will pick the chat", "Нема број — ќе го избереш разговорот")}">
+    <label>${T("Message", "Порака")}</label>
+    <textarea id="msg-text" rows="9">${esc(m.text(m.lang, m.key))}</textarea>
+    <div class="grid2" style="margin-top:12px">
+      <button class="btn msg-wa" onclick="msgSend('wa')">WhatsApp</button>
+      <button class="btn msg-vb" onclick="msgSend('viber')">Viber</button>
+    </div>
+    ${m.makeFile
+      ? `<button class="btn ghost" id="msg-share" onclick="msgShare()" disabled>${ICON.share}<span id="msg-share-l"></span></button>
+         <p class="muted" style="font-size:12.5px;margin-top:6px">${T(
+           "WhatsApp and Viber open the chat with the words in it. To send the PDF too, use Share and pick the chat.",
+           "WhatsApp и Viber го отвораат разговорот со текстот. За да го пратиш и PDF-от, користи Сподели и избери го разговорот.")}</p>`
+      : `<button class="btn ghost" onclick="msgShare()">${ICON.share}${T("Other apps…", "Други апликации…")}</button>`}
+    <button class="btn ghost" onclick="msgCopy()">${T("Copy the words", "Копирај го текстот")}</button>`);
+  msgShareReady();
+}
+function msgShareReady() {
+  const b = $("msg-share"), l = $("msg-share-l");
+  if (!b || !msg) return;
+  b.disabled = !msg.ready;
+  l.textContent = msg.ready ? T("Share with the PDF", "Сподели со PDF")
+    : msg.fileErr ? T("The PDF could not be made", "PDF-от не може да се направи")
+    : T("Preparing the PDF…", "Се подготвува PDF…");
+}
+// a template or language chip: the number typed so far stays, the words are written again
+function msgSet(what, v) {
+  if (!msg) return;
+  if ($("msg-phone")) msg.phone = $("msg-phone").value;
+  msg[what] = v;
+  renderMessage();
+}
+const msgWords = () => (($("msg-text") || {}).value || "").trim();
+// With a number the chat opens on that person; without one the app asks whom to send to.
+const waLink = (phone, text) => `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+const viberLink = (phone, text) => phone ? `viber://chat?number=%2B${phone}&draft=${encodeURIComponent(text)}`
+  : `viber://forward?text=${encodeURIComponent(text)}`;
+async function msgSend(app) {
+  const m = msg; if (!m) return;
+  const text = msgWords(), raw = ($("msg-phone") || {}).value || "", phone = intlPhone(raw);
+  if (!text) return toast(T("Write something first", "Прво напиши нешто"));
+  if (app === "wa") {
+    window.open(waLink(phone, text), "_blank");
+  } else {
+    // Viber takes the number and, on most phones, the words as a draft; they
+    // are copied as well, for a phone that drops them
+    try { await navigator.clipboard.writeText(text); } catch { /* the draft may still carry them */ }
+    location.href = viberLink(phone, text);
+    toast(T("Also copied — paste it if Viber opens empty", "Копирано е — залепи ако Viber се отвори празен"));
+  }
+  msgKeepPhone(raw);
+}
+async function msgShare() {
+  const m = msg; if (!m) return;
+  const text = msgWords();
+  const data = m.ready ? { files: [m.ready], title: m.ready.name.replace(/\.pdf$/, ""), text } : { text };
+  if (!navigator.share || (navigator.canShare && !navigator.canShare(data))) {
+    // a browser that cannot hand files on: save the PDF, copy the words
+    if (m.ready) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(m.ready); a.download = m.ready.name;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    }
+    try { await navigator.clipboard.writeText(text); } catch { /* shown below anyway */ }
+    return say(T("This browser cannot pass things to other apps. The words are copied", "Овој прелистувач не може да праќа во други апликации. Текстот е копиран")
+      + (m.ready ? T(" and the PDF is downloaded.", " и PDF-от е преземен.") : "."));
+  }
+  try { await navigator.share(data); }
+  catch (e) {
+    if (e && e.name === "AbortError") return;          // closed the share sheet without choosing
+    console.error(e);
+    return say(T("Could not share: ", "Не може да се сподели: ") + e.message);
+  }
+  msgKeepPhone(($("msg-phone") || {}).value || "");
+  closeSheet(); toast(T("Sent", "Испратено"));
+}
+async function msgCopy() {
+  try { await navigator.clipboard.writeText(msgWords()); toast(T("Copied", "Копирано")); }
+  catch { await askText(T("Copy this", "Копирај го ова"), msgWords()); }
+}
+// a number typed here is kept on the client, policy or stay, so it is there next time
+async function msgKeepPhone(raw) {
+  const m = msg, v = String(raw || "").trim();
+  if (!m || !m.savePhone || !v || v === (m.phone0 || "")) return;
+  try { await m.savePhone(v); m.phone0 = v; } catch (e) { console.warn("phone not kept", e); }
+}
+const moneyMk = (n) => fmt(n) + " ден.";
+const msgLines = (lines) => lines.filter((l) => l !== null && l !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+// An invoice: sent as it is issued, or a reminder once it is late.
+function messageInvoice(id) {
+  const i = state.invoices.find((x) => x.id === id);
+  if (!i) return;
+  const c = state.clients.find((x) => x.id === i.client_id);
+  const late = !invPaid(i) && i.due_date && i.due_date < todayStr();
+  const acc = setting("co_account", ""), bank = setting("co_bank", ""), co = setting("co_name", "");
+  const text = (lang, key) => {
+    const mk = lang === "mk", due = i.due_date ? dmy(i.due_date) : "";
+    const pay = acc ? (mk ? `Уплатата можете да ја направите на сметка ${acc}${bank ? " (" + bank + ")" : ""}, со повик на број ${i.number}.`
+      : `Payment can be made to account ${acc}${bank ? " (" + bank + ")" : ""}, reference ${i.number}.`) : null;
+    const lines = key === "remind"
+      ? (mk ? ["Почитувани,", `ве потсетуваме дека фактурата бр. ${i.number} од ${dmy(i.invoice_date)}, на износ од ${moneyMk(i.total)}, ${
+          due ? (i.due_date < todayStr() ? "доспеа за плаќање на " : "доспева за плаќање на ") + due : "сè уште не е платена"}.`,
+          pay, "Доколку е веќе платена, ве молиме занемарете ја оваа порака.", "", "Ви благодариме,", co]
+        : ["Hello,", `a reminder that invoice no. ${i.number} of ${dmy(i.invoice_date)}, for ${fmt(i.total)} MKD, ${
+          due ? (i.due_date < todayStr() ? "was due on " : "is due on ") + due : "is still unpaid"}.`,
+          pay, "If it has already been paid, please disregard this message.", "", "Thank you,", co])
+      : (mk ? ["Почитувани,", `во прилог ви ја испраќаме фактурата бр. ${i.number} од ${dmy(i.invoice_date)}, на износ од ${moneyMk(i.total)}.${
+          due ? ` Рок за плаќање: ${due}.` : ""}`, pay, "", "Ви благодариме за соработката,", co]
+        : ["Hello,", `please find attached invoice no. ${i.number} of ${dmy(i.invoice_date)}, for ${fmt(i.total)} MKD.${
+          due ? ` Payment is due by ${due}.` : ""}`, pay, "", "Thank you for your business,", co]);
+    return msgLines(lines);
+  };
+  openMessage({
+    title: T("Invoice", "Фактура") + " " + i.number, to: c ? c.name : "",
+    phone: (c && c.phone) || "", phone0: (c && c.phone) || "",
+    templates: [["send", T("Send the invoice", "Испрати фактура")], ["remind", T("Payment reminder", "Потсетник за плаќање")]],
+    key: late ? "remind" : "send", text,
+    makeFile: () => htmlPdfFile(docShell(invoiceDocHtml(i)), invoiceFileName(i)),
+    savePhone: c ? async (v) => {
+      await dbq(db.from("clients").update({ phone: v }).eq("id", c.id), T("Number not kept", "Бројот не е зачуван"));
+      c.phone = v;
+    } : null,
+  });
+}
+
+// A policy coming to an end, to the person it covers.
+const POLICY_WHAT = {
+  "Автомобил": ["за автомобилот", "car"], "Зелен картон": ["за зелен картон", "green card"],
+  "Имот": ["за имотот", "property"], "Патничко": ["за патничко осигурување", "travel"],
+  "Живот": ["за животно осигурување", "life"],
+};
+function messagePolicy(id) {
+  const p = state.policies.find((x) => x.id === id);
+  if (!p) return;
+  const text = (lang) => {
+    const mk = lang === "mk", what = POLICY_WHAT[p.kind] || ["", ""];
+    const plate = p.plate ? " " + p.plate : "", no = p.policy_no ? (mk ? ` (бр. ${p.policy_no})` : ` (no. ${p.policy_no})`) : "";
+    const ended = p.end_date && p.end_date < todayStr(), end = p.end_date ? dmy(p.end_date) : "";
+    const gc = p.has_green_card && p.green_card_end
+      ? (mk ? `Зелениот картон важи до ${dmy(p.green_card_end)}.` : `The green card is valid until ${dmy(p.green_card_end)}.`) : null;
+    const lines = mk
+      ? [`Почитуван/а ${p.holder_name},`,
+         end ? `ве известуваме дека вашата полиса ${what[0]}${plate}${no} ${ended ? "истече на" : "истекува на"} ${end}.`
+           : `ви пишувам во врска со вашата полиса ${what[0]}${plate}${no}.`,
+         gc, "Доколку сакате да ја обновиме, одговорете на оваа порака или јавете се.", "", "Поздрав,", myName()]
+      : [`Hello ${firstName(p.holder_name)},`,
+         end ? `your ${what[1] ? what[1] + " " : ""}insurance policy${plate}${no} ${ended ? "ended on" : "ends on"} ${end}.`
+           : `I am writing about your ${what[1] ? what[1] + " " : ""}insurance policy${plate}${no}.`,
+         gc, "If you would like us to renew it, just reply to this message or give me a call.", "", "Best regards,", myName()];
+    return msgLines(lines);
+  };
+  openMessage({
+    title: T("Message about the policy", "Порака за полисата"), to: p.holder_name,
+    phone: p.phone || "", phone0: p.phone || "", text,
+    savePhone: async (v) => {
+      await dbq(db.from("policies").update({ phone: v }).eq("id", p.id), T("Number not kept", "Бројот не е зачуван"));
+      p.phone = v;
+    },
+  });
+}
+
+// A guest: the way in before they come, the thank-you after they leave —
+// written from what the apartment already holds.
+function messageGuest(id) {
+  const s = state.stays.find((x) => x.id === id);
+  if (!s) return;
+  const a = state.apartments.find((x) => x.id === s.apartment_id) || {};
+  const phone = s.guest_phone || phoneIn(s.notes);
+  const text = (lang, key) => {
+    const mk = lang === "mk", name = firstName(s.guest_name), apt = a.name || "";
+    const ci = dmy(s.check_in), co = dmy(s.check_out), out = checkoutTimeFor(s.apartment_id);
+    if (key === "thanks") {
+      const where = s.source === "Booking.com" || s.source === "Airbnb" ? s.source : "";
+      return (mk
+        ? [`Здраво ${name},`, `ви благодариме што престојувавте во ${apt}! Се надеваме дека уживавте.`,
+           where ? `Ако имате минута, рецензија на ${where} многу би ни значела.` : "Ако имате минута, неколку зборови за престојот многу би ни значеле.",
+           "Добредојдени сте повторно во секое време.", "", myName()]
+        : [`Hello ${name},`, `thank you for staying at ${apt}! We hope you enjoyed it.`,
+           where ? `If you have a minute, a review on ${where} would mean a lot to us.` : "If you have a minute, a few words about your stay would mean a lot to us.",
+           "You are welcome back any time.", "", myName()]).join("\n").trim();
+    }
+    const L = mk
+      ? { hi: `Здраво ${name},`, wel: `добредојдовте во ${apt}! Сè што ви треба за престојот, ${ci} – ${co}:`,
+          adr: "📍 Адреса: ", key: "🔑 Код за сефот со клучот: ", wifi: "📶 Wi-Fi: ", pass: ", лозинка ",
+          out: `Одјавата е до ${out} на ${co}.`, help: "Ако ви треба нешто, слободно пишете ми тука." }
+      : { hi: `Hello ${name},`, wel: `welcome to ${apt}! Everything you need for your stay, ${ci} – ${co}:`,
+          adr: "📍 Address: ", key: "🔑 Key box code: ", wifi: "📶 Wi-Fi: ", pass: ", password ",
+          out: `Check-out is by ${out} on ${co}.`, help: "If you need anything, just write to me here." };
+    return msgLines([L.hi, L.wel, "",
+      a.address ? L.adr + a.address : null,
+      a.keybox_code ? L.key + a.keybox_code : null,
+      a.wifi_name ? L.wifi + a.wifi_name + (a.wifi_pass ? L.pass + a.wifi_pass : "") : null,
+      a.access_note || null, "", L.out, L.help, "", myName()]);
+  };
+  openMessage({
+    title: T("Message to the guest", "Порака до гостинот"), to: `${s.guest_name} · ${a.name || ""}`,
+    phone, phone0: s.guest_phone || "", lang: langFor(s.guest_name),
+    templates: [["checkin", T("Check-in details", "Податоци за пријава")], ["thanks", T("Thank you", "Благодарност")]],
+    key: stayEnded(s) ? "thanks" : "checkin", text,
+    savePhone: state.stayPhoneCol ? async (v) => {
+      await dbq(db.from("stays").update({ guest_phone: v }).eq("id", s.id), T("Number not kept", "Бројот не е зачуван"));
+      s.guest_phone = v;
+    } : null,
+  });
 }
 
 /* ---------- Booking.com / Airbnb calendar feeds ---------- */
@@ -8371,7 +8647,11 @@ function openWorkSheet(offerId) {
 /* ---------- фактури ---------- */
 async function printInvoice(id) {
   const i = state.invoices.find((x) => x.id === id);
-  if (!i) return;
+  if (i) await printDoc(invoiceDocHtml(i));
+}
+const invoiceFileName = (i) => `Фактура ${String(i.number || "").replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
+// The invoice laid out for paper — printed, or made into the PDF a client is sent.
+function invoiceDocHtml(i) {
   const c = state.clients.find((x) => x.id === i.client_id) || {};
   const co = (k) => esc(setting(k, ""));
   const rows = (i.items || []).map((it, n) => {
@@ -8390,7 +8670,7 @@ async function printInvoice(id) {
   }).join("");
   const vb = vatBreakdown(i.items || []);
 
-  await printDoc(`
+  return `
     <div class="rp-h1">Фактура бр. ${esc(i.number)}</div>
     <div class="rp-sub">Датум: ${dmy(i.invoice_date)}${i.due_date ? " · Рок на плаќање: " + dmy(i.due_date) : ""}${
       i.cancelled ? " · СТОРНИРАНА" : ""}</div>
@@ -8423,7 +8703,7 @@ async function printInvoice(id) {
     ${setting("co_account", "") ? `<div class="rp-sub" style="margin-top:4mm">
       Плаќање на сметка ${co("co_account")}${setting("co_bank", "") ? " · " + co("co_bank") : ""}<br>
       Повикување на број: ${esc(i.number)}</div>` : ""}
-    ${i.note ? `<div class="rp-sub">${esc(i.note)}</div>` : ""}`);
+    ${i.note ? `<div class="rp-sub">${esc(i.note)}</div>` : ""}`;
 }
 
 const invPaid = (i) => !!i.paid_on;
@@ -8542,6 +8822,8 @@ function openInvoiceSheet(id) {
       it.qty ? ` × ${fmt(it.qty)}` : ""}</span><span class="mono">${fmt((it.qty || 0) * (it.price || 0))}</span></div>`).join("")}
 
     <button class="btn" onclick="printInvoice('${i.id}')">${T("Print / Save as PDF", "Печати / Зачувај PDF")}</button>
+    ${!i.cancelled ? `<button class="btn ghost" onclick="messageInvoice('${i.id}')">${ICON.share}${
+      !invPaid(i) && i.due_date && i.due_date < todayStr() ? T("Remind the client", "Потсети го клиентот") : T("Send to the client", "Испрати до клиентот")}</button>` : ""}
     ${!invPaid(i) && !i.cancelled ? `<label>${T("Paid on", "Платена на")}</label>
       <input id="iv-paid" type="date" value="${todayStr()}">
       <button class="btn amber" onclick="markInvoicePaid('${i.id}')">${T("Mark as paid", "Означи како платена")}</button>` : ""}
