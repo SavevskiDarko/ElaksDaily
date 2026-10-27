@@ -588,9 +588,9 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 
   <!-- APARTMENTS -->
   <div class="view" id="v-apt">
+    <div class="chips" id="apt-filter" style="margin-bottom:10px"></div>
     <div id="apt-bank"></div>
-    <div class="chips" id="apt-tabs" style="margin-bottom:8px"></div>
-    <div class="chips" id="apt-filter" style="margin-bottom:12px"></div>
+    <div class="chips" id="apt-tabs" style="margin-bottom:12px"></div>
     <div id="apt-body"></div>
   </div>
 
@@ -739,7 +739,7 @@ const ICON = (() => {
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true },
   elaksView: "work", workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
-  loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: "all", showHiddenClients: false,
+  loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: keptAptFilter(), showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), skipSet: new Set(), templates: [], settings: [], installs: [],
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
@@ -953,7 +953,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261026-144923";
+const BUILD = "20261027-101500";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -6193,81 +6193,120 @@ function moneyArrived(s, acct) {
 // over nothing else — but an account's starting amount is a shared figure and
 // would drag the owner's takings into their total, so it starts at zero.
 const aptsOwnOnly = () => !state.perm.owner && !!state.perm.aptsOwnOnly;
-function accountBalances() {
+// Given a flat, what that flat alone has put into each account and taken out
+// of it. An account's starting amount belongs to no one flat, so it is left out.
+function accountBalances(aptId) {
   const bal = {};
-  const shared = !aptsOwnOnly();
+  const shared = !aptsOwnOnly() && !aptId;
+  const mine = (r) => !aptId || (!!r && r.apartment_id === aptId);
   for (const a of state.accounts) bal[a.id] = shared ? (parseFloat(a.opening_balance) || 0) : 0;
   for (const p of state.stayPays) {
     // where the payment went: what was chosen on it, else where that booking pays
     const s = state.stays.find((x) => x.id === p.stay_id);
+    if (!mine(s)) continue;
     const id = p.account_id || (s ? accountFor(s) : null);
     if (id) bal[id] = (bal[id] || 0) + (parseFloat(p.amount) || 0);
   }
   // rent lands where it was paid to, else where the lease says it goes
   for (const p of state.rentPays || []) {
+    if (!mine(p)) continue;
     const l = (state.leases || []).find((x) => x.id === p.lease_id);
     const id = p.account_id || (l && l.account_id) || accountFor({});
     if (id) bal[id] = (bal[id] || 0) + (parseFloat(p.amount) || 0);
   }
   for (const b of state.bills) {
+    if (!mine(b)) continue;
     const id = accountFor(b);
     if (id) bal[id] = (bal[id] || 0) - (parseFloat(b.amount) || 0);
   }
   // one-off spending leaves the account it was paid from — the plumber, a new
   // mattress, restocking. This was going into the figures but not out of them.
   for (const e of (state.expenses || [])) {
+    if (!mine(e)) continue;
     const id = e.account_id || accountFor(e);
     if (id) bal[id] = (bal[id] || 0) - (parseFloat(e.amount) || 0);
   }
   // apartment starting amounts are cash on hand
   const cash = state.accounts.find((a) => /cash|кеш/i.test(a.name));
-  if (cash) bal[cash.id] = (bal[cash.id] || 0) + sumBy(state.apartments, (a) => a.opening_balance);
+  if (cash) bal[cash.id] = (bal[cash.id] || 0) + sumBy(state.apartments.filter((a) => !aptId || a.id === aptId), (a) => a.opening_balance);
   return bal;
 }
 
+// The chips at the top choose the flat the whole screen is about, the card
+// with the money included, since flats can be looked after by different
+// people. The choice stays on this phone for next time.
+// (called while state itself is being made, so no constants from further down)
+function keptAptFilter() {
+  try { return localStorage.getItem("centrala_apt_filter") || "all"; } catch { return "all"; }
+}
+function keepAptFilter(v) {
+  state.aptFilter = v;
+  try { localStorage.setItem("centrala_apt_filter", v); } catch {}
+}
+function setAptFilter(v) { keepAptFilter(v); renderApt(); }
+
 function renderApt() {
+  // a flat chosen earlier may since have been put away or taken off
+  const one = state.apartments.find((a) => a.id === state.aptFilter) || null;
+  if (!one && state.aptFilter !== "all" && !state.loading) keepAptFilter("all");
+  const flat = one ? one.id : null;
+  const inF = (r) => !flat || r.apartment_id === flat;
+  const stays = state.stays.filter(inF), bills = state.bills.filter(inF), exps = (state.expenses || []).filter(inF);
   const curM = new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0");
   const yr = String(new Date().getFullYear());
   const inM = (d, m) => (d || "").slice(0, 7) === m;
   // what the month earned after the platform and the cleaner, not before
-  const staysM = state.stays.filter((s) => inM(s.check_in, curM));
-  const staysY = state.stays.filter((s) => (s.check_in || "").slice(0, 4) === yr);
+  const staysM = stays.filter((s) => inM(s.check_in, curM));
+  const staysY = stays.filter((s) => (s.check_in || "").slice(0, 4) === yr);
   // a flat let by the month earns its rent for each month, as a booking earns its price
-  const incM = sumBy(staysM, stayNet) + rentEarned(curM);
-  const expM = sumBy((state.expenses || []).filter((e) => inM(e.spent_on, curM)), (e) => e.amount);
-  const expY = sumBy((state.expenses || []).filter((e) => (e.spent_on || "").slice(0, 4) === yr), (e) => e.amount);
+  const incM = sumBy(staysM, stayNet) + rentEarned(curM, flat);
+  const expM = sumBy(exps.filter((e) => inM(e.spent_on, curM)), (e) => e.amount);
+  const expY = sumBy(exps.filter((e) => (e.spent_on || "").slice(0, 4) === yr), (e) => e.amount);
   const incY = sumBy(staysY, stayNet)
-    + Array.from({ length: Number(curM.slice(5, 7)) }, (_, i) => rentEarned(`${yr}-${p2(i + 1)}`)).reduce((a, b) => a + b, 0);
-  const recAll = sumBy(state.stayPays, (p) => p.amount) + sumBy(state.rentPays || [], (p) => p.amount);
-  const openAll = sumBy(state.apartments, (a) => a.opening_balance);
-  const bilAll = sumBy(state.bills, (b) => b.amount);
-  const expAll = sumBy(state.expenses || [], (e) => e.amount);
+    + Array.from({ length: Number(curM.slice(5, 7)) }, (_, i) => rentEarned(`${yr}-${p2(i + 1)}`, flat)).reduce((a, b) => a + b, 0);
+  // a payment knows its booking, not its flat
+  const stayIds = new Set(stays.map((s) => s.id));
+  const pays = flat ? state.stayPays.filter((p) => stayIds.has(p.stay_id)) : state.stayPays;
+  const rents = (state.rentPays || []).filter(inF);
+  const recAll = sumBy(pays, (p) => p.amount) + sumBy(rents, (p) => p.amount);
+  const openAll = sumBy(state.apartments.filter((a) => !flat || a.id === flat), (a) => a.opening_balance);
+  const bilAll = sumBy(bills, (b) => b.amount);
+  const expAll = sumBy(exps, (e) => e.amount);
   // the view sums the full history; the local figure is the fallback if it is missing
   // apt_cash_total sums the whole history in one figure, which is not this
   // person's history when they are limited to their own flats
-  // — nor when some flats are put away; and the view knows nothing of rent yet
-  const cashAll = (state.aptCash === null || aptsOwnOnly() || state.hideApts.size)
+  // — nor when some flats are put away, nor one flat's; and the view knows nothing of rent yet
+  const cashAll = (flat || state.aptCash === null || aptsOwnOnly() || state.hideApts.size)
     ? (recAll + openAll - bilAll - expAll) : state.aptCash + sumBy(state.rentPays || [], (p) => p.amount);
   // everything still to collect, whether the guest has arrived or not
-  const soon = sumBy(state.stays.filter((s) => !staySettled(s)), stayBalance) + rentOutstanding();
+  const soon = sumBy(stays.filter((s) => !staySettled(s)), stayBalance) + rentOutstanding(flat);
   // bookings the calendars brought in with no price on them yet
-  const noPrice = state.stays.filter(stayUnpriced);
-  const bilM = sumBy(state.bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
-  const bilY = sumBy(state.bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
-  const occ = occupiedTonight().size;
-  const bal = accountBalances();
+  const noPrice = stays.filter(stayUnpriced);
+  const bilM = sumBy(bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
+  const bilY = sumBy(bills.filter((b) => (b.month || "").slice(0, 4) === yr), (b) => b.amount);
+  const occ = occupiedTonight();
+  const bal = accountBalances(flat);
   const total = state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll;
+  // one flat shows only the accounts its money went through, and as figures:
+  // setting an account's real balance is for the whole account, under All
+  const accts = flat ? state.accounts.filter((a) => Math.round(bal[a.id] || 0) !== 0) : state.accounts;
+  const who = one && one.managed_by && one.managed_by !== state.uid ? personName(one.managed_by) : "";
+  const arg = flat ? `'${flat}'` : "";
   $("apt-bank").innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between;align-items:flex-start">
       <div>
         <div class="bank-big">${fmt(total)} <span style="font-size:16px">ден.</span></div>
-        <div class="bank-lbl">${T("money in hand", "пари вкупно")}</div>
+        <div class="bank-lbl">${flat ? T("money in hand from this apartment", "пари од овој стан") : T("money in hand", "пари вкупно")}</div>
+        ${who ? `<div class="bank-lbl">${T("Managed by", "Го води")} ${esc(who)}</div>` : ""}
       </div>
-      <span class="muted nw">${occ}/${state.apartments.length} ${T("tonight", "вечерва")}</span>
+      <span class="muted nw">${flat
+        ? (occ.has(flat) ? T("occupied tonight", "зафатен вечерва") : T("free tonight", "слободен вечерва"))
+        : `${occ.size}/${state.apartments.length} ${T("tonight", "вечерва")}`}</span>
     </div>
 
-    ${state.accounts.length ? `<div class="acct-grid">
-      ${state.accounts.map((a) => `<div class="acct" role="button" tabindex="0"
+    ${accts.length ? `<div class="acct-grid">
+      ${accts.map((a) => flat ? `<div class="acct" style="cursor:default">
+        <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>` : `<div class="acct" role="button" tabindex="0"
           onclick="event.stopPropagation();openAccountSheet('${a.id}')">
         <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>`).join("")}
     </div>` : ""}
@@ -6282,7 +6321,7 @@ function renderApt() {
           `Earned ${fmt(incY)} · bills ${fmt(bilY)} · spending ${fmt(expY)}`,
           `Заработено ${fmt(incY)} · сметки ${fmt(bilY)} · трошоци ${fmt(expY)}`)}">
         <span>${T("This year, after costs", "Оваа година, по трошоци")}</span><b>${fmt(incY - bilY - expY)}</b></div>
-      <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();openUnpaidStays()">
+      <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();openUnpaidStays(${arg})">
         <span>${T("To collect", "За наплата")}</span>
         <b class="${soon ? "hflag" : "muted"}">${fmt(soon)}</b></div>
     </div>
@@ -6290,7 +6329,7 @@ function renderApt() {
       `Earned ${fmt(incY)} this year, less ${fmt(bilY)} bills and ${fmt(expY)} one-off spending.`,
       `Заработено ${fmt(incY)} оваа година, минус ${fmt(bilY)} сметки и ${fmt(expY)} еднократни трошоци.`)}</div>
     ${noPrice.length ? `<div class="row tapp" role="button" tabindex="0" style="margin-top:8px;color:var(--amber);font-size:12.5px"
-        onclick="event.stopPropagation();openUnpricedStays()">
+        onclick="event.stopPropagation();openUnpricedStays(${arg})">
       ${noPrice.length} ${noPrice.length === 1
         ? T("booking has no price yet", "резервација е без цена")
         : T("bookings have no price yet", "резервации се без цена")} ›</div>` : ""}
@@ -6303,12 +6342,11 @@ function renderApt() {
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
   // With more than a couple of apartments, stacking every one makes the page
   // unreadable — so choose which you are looking at.
-  const showFilter = state.apartments.length > 1 && state.aptView !== "apartments";
   const filterEl = $("apt-filter");
-  if (filterEl) filterEl.innerHTML = !showFilter ? "" :
+  if (filterEl) filterEl.innerHTML = state.apartments.length < 2 ? "" :
     [["all", T("All", "Сите")]].concat(state.apartments.map((a) => [a.id, a.name]))
       .map(([v, l]) => `<button class="chip ${state.aptFilter === v ? "on" : ""}"
-        onclick="state.aptFilter='${v}';renderApt()">${esc(l)}</button>`).join("");
+        onclick="setAptFilter('${v}')">${esc(l)}</button>`).join("");
   syncFab();
   if (state.aptView === "stays") renderStays();
   else if (state.aptView === "calendar") renderCalendar();
@@ -6521,8 +6559,8 @@ async function delStayPayment(id) {
 // who still owes something, so it can be chased
 // What the calendars brought in but nobody has priced. They count as nothing
 // in every figure on this screen until an amount is put on them.
-function openUnpricedStays() {
-  const list = state.stays.filter(stayUnpriced)
+function openUnpricedStays(aptId) {
+  const list = state.stays.filter((s) => stayUnpriced(s) && (!aptId || s.apartment_id === aptId))
     .sort((a, b) => (a.check_in || "").localeCompare(b.check_in || ""));
   const aptOf = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
   openSheet(`<h2>${T("No price yet", "Без цена")}</h2>
@@ -6537,13 +6575,13 @@ function openUnpricedStays() {
     </div>`).join("") : `<p class="muted">${T("Every booking has a price.", "Сите резервации имаат цена.")}</p>`}`);
 }
 
-function openUnpaidStays() {
-  const list = state.stays.filter((s) => !staySettled(s))
+function openUnpaidStays(aptId) {
+  const list = state.stays.filter((s) => !staySettled(s) && (!aptId || s.apartment_id === aptId))
     .sort((a, b) => (a.check_out || "").localeCompare(b.check_out || ""));
   const aptOf = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
   // rent owed: one row per month still open
   const rent = [];
-  for (const l of state.leases || []) for (const m of rentOwed(l)) rent.push({ l, m });
+  for (const l of state.leases || []) if (!aptId || l.apartment_id === aptId) for (const m of rentOwed(l)) rent.push({ l, m });
   rent.sort((a, b) => a.m.localeCompare(b.m));
   openSheet(`<h2>${T("Still to collect", "За наплата")}</h2>
     <div class="totalbar"><span>${T("Total", "Вкупно")}</span>
@@ -6994,7 +7032,7 @@ function renderAptList() {
     ? `<button class="tool" style="width:100%;margin-top:4px" onclick="openMyApts()"><span>${
         state.hideApts.size ? T(`${state.hideApts.size} put away · choose which apartments you see`, `${state.hideApts.size} склонети · избери кои станови ги гледаш`)
           : T("Choose which apartments you see", "Избери кои станови ги гледаш")}</span><span class="chev">›</span></button>` : "";
-  $("apt-body").innerHTML = (state.apartments.length ? state.apartments.map((a) => `
+  $("apt-body").innerHTML = (state.apartments.length ? shownApartments().map((a) => `
     <div class="card row" role="button" tabindex="0" onclick="openAptStatement('${a.id}')">
       <div style="flex:1"><b>${esc(a.name)}</b>
         <div class="muted">${esc(a.address || "")} ${a.size_m2 ? "· " + fmt(a.size_m2) + " m²" : ""}${how(a)}</div></div>
@@ -7163,7 +7201,8 @@ function rentOwed(l) {
   }
   return out;
 }
-const rentOutstanding = () => sumBy(state.leases || [], (l) => sumBy(rentOwed(l), (m) => rentLeft(l, m)));
+const rentOutstanding = (aptId) => sumBy((state.leases || []).filter((l) => !aptId || l.apartment_id === aptId),
+  (l) => sumBy(rentOwed(l), (m) => rentLeft(l, m)));
 // What the flats on monthly rent earn in a month — owed whether or not it is
 // in yet, as a booking's price counts before the guest has paid it.
 const rentEarned = (m, aptId) => sumBy((state.leases || []).filter((l) => !aptId || l.apartment_id === aptId), (l) => rentDue(l, m));
@@ -7434,7 +7473,7 @@ async function saveMyApts() {
   try { await dbq(db.from("user_roles").update({ hide_apts: hide }).eq("user_id", state.uid), T("Not saved", "Не е зачувано")); }
   catch { return; }
   state.hideApts = new Set(hide);
-  state.aptFilter = "all";
+  keepAptFilter("all");
   closeSheet(); await refreshAll(); render();
   toast(hide.length ? T(`${hide.length} apartment${hide.length > 1 ? "s" : ""} put away`, `${hide.length} стан(ови) склонети`) : T("Showing every apartment", "Се гледаат сите станови"));
 }
