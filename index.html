@@ -953,7 +953,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261028-143500";
+const BUILD = "20261028-150500";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -6343,7 +6343,7 @@ function renderApt() {
         : T("bookings have no price yet", "резервации се без цена")} ›</div>` : ""}
   </div>`;
   // Rent only once some flat is let by the month
-  const withRent = state.apartments.some(isMonthly);
+  const withRent = state.apartments.some((a) => isMonthly(a) || strayLease(a.id));
   if (state.aptView === "rent" && !withRent) state.aptView = "stays";
   $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ...(withRent ? [["rent", T("Rent", "Кирија")]] : []),
     ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
@@ -6608,7 +6608,8 @@ function openUnpaidStays(aptId) {
         onclick="openRentPay('${l.id}','${m}')">
       <div style="flex:1;min-width:0"><b>${esc(l.tenant_name)}</b>
         <div class="o-num">${esc(aptName(l.apartment_id))} · ${monthName(m)} ${m.slice(0, 4)}${
-          rentLate(l, m) ? ` · <span style="color:var(--danger)">${T("late", "доцни")}</span>` : ""}</div></div>
+          rentLate(l, m) ? ` · <span style="color:var(--danger)">${T("late", "доцни")}</span>` : ""}${
+          strayLease(l.apartment_id) ? ` · <span style="color:var(--danger)">${T("flat let by the night", "станот е на ноќ")}</span>` : ""}</div></div>
       <span class="o-total mono" style="color:var(--amber)">${fmt(rentLeft(l, m))}</span>
     </div>`).join("") : ""}
     ${now.length ? `<div class="sec">${T("Guests here or gone", "Гости што се тука или заминаа")} · ${fmt(sumBy(now, stayBalance))}</div>`
@@ -7205,6 +7206,15 @@ const leaseOn = (aptId, day = todayStr()) => (state.leases || [])
 const leaseNext = (aptId, day = todayStr()) => (state.leases || [])
   .filter((l) => l.apartment_id === aptId && l.start_date > day)
   .sort((a, b) => a.start_date.localeCompare(b.start_date))[0] || null;
+// A tenancy on a flat let by the night is left over — the flat was switched
+// back, or it was added by mistake. Its rent still counts until it is ended or
+// deleted, so it is shown, not hidden: the one still running, coming or owing.
+const strayLease = (aptId) => {
+  const a = state.apartments.find((x) => x.id === aptId);
+  if (!a || isMonthly(a)) return null;
+  return leaseOn(aptId) || leaseNext(aptId)
+    || (state.leases || []).find((l) => l.apartment_id === aptId && rentOwed(l).length) || null;
+};
 // a lease owes a month's rent for every month it touches
 const leaseInMonth = (l, m) => ym(l.start_date) <= m && (!l.end_date || ym(l.end_date) >= m);
 const rentDue = (l, m) => (leaseInMonth(l, m) ? parseFloat(l.rent) || 0 : 0);
@@ -7244,13 +7254,22 @@ function rentCell(l, m) {
   return `<button class="rent-m ${cls}" onclick="openRentPay('${l.id}','${m}')">${label}</button>`;
 }
 function renderRent() {
-  const flats = shownApartments().filter(isMonthly), m = curYm();
+  const flats = shownApartments().filter((a) => isMonthly(a) || strayLease(a.id)), m = curYm();
   if (!flats.length) {
     $("apt-body").innerHTML = `<div class="empty">${T("No apartment here is on monthly rent.<br>Open one under Apartments and choose Monthly rent.",
       "Ниту еден стан овде не е под кирија.<br>Отвори стан во Станови и избери Месечна кирија.")}</div>`;
     return;
   }
   $("apt-body").innerHTML = flats.map((a) => {
+    if (!isMonthly(a)) {
+      const x = strayLease(a.id);
+      return `<div class="card"><b>${esc(a.name)}</b>
+        <p class="hflag" style="font-size:12.5px;margin-top:2px">${T(
+          "Let by the night, but a tenancy is still saved on it, and its rent counts in the figures. Open it to end or delete it.",
+          "Се издава на ноќ, но на него има зачуван закуп и киријата се брои во бројките. Отвори го за да го завршиш или избришеш.")}</p>
+        <div class="tapp" role="button" tabindex="0" onclick="openLeaseSheet('${x.id}')" style="margin-top:6px">
+          <div class="o-num"><b>${esc(x.tenant_name)}</b> · ${fmt(x.rent)} ${T("ден. a month", "ден. месечно")} · ${T("from", "од")} ${dmy(x.start_date)} ›</div></div></div>`;
+    }
     const l = leaseOn(a.id), next = leaseNext(a.id);
     // whoever moves in next — into the empty flat, or when this tenant leaves —
     // is shown too: a tenant saved with a later start was nowhere to be seen
@@ -7295,8 +7314,11 @@ function renderRent() {
 }
 
 function openLeaseSheet(id, aptId) {
-  const flats = state.apartments.filter(isMonthly);
-  const l = id ? (state.leases || []).find((x) => x.id === id)
+  const found = id ? (state.leases || []).find((x) => x.id === id) : null;
+  // a tenancy left on a flat let by the night keeps that flat in the list, so saving it does not move it
+  const flats = state.apartments.filter((a) => isMonthly(a) || (found && a.id === found.apartment_id));
+  const stray = !!found && !isMonthly(state.apartments.find((a) => a.id === found.apartment_id));
+  const l = id ? found
     : { apartment_id: aptId || (flats.find((a) => !leaseOn(a.id) && !leaseNext(a.id)) || flats[0] || {}).id, start_date: todayStr(), due_day: 1, rent: "", deposit: 0 };
   if (!l) return;
   if (!flats.length) return say(T("First set an apartment to Monthly rent — open it under Apartments.",
@@ -7304,6 +7326,9 @@ function openLeaseSheet(id, aptId) {
   const pays = id ? (state.rentPays || []).filter((p) => p.lease_id === id).sort((a, b) => b.month.localeCompare(a.month) || b.paid_on.localeCompare(a.paid_on)) : [];
   const acct = l.account_id || accountFor({});
   openSheet(`<h2>${id ? esc(l.tenant_name) : T("New tenant", "Нов закупец")}</h2>
+    ${stray ? `<p class="hflag" style="font-size:12.5px">${T(
+      `${aptName(l.apartment_id)} is let by the night, so this tenancy looks left over. Delete it if it was a mistake, or say the tenant has moved out.`,
+      `${aptName(l.apartment_id)} се издава на ноќ, па овој закуп изгледа заостанат. Избриши го ако е грешка, или означи дека закупецот се иселил.`)}</p>` : ""}
     <label>${T("Apartment", "Стан")}</label>
     <select id="ls-apt">${flats.map((a) => `<option value="${a.id}" ${l.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select>
     <label>${T("Tenant", "Закупец")}</label><input id="ls-name" value="${esc(l.tenant_name || "")}" placeholder="${T("Full name", "Име и презиме")}">
@@ -7403,7 +7428,9 @@ function openRentPay(leaseId, m) {
     <label>${T("Money went to", "Парите одат во")}</label>
     <select id="rp-acct">${state.accounts.map((x) => `<option value="${x.id}" ${(l.account_id || accountFor({})) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
     <label>${T("Note (opt.)", "Белешка (опц.)")}</label><input id="rp-note">
-    <button class="btn amber" onclick="saveRentPay('${leaseId}')">${T("Save payment", "Зачувај уплата")}</button>`);
+    <button class="btn amber" onclick="saveRentPay('${leaseId}')">${T("Save payment", "Зачувај уплата")}</button>
+    <button class="btn ghost" onclick="closeSheet();setTimeout(()=>openLeaseSheet('${leaseId}'),240)">${T(
+      "The tenancy: change, end or delete it ›", "Закупот: измени, заврши или избриши ›")}</button>`);
 }
 // a different month: suggest what is still owed for it
 function rentPayMonth(leaseId) {
@@ -7844,6 +7871,13 @@ async function saveApt(id) {
   const aid = id || (state.apartments.find((a) => a.name === row.name) || {}).id;
   if (row.rent_mode === "monthly" && aid && (state.leases || []).every((l) => l.apartment_id !== aid)) {
     setTimeout(() => openLeaseSheet(null, aid), 260);
+  } else if (row.rent_mode === "short" && aid) {
+    // back to the night with a tenant still on it: their rent would go on counting
+    const left = leaseOn(aid) || leaseNext(aid);
+    if (left) setTimeout(async () => {
+      if (await ask(T(`${left.tenant_name} still has a tenancy on this apartment, and its rent still counts. Open it to end or delete it?`,
+        `${left.tenant_name} сè уште има закуп на овој стан и киријата се брои. Да се отвори за да се заврши или избрише?`), T("Open it", "Отвори го"))) openLeaseSheet(left.id);
+    }, 260);
   }
 }
 async function delApt(id) {
