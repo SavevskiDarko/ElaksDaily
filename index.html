@@ -953,7 +953,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261027-101500";
+const BUILD = "20261028-110500";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7025,8 +7025,9 @@ async function setBill(aptId, type, field, value) {
 function renderAptList() {
   const how = (a) => {
     if (!isMonthly(a)) return a.nightly_rate ? " · " + fmt(a.nightly_rate) + " ден./night" : "";
-    const l = leaseOn(a.id);
-    return " · " + T("monthly rent", "месечна кирија") + (l ? " · " + esc(l.tenant_name) : "");
+    const l = leaseOn(a.id), next = !l && leaseNext(a.id);
+    return " · " + T("monthly rent", "месечна кирија") + (l ? " · " + esc(l.tenant_name)
+      : next ? " · " + esc(next.tenant_name) + " " + T("from", "од") + " " + dm(next.start_date) : "");
   };
   const chooser = state.perm.owner && state.aptListCol
     ? `<button class="tool" style="width:100%;margin-top:4px" onclick="openMyApts()"><span>${
@@ -7181,6 +7182,10 @@ const shiftYm = (m, n) => {
 const leaseOn = (aptId, day = todayStr()) => (state.leases || [])
   .filter((l) => l.apartment_id === aptId && l.start_date <= day && (!l.end_date || l.end_date >= day))
   .sort((a, b) => b.start_date.localeCompare(a.start_date))[0] || null;
+// a tenant who has signed but not moved in yet: the soonest lease still to begin
+const leaseNext = (aptId, day = todayStr()) => (state.leases || [])
+  .filter((l) => l.apartment_id === aptId && l.start_date > day)
+  .sort((a, b) => a.start_date.localeCompare(b.start_date))[0] || null;
 // a lease owes a month's rent for every month it touches
 const leaseInMonth = (l, m) => ym(l.start_date) <= m && (!l.end_date || ym(l.end_date) >= m);
 const rentDue = (l, m) => (leaseInMonth(l, m) ? parseFloat(l.rent) || 0 : 0);
@@ -7227,11 +7232,20 @@ function renderRent() {
     return;
   }
   $("apt-body").innerHTML = flats.map((a) => {
-    const l = leaseOn(a.id);
+    const l = leaseOn(a.id), next = leaseNext(a.id);
+    // whoever moves in next — into the empty flat, or when this tenant leaves —
+    // is shown too: a tenant saved with a later start was nowhere to be seen
+    const nextLine = next ? `<div class="tapp" role="button" tabindex="0" onclick="openLeaseSheet('${next.id}')" style="margin-top:6px">
+        <div class="o-num">${T("Moves in on", "Се вселува на")} ${dmy(next.start_date)}: <b>${esc(next.tenant_name)}</b> ·
+          ${fmt(next.rent)} ${T("ден. a month", "ден. месечно")} ›</div></div>` : "";
     if (!l) {
       return `<div class="card"><b>${esc(a.name)}</b>
         <p class="muted" style="margin-top:2px">${T("No tenant at the moment.", "Моментално нема закупец.")}</p>
-        <button class="btn sm" style="margin-top:8px" onclick="openLeaseSheet(null,'${a.id}')">+ ${T("Add the tenant", "Додај закупец")}</button></div>`;
+        ${nextLine}
+        ${next ? `<div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn sm" onclick="openRentPay('${next.id}','${ym(next.start_date)}')">${T("Record rent", "Внеси кирија")}</button>
+          <button class="btn sm ghost" onclick="messageTenant('${next.id}')">${ICON.share}${T("Message", "Порака")}</button></div>`
+        : `<button class="btn sm" style="margin-top:8px" onclick="openLeaseSheet(null,'${a.id}')">+ ${T("Add the tenant", "Додај закупец")}</button>`}</div>`;
     }
     const left = rentLeft(l, m), paid = rentPaid(l, m), due = rentDueDate(l, m);
     const status = left <= 0.005 ? `<span class="hok">✓ ${T("paid", "платено")}</span>`
@@ -7250,6 +7264,7 @@ function renderRent() {
       ${earlier.length ? `<div class="hflag" style="font-size:12.5px;margin-top:6px">${T(
         `${earlier.length} earlier month${earlier.length > 1 ? "s" : ""} still open · ${fmt(sumBy(earlier, (x) => rentLeft(l, x)))} ден.`,
         `Неплатено од претходно: ${earlier.length} мес. · ${fmt(sumBy(earlier, (x) => rentLeft(l, x)))} ден.`)}</div>` : ""}
+      ${nextLine}
       <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
         <button class="btn sm" onclick="openRentPay('${l.id}','${left > 0.005 ? m : (earlier[0] || m)}')">${T("Record rent", "Внеси кирија")}</button>
         <button class="btn sm ghost" onclick="messageTenant('${l.id}')">${ICON.share}${T("Message", "Порака")}</button>
@@ -7263,7 +7278,7 @@ function renderRent() {
 function openLeaseSheet(id, aptId) {
   const flats = state.apartments.filter(isMonthly);
   const l = id ? (state.leases || []).find((x) => x.id === id)
-    : { apartment_id: aptId || (flats.find((a) => !leaseOn(a.id)) || flats[0] || {}).id, start_date: todayStr(), due_day: 1, rent: "", deposit: 0 };
+    : { apartment_id: aptId || (flats.find((a) => !leaseOn(a.id) && !leaseNext(a.id)) || flats[0] || {}).id, start_date: todayStr(), due_day: 1, rent: "", deposit: 0 };
   if (!l) return;
   if (!flats.length) return say(T("First set an apartment to Monthly rent — open it under Apartments.",
     "Прво постави стан на Месечна кирија — отвори го во Станови."));
@@ -7318,8 +7333,16 @@ async function saveLease(id) {
   // one tenant at a time: two leases on the same days would count the rent twice
   const clash = (state.leases || []).find((x) => x.id !== id && x.apartment_id === row.apartment_id
     && x.start_date <= (row.end_date || "9999") && row.start_date <= (x.end_date || "9999"));
-  if (clash) return say(T(`${clash.tenant_name} already rents this apartment for some of those days. End that tenancy first.`,
-    `${clash.tenant_name} веќе го изнајмува станот во дел од тие денови. Прво заврши го тој закуп.`));
+  if (clash) {
+    // say when, and take them to it: the clash may be a tenant not yet moved in
+    const until = clash.end_date ? T(` until ${dmy(clash.end_date)}`, ` до ${dmy(clash.end_date)}`) : "";
+    const open = await ask(T(
+      `${clash.tenant_name} is already down for this apartment from ${dmy(clash.start_date)}${until}. Open that tenancy to change its dates, or end it first.`,
+      `${clash.tenant_name} веќе е внесен за овој стан од ${dmy(clash.start_date)}${until}. Отвори го тој закуп за да ги смениш датумите, или прво заврши го.`),
+      T("Open it", "Отвори го"));
+    if (open) { closeSheet(); setTimeout(() => openLeaseSheet(clash.id), 240); }
+    return;
+  }
   try { await dbq(id ? db.from("leases").update(row).eq("id", id) : db.from("leases").insert(row), T("Not saved", "Не е зачувано")); }
   catch { return; }
   closeSheet(); await refreshAll(["leases"]); renderApt(); toast(T("Saved", "Зачувано"));
