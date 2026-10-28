@@ -280,21 +280,27 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .ltot{font-size:14.5px;text-align:right;white-space:nowrap}
 .lrow .del{color:var(--danger);font-size:18px;align-self:center}
 .lhead{display:none}
+/* what the item costs you and its markup, under it — never on the offer itself */
+.lmargin{grid-column:2 / -2;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:12.5px;color:var(--muted)}
+.lmargin .neg{color:var(--danger)}
+.lpct{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.lpct input{width:84px;padding:5px 8px;text-align:right}
 /* From tablet width up there is room for the original single row, so the
    name, quantity, price and total line up in columns again. */
 @media (min-width:640px){
-  .lrow{grid-template-columns:22px 1fr 58px 78px 88px 24px;gap:6px;
+  .lrow{grid-template-columns:22px 1fr 58px 100px 88px 24px;gap:6px;
     padding:0;margin-bottom:6px;border-bottom:0}
-  .lrow.nomove{grid-template-columns:1fr 58px 78px 88px 24px}
+  .lrow.nomove{grid-template-columns:1fr 58px 100px 88px 24px}
   .lbody,.lnums{display:contents}        /* their children become row columns */
   .lop{display:none}
   .lname{font-weight:400}
   .ltot{align-self:center}
-  .lhead{display:grid;grid-template-columns:22px 1fr 58px 78px 88px 24px;gap:6px;
+  .lhead{display:grid;grid-template-columns:22px 1fr 58px 100px 88px 24px;gap:6px;
     font-family:var(--cond);font-weight:700;font-size:11.5px;letter-spacing:.06em;
     text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
-  .lhead.nomove{grid-template-columns:1fr 58px 78px 88px 24px}
+  .lhead.nomove{grid-template-columns:1fr 58px 100px 88px 24px}
   .lhead span:nth-child(n+3){text-align:right}
+  .lmargin{margin:-2px 0 6px}
 }
 .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:4px}
 .pcell{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:#ECECEC;border:1px solid var(--line)}
@@ -953,7 +959,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261028-160500";
+const BUILD = "20261028-173000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2954,6 +2960,11 @@ async function openOfferSheet(id) {
     <div class="row" style="justify-content:space-between;margin-top:4px">
       <span class="muted nw">Profit (net of ДДВ)</span>
       <span class="mono" id="of-profit">0 ден.</span></div>
+    <div class="row" id="of-mk-row" style="justify-content:space-between;align-items:center;margin-top:8px;gap:8px;flex-wrap:wrap">
+      <span class="muted">${T("Markup on every item", "Надценка на сите ставки")} <span id="of-mk-now"></span></span>
+      <span class="row" style="gap:6px"><span class="lpct">+<input id="of-mk-all" type="number" inputmode="decimal" step="any"
+        aria-label="${T("Markup %", "Надценка %")}">%</span>
+        <button class="btn sm ghost" onclick="offerMarkupAll()">${T("Apply", "Примени")}</button></span></div>
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
     <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
     <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
@@ -3092,15 +3103,62 @@ function renderOfferItems() {
               ? `<input value="—" disabled>`
               : `<input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="offerItems[${i}].qty=parseFloat(this.value)||0;updateTotal()">`}
           <span class="lop">×</span>
-          <input type="number" inputmode="decimal" value="${it.price ?? ""}" oninput="offerItems[${i}].price=parseFloat(this.value)||0;updateTotal()">
+          <input type="number" inputmode="decimal" id="of-it-price-${i}" value="${it.price ?? ""}" oninput="offerItems[${i}].price=parseFloat(this.value)||0;updateTotal()">
           <span class="lop">=</span>
           <b class="mono ltot" id="of-it-tot-${i}">${tot === null ? "???" : fmt(tot)}</b>
         </div>
       </div>
       <button class="del" onclick="offerItems.splice(${i},1);renderOfferItems()">✕</button>
+      ${marginLine(it, i)}
     </div>`;
   }).join("");
   updateTotal();
+}
+// What an item costs you and how much it is marked up: the same "+50%" the
+// article sheet puts on the purchase price. Changing it here changes this
+// offer's price only, for this customer; the article keeps its own.
+function markupOf(it) {
+  const c = itemCost(it);
+  return c > 0 && it.price ? Math.round(((it.price - c) / c) * 1000) / 10 : null;
+}
+// for the line, net of ДДВ as Profit is; a metre item is not measured yet, so per metre
+function gainHtml(it) {
+  const p = itemProfit(it);
+  const v = p === null ? netOf((it.price || 0) - itemCost(it), itemVat(it)) : p;
+  return `<span class="${v < 0 ? "neg" : ""}">${T("you make", "заработуваш")} ${fmt(Math.round(v))}${p === null ? " / m" : ""}</span>`;
+}
+function marginLine(it, i) {
+  const c = itemCost(it);
+  if (it.free || !(c > 0)) return "";
+  return `<div class="lmargin">
+    <span>${T("Cost", "Набавна")} ${fmt(c)}</span>
+    <span class="lpct">+<input type="number" inputmode="decimal" step="any" id="of-it-mk-${i}" value="${markupOf(it) ?? ""}"
+      oninput="offerMarkup(${i},this.value)" aria-label="${T("Markup %", "Надценка %")}">%</span>
+    <span id="of-it-gain-${i}">${gainHtml(it)}</span>
+  </div>`;
+}
+function offerMarkup(i, v) {
+  const it = offerItems[i], pct = parseFloat(v), c = it ? itemCost(it) : 0;
+  if (!(c > 0) || !Number.isFinite(pct)) return;
+  it.price = Math.round(c * (1 + pct / 100));
+  const el = $("of-it-price-" + i);
+  if (el) el.value = it.price;
+  updateTotal();
+}
+function offerMarkupAll() {
+  const pct = parseFloat($("of-mk-all").value);
+  if (!Number.isFinite(pct)) return toast(T("Enter the markup %", "Внеси надценка %"));
+  let n = 0;
+  for (const it of offerItems) {
+    const c = itemCost(it);
+    if (it.free || !(c > 0)) continue;
+    it.price = Math.round(c * (1 + pct / 100));
+    n++;
+  }
+  if (!n) return toast(T("No item here has a purchase price", "Ниедна ставка нема набавна цена"));
+  $("of-mk-all").value = "";
+  renderOfferItems();
+  toast(T(`${n} item${n > 1 ? "s" : ""} at +${pct}%`, `${n} ставки на +${pct}%`));
 }
 function updateTotal() {
   let sum = 0;
@@ -3123,6 +3181,18 @@ function updateTotal() {
     pEl.textContent = fmt(pr.value) + " ден." + (pr.pending ? " + meters" : "");
     pEl.style.color = pr.value < 0 ? "var(--danger)" : "var(--personal)";
   }
+  // each item's markup and gain — not the % box being typed in
+  let cost = 0, sale = 0;
+  offerItems.forEach((it, i) => {
+    const mk = $("of-it-mk-" + i), gain = $("of-it-gain-" + i);
+    if (mk && document.activeElement !== mk) mk.value = markupOf(it) ?? "";
+    if (gain) gain.innerHTML = gainHtml(it);
+    const c = itemCost(it), q = it.unit === "m" ? 0 : (it.qty || 0);
+    if (!it.free && c > 0) { cost += c * q; sale += (it.price || 0) * q; }
+  });
+  const mkRow = $("of-mk-row"), mkNow = $("of-mk-now");
+  if (mkRow) mkRow.style.display = offerItems.some((it) => !it.free && itemCost(it) > 0) ? "" : "none";
+  if (mkNow) mkNow.textContent = cost > 0 ? `· ${T("now", "сега")} +${Math.round(((sale - cost) / cost) * 1000) / 10}%` : "";
   const metersOpen = offerItems.filter((it) => it.unit === "m" && !it.consumed);
   const noteEl = $("of-note");
   if (noteEl && !noteEl.dataset.manual) {
