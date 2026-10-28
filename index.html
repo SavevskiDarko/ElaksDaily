@@ -953,7 +953,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261028-110500";
+const BUILD = "20261028-143500";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -6280,6 +6280,8 @@ function renderApt() {
     ? (recAll + openAll - bilAll - expAll) : state.aptCash + sumBy(state.rentPays || [], (p) => p.amount);
   // everything still to collect, whether the guest has arrived or not
   const soon = sumBy(stays.filter((s) => !staySettled(s)), stayBalance) + rentOutstanding(flat);
+  // of which bookings not begun: paid when the guest comes, so not late
+  const later = sumBy(stays.filter((s) => !staySettled(s) && !stayStarted(s)), stayBalance);
   // bookings the calendars brought in with no price on them yet
   const noPrice = stays.filter(stayUnpriced);
   const bilM = sumBy(bills.filter((b) => inM(b.month, curM)), (b) => b.amount);
@@ -6296,7 +6298,10 @@ function renderApt() {
     <div class="row" style="justify-content:space-between;align-items:flex-start">
       <div>
         <div class="bank-big">${fmt(total)} <span style="font-size:16px">ден.</span></div>
-        <div class="bank-lbl">${flat ? T("money in hand from this apartment", "пари од овој стан") : T("money in hand", "пари вкупно")}</div>
+        <div class="bank-lbl">${flat
+          // not money in hand: what the accounts really hold is only known for all of them together
+          ? T("received from this apartment, less its costs", "примено од овој стан, минус трошоците")
+          : T("money in hand", "пари вкупно")}</div>
         ${who ? `<div class="bank-lbl">${T("Managed by", "Го води")} ${esc(who)}</div>` : ""}
       </div>
       <span class="muted nw">${flat
@@ -6322,8 +6327,11 @@ function renderApt() {
           `Заработено ${fmt(incY)} · сметки ${fmt(bilY)} · трошоци ${fmt(expY)}`)}">
         <span>${T("This year, after costs", "Оваа година, по трошоци")}</span><b>${fmt(incY - bilY - expY)}</b></div>
       <div class="stat" role="button" tabindex="0" onclick="event.stopPropagation();openUnpaidStays(${arg})">
-        <span>${T("To collect", "За наплата")}</span>
-        <b class="${soon ? "hflag" : "muted"}">${fmt(soon)}</b></div>
+        <span>${T("To collect", "За наплата")} ›</span>
+        <b class="${soon - later > 0.005 ? "hflag" : soon ? "" : "muted"}">${fmt(soon)}</b>
+        ${later > 0.005 ? `<span style="font-size:11px;margin-top:1px">${soon - later > 0.005
+          ? T(`${fmt(later)} from guests to come`, `${fmt(later)} од гости што доаѓаат`)
+          : T("from guests still to come", "од гости што доаѓаат")}</span>` : ""}</div>
     </div>
     <div class="muted" style="font-size:11.5px;margin-top:8px">${T(
       `Earned ${fmt(incY)} this year, less ${fmt(bilY)} bills and ${fmt(expY)} one-off spending.`,
@@ -6578,11 +6586,21 @@ function openUnpricedStays(aptId) {
 function openUnpaidStays(aptId) {
   const list = state.stays.filter((s) => !staySettled(s) && (!aptId || s.apartment_id === aptId))
     .sort((a, b) => (a.check_out || "").localeCompare(b.check_out || ""));
+  // owed now — the guest is in or has gone — apart from bookings still to
+  // come, which are paid when the guest arrives and are not late
+  const now = list.filter(stayStarted), later = list.filter((s) => !stayStarted(s));
   const aptOf = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
   // rent owed: one row per month still open
   const rent = [];
   for (const l of state.leases || []) if (!aptId || l.apartment_id === aptId) for (const m of rentOwed(l)) rent.push({ l, m });
   rent.sort((a, b) => a.m.localeCompare(b.m));
+  const guest = (s) => `<div class="card offer row" role="button" tabindex="0" onclick="openStaySheet('${s.id}')">
+      <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
+        <div class="o-num">${esc(aptOf(s.apartment_id))} · ${dm(s.check_in)} → ${dm(s.check_out)}${s.source ? " · " + esc(s.source) : ""}${
+          stayPartly(s) ? ` · ${T("part paid", "делумно")} ${fmt(stayPaid(s))}` : ""}${
+          dOnly(s.check_out) < todayStr() ? ` · <span style="color:var(--danger)">${T("already left", "веќе замина")}</span>` : ""}</div></div>
+      <span class="o-total mono" style="color:var(--amber)">${fmt(stayBalance(s))}</span>
+    </div>`;
   openSheet(`<h2>${T("Still to collect", "За наплата")}</h2>
     <div class="totalbar"><span>${T("Total", "Вкупно")}</span>
       <span class="mono">${fmt(sumBy(list, stayBalance) + sumBy(rent, (r) => rentLeft(r.l, r.m)))} ден.</span></div>
@@ -6592,14 +6610,15 @@ function openUnpaidStays(aptId) {
         <div class="o-num">${esc(aptName(l.apartment_id))} · ${monthName(m)} ${m.slice(0, 4)}${
           rentLate(l, m) ? ` · <span style="color:var(--danger)">${T("late", "доцни")}</span>` : ""}</div></div>
       <span class="o-total mono" style="color:var(--amber)">${fmt(rentLeft(l, m))}</span>
-    </div>`).join("") + (list.length ? `<div class="sec">${T("Guests", "Гости")}</div>` : "") : ""}
-    ${list.length ? list.map((s) => `<div class="card offer row" role="button" tabindex="0" onclick="openStaySheet('${s.id}')">
-      <div style="flex:1;min-width:0"><b>${esc(s.guest_name)}</b>
-        <div class="o-num">${esc(aptOf(s.apartment_id))} · ${dm(s.check_in)} → ${dm(s.check_out)}${
-          stayPartly(s) ? ` · ${T("part paid", "делумно")} ${fmt(stayPaid(s))}` : ""}${
-          dOnly(s.check_out) < todayStr() ? ` · <span style="color:var(--danger)">${T("already left", "веќе замина")}</span>` : ""}</div></div>
-      <span class="o-total mono" style="color:var(--amber)">${fmt(stayBalance(s))}</span>
-    </div>`).join("") : rent.length ? "" : `<p class="muted">${T("Everyone has paid.", "Сите платиле.")}</p>`}`);
+    </div>`).join("") : ""}
+    ${now.length ? `<div class="sec">${T("Guests here or gone", "Гости што се тука или заминаа")} · ${fmt(sumBy(now, stayBalance))}</div>`
+      + now.map(guest).join("") : ""}
+    ${later.length ? `<div class="sec">${T("Guests still to come", "Гости што доаѓаат")} · ${fmt(sumBy(later, stayBalance))}</div>
+      <p class="muted" style="font-size:12.5px;margin:-2px 0 8px">${T(
+        "Not late — they pay when they come. One that has paid already: open it and record the payment.",
+        "Не доцнат — плаќаат кога ќе дојдат. Ако некој веќе платил: отвори го и внеси ја уплатата.")}</p>`
+      + later.map(guest).join("") : ""}
+    ${!list.length && !rent.length ? `<p class="muted">${T("Everyone has paid.", "Сите платиле.")}</p>` : ""}`);
 }
 
 async function markArrived(id) {
