@@ -953,7 +953,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261028-150500";
+const BUILD = "20261028-160500";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1081,9 +1081,22 @@ function fabAction() {
   if (state.tab === "today") return openTaskSheet;
   if (state.tab === "ins") return openPolicySheet;
   if (state.tab === "elaks") return ELAKS_NEW[state.elaksView] || null;
-  if (state.tab === "apt") return state.aptView === "apartments" ? openAptSheet
-    : state.aptView === "rent" ? () => openLeaseSheet() : openStaySheet;
+  if (state.tab === "apt") {
+    if (state.aptView === "apartments") return openAptSheet;
+    // a flat let by the month takes a tenant and their rent, never a guest
+    const one = state.apartments.find((a) => a.id === state.aptFilter);
+    if (state.aptView === "rent" || isMonthly(one)) return rentFab;
+    return openStaySheet;
+  }
   return null;
+}
+// On a flat let by the month the + records its rent, or adds its tenant when
+// it has none; with every flat showing, it adds a tenant.
+function rentFab() {
+  const one = state.apartments.find((a) => a.id === state.aptFilter);
+  const l = isMonthly(one) ? (leaseOn(one.id) || leaseNext(one.id)) : null;
+  if (l) return openRentPay(l.id, leaseOn(one.id) ? curYm() : ym(l.start_date));
+  openLeaseSheet(null, isMonthly(one) ? one.id : undefined);
 }
 function fabClick() {
   const fn = fabAction();
@@ -6345,7 +6358,10 @@ function renderApt() {
   // Rent only once some flat is let by the month
   const withRent = state.apartments.some((a) => isMonthly(a) || strayLease(a.id));
   if (state.aptView === "rent" && !withRent) state.aptView = "stays";
-  $("apt-tabs").innerHTML = [["stays", "Stays"], ["calendar", "Calendar"], ...(withRent ? [["rent", T("Rent", "Кирија")]] : []),
+  // a flat let by the month has no guests: Stays only if it has some from before
+  const noStays = isMonthly(one) && !state.stays.some((s) => s.apartment_id === one.id);
+  if (noStays && state.aptView === "stays") state.aptView = "rent";
+  $("apt-tabs").innerHTML = [...(noStays ? [] : [["stays", "Stays"]]), ["calendar", "Calendar"], ...(withRent ? [["rent", T("Rent", "Кирија")]] : []),
     ["bills", "Bills"], ["apartments", "Apartments"]].map(([v, l]) =>
     `<button class="chip ${state.aptView === v ? "on" : ""}" onclick="state.aptView='${v}';renderApt()">${l}</button>`).join("");
   // With more than a couple of apartments, stacking every one makes the page
@@ -6707,11 +6723,18 @@ function renderStays() {
 function openStaySheet(id, pre) {
   const s0 = id ? state.stays.find((x) => x.id === id) : null;
   if (s0 && s0.external_uid) toast("This booking comes from " + (s0.source || "a calendar") + " — dates may be overwritten");
+  // guests are for the flats let by the night; one already on a flat since
+  // let by the month keeps it, so editing does not move it
+  const flats = state.apartments.filter((a) => !isMonthly(a) || (s0 && a.id === s0.apartment_id));
+  if (!flats.length) return say(T("Every apartment is on monthly rent. Guests are for apartments let by the night.",
+    "Сите станови се под месечна кирија. Гостите се за станови што се издаваат на ноќ."));
+  const chosen = flats.find((a) => a.id === state.aptFilter);
   const s = id ? state.stays.find((x) => x.id === id)
-              : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "", apartment_id: pre && pre.apartment_id };
+              : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "",
+                  apartment_id: (pre && pre.apartment_id) || (chosen && chosen.id) || flats[0].id };
   openSheet(`
     <h2>${id ? "Edit stay" : "New guest"}</h2>
-    <label>Apartment</label><select id="st-apt" onchange="stayCalc()">${state.apartments.map((a) =>
+    <label>Apartment</label><select id="st-apt" onchange="stayCalc()">${flats.map((a) =>
       `<option value="${a.id}" ${s.apartment_id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select>
     <label>Guest name</label><input id="st-guest" value="${esc(s.guest_name || "")}">
     ${state.stayPhoneCol ? `<label>${T("Guest phone (opt.)", "Телефон на гостинот (опц.)")}</label>
