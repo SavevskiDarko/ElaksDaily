@@ -959,7 +959,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261029-101500";
+const BUILD = "20261029-113000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2288,6 +2288,7 @@ function renderInv() {
     tool(`onclick="openReportSheet()"`, T("Monthly report", "Месечен извештај")),
     tool(`onclick="openOrderSheet()"`, T("To order", "За нарачка"), lowN || "", "bad"),
     tool(`onclick="openSerialSearch()"`, T("Find by serial", "Најди по сериски")),
+    state.stock.some(photoToClean) ? tool(`onclick="openPhotoClean()"`, T("White backgrounds", "Бели позадини")) : "",
     warrN ? tool(`onclick="openWarranties()"`, T("Warranties ending", "Гаранции истекуваат"), warrN, "warn") : "",
     dupN ? tool(`onclick="openDuplicates()"`, T("Possible duplicates", "Можни дупликати"), dupN, "bad") : "",
   ].filter(Boolean);
@@ -2725,6 +2726,120 @@ function cutWhiteBackground(im, max = 900) {
   }
   ctx.putImageData(img, 0, 0);
   return c;
+}
+/* ---------- every product photo at once ----------
+   The same cut, run over the photos already saved. Each is fetched, cut when
+   it is on white, and saved; one already clear or not on white is left as it
+   is. The originals are held until the sheet is gone, so any of them can be
+   put back. */
+// a photo that may still have its white: one kept as a JPEG (a cut one is a PNG)
+const photoToClean = (a) => !!a.image_thumb && !/^data:image\/png/.test(a.image_thumb);
+const loadImg = (src) => new Promise((ok) => {
+  const im = new Image();
+  im.onload = () => ok(im);
+  im.onerror = () => ok(null);
+  im.src = src;
+});
+let photoClean = null;
+async function openPhotoClean() {
+  if (photoClean && !photoClean.finished) return renderPhotoClean(true);   // already going
+  const list = state.stock.filter(photoToClean);
+  if (!list.length) return say(T("No product photo is left with a white background.", "Нема слика на производ со бела позадина."));
+  if (!await ask(T(
+    `Go through ${list.length} product photo${list.length > 1 ? "s" : ""} and remove white backgrounds? A photo not on white is left as it is, and you can put any of them back afterwards.`,
+    `Да се поминат ${list.length} слики на производи и да се отстрани белата позадина? Слика што не е на бела позадина останува иста, а секоја може да се врати после.`),
+    T("Start", "Почни"))) return;
+  photoClean = { stop: false, finished: false, done: 0, total: list.length, changed: [], same: 0, noFull: 0, failed: 0 };
+  renderPhotoClean(true);
+  for (let k = 0; k < list.length && !photoClean.stop; k += 6) {
+    const chunk = list.slice(k, k + 6);
+    const { data, error } = await db.from("article_images").select("article_id, data").in("article_id", chunk.map((a) => a.id));
+    for (const a of chunk) {
+      if (photoClean.stop) break;
+      const full = error ? null : ((data || []).find((r) => r.article_id === a.id) || {}).data;
+      if (error) photoClean.failed++;
+      else if (!full) photoClean.noFull++;                 // only the small one: nothing to cut from
+      else {
+        const im = await loadImg(full);
+        const clean = im && !imgHasAlpha(im) ? cutWhiteBackground(im) : null;
+        if (!clean) photoClean.same++;
+        else {
+          const sizes = photoSizes(clean);
+          try {
+            await dbq(db.from("article_images").upsert({ article_id: a.id, data: sizes.full }, { onConflict: "article_id" }), T("Photo not saved", "Сликата не е зачувана"));
+            await dbq(db.from("articles").update({ image_thumb: sizes.thumb }).eq("id", a.id), T("Photo not saved", "Сликата не е зачувана"));
+            photoClean.changed.push({ id: a.id, name: a.name, thumb: sizes.thumb, old: { thumb: a.image_thumb, full } });
+          } catch { photoClean.failed++; }
+        }
+      }
+      photoClean.done++;
+      renderPhotoClean();
+    }
+  }
+  photoClean.finished = true;
+  await refreshAll(["stock"]);
+  if (state.tab === "elaks") renderInv();
+  renderPhotoClean();
+  if (!$("pc-body")) toast(T(`White removed from ${photoClean.changed.length} photo${photoClean.changed.length === 1 ? "" : "s"}`,
+    `Белата позадина е отстранета од ${photoClean.changed.length} слики`));
+}
+// The sheet is opened once; while the run goes on only the count and the bar
+// change, so Stop stays put under a finger, the sheet can be closed and the
+// run carries on, and scrolling the list afterwards is not reset.
+function renderPhotoClean(open) {
+  const pc = photoClean;
+  if (!pc) return;
+  if (open) openSheet(`<h2>${T("White backgrounds", "Бели позадини")}</h2><div id="pc-body">
+    <p class="muted" id="pc-msg"></p>
+    <div class="tk-bar"><i id="pc-bar" style="width:0"></i></div>
+    <p style="margin-top:8px" id="pc-count"></p>
+    <div id="pc-tail"></div></div>`);
+  if (!$("pc-body")) return;
+  const left = pc.same + pc.noFull;
+  $("pc-msg").textContent = pc.finished
+    ? (pc.stop ? T("Stopped.", "Запрено.") : T("Done.", "Готово."))
+    : T("Working through the photos — this can take a minute.", "Се обработуваат сликите — може да трае една минута.");
+  $("pc-bar").style.width = Math.round(pc.done / pc.total * 100) + "%";
+  $("pc-count").innerHTML = `<b>${pc.done} / ${pc.total}</b> · ${T("white removed", "отстранета бела")} <b>${pc.changed.length}</b>${
+    left ? ` · ${T("left as they were", "останаа исти")} ${left}` : ""}${pc.failed ? ` · <span style="color:var(--danger)">${T("not saved", "не се зачувани")} ${pc.failed}</span>` : ""}`;
+  const tail = !pc.finished
+    ? `<button class="btn ghost" onclick="photoCleanStop()">${T("Stop", "Запри")}</button>`
+    : `${pc.noFull ? `<p class="muted" style="font-size:12.5px">${T(
+        `${pc.noFull} only have the small photo — choose the photo again on those to cut it.`,
+        `${pc.noFull} ја имаат само малата слика — избери ја сликата повторно за да се исече.`)}</p>` : ""}
+      ${pc.changed.length ? `<div class="sec">${T("Changed — check them on the offer grey", "Променети — провери ги на сивата од понудата")}</div>
+      ${pc.changed.map((c, i) => `<div class="row" style="margin-bottom:8px;gap:10px">
+        <img class="thumb" style="width:52px;height:52px;object-fit:contain" src="${c.back ? c.old.thumb : c.thumb}" alt="">
+        <span style="flex:1;min-width:0">${esc(c.name)}</span>
+        ${c.back ? `<span class="muted nw">${T("put back", "вратена")}</span>`
+          : `<button class="btn sm ghost" onclick="photoCleanUndo(${i})">${T("Put back", "Врати")}</button>`}</div>`).join("")}
+      ${pc.changed.some((c) => !c.back) ? `<button class="btn ghost" onclick="photoCleanUndoAll()">${T("Put them all back", "Врати ги сите")}</button>` : ""}` : ""}`;
+  // the tail only when it has changed: while running that is never, so Stop is never replaced
+  const el = $("pc-tail");
+  if (el.dataset.html !== tail) { el.innerHTML = tail; el.dataset.html = tail; }
+}
+function photoCleanStop() {
+  if (photoClean) photoClean.stop = true;
+}
+async function photoCleanUndo(i, quiet) {
+  const c = photoClean && photoClean.changed[i];
+  if (!c || c.back) return;
+  try {
+    await dbq(db.from("article_images").upsert({ article_id: c.id, data: c.old.full }, { onConflict: "article_id" }), T("Not put back", "Не е вратено"));
+    await dbq(db.from("articles").update({ image_thumb: c.old.thumb }).eq("id", c.id), T("Not put back", "Не е вратено"));
+  } catch { return; }
+  c.back = true;
+  if (quiet) return;
+  await refreshAll(["stock"]);
+  if (state.tab === "elaks") renderInv();
+  renderPhotoClean();
+}
+async function photoCleanUndoAll() {
+  for (let i = 0; i < photoClean.changed.length; i++) await photoCleanUndo(i, true);
+  await refreshAll(["stock"]);
+  if (state.tab === "elaks") renderInv();
+  renderPhotoClean();
+  toast(T("The photos are as they were", "Сликите се вратени"));
 }
 // the photo as both sizes the app keeps: a small one for lists, the large one for offers
 const photoSizes = (src) => ({ thumb: imgResize(src, 72, 0.6), full: imgResize(src, 700, 0.75) });
