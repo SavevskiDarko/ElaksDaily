@@ -959,7 +959,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261029-172000";
+const BUILD = "20261029-190000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7921,15 +7921,30 @@ function renderMessage() {
     <input id="msg-phone" type="tel" inputmode="tel" value="${esc(m.phone || "")}"
       placeholder="${T("No number — you will pick the chat", "Нема број — ќе го избереш разговорот")}">
     <label>${T("Message", "Порака")}</label>
-    <textarea id="msg-text" rows="9">${esc(m.text(m.lang, m.key))}</textarea>
-    ${m.makeFile
+    <textarea id="msg-text" rows="9" oninput="msg.edited=this.value">${esc(m.edited ?? m.text(m.lang, m.key))}</textarea>
+    ${m.makeFile && m.fileSent
+      // Viber takes a shared PDF and drops the words that came with it, so
+      // once the file has gone the words are a second step: the chat opens
+      // on the same person with them written in, one tap to send.
+      ? `<div class="card" style="margin-top:12px">
+           <b>\u2713 ${T("The PDF has gone", "PDF-от е испратен")}</b>
+           <p class="muted" style="font-size:12.5px;margin-top:4px">${T(
+             "Viber sends the file without the words. Send them now: the chat opens with them written in. (WhatsApp keeps them with the file.)",
+             "Viber го праќа фајлот без текстот. Прати го сега: разговорот се отвора со текстот внатре. (WhatsApp го задржува со фајлот.)")}</p>
+           <div class="grid2" style="margin-top:8px">
+             <button class="btn sm msg-vb" style="width:100%" onclick="msgSend('viber')">${T("Words to Viber", "Текст на Viber")}</button>
+             <button class="btn sm msg-wa" style="width:100%" onclick="msgSend('wa')">${T("Words to WhatsApp", "Текст на WhatsApp")}</button>
+           </div>
+         </div>
+         <button class="btn ghost" onclick="closeSheet()">${T("Done", "Готово")}</button>`
+    : m.makeFile
       // A link into WhatsApp or Viber can carry words but never a file, so
       // with a PDF the first button is the phone's share menu, and the two
       // app buttons say plainly that they send the words alone.
       ? `<button class="btn" id="msg-share" onclick="msgShare()" disabled style="margin-top:12px">${ICON.share}<span id="msg-share-l"></span></button>
          <p class="muted" style="font-size:12.5px;margin-top:6px">${T(
-           "Opens the phone's share menu: choose Viber or WhatsApp, then the chat. The words go with it, and are copied too.",
-           "Го отвора менито за споделување: избери Viber или WhatsApp, па разговорот. Текстот оди со него, а е и копиран.")}</p>
+           "Opens the phone's share menu: choose Viber or WhatsApp, then the chat. If the words do not go with the file, the next step sends them.",
+           "Го отвора менито за споделување: избери Viber или WhatsApp, па разговорот. Ако текстот не оди со фајлот, следниот чекор го праќа.")}</p>
          <div class="sec" style="margin-top:14px">${T("Only the words, without the PDF", "Само текстот, без PDF")}</div>
          <div class="grid2">
            <button class="btn sm msg-wa" style="width:100%" onclick="msgSend('wa')">WhatsApp</button>
@@ -7956,6 +7971,7 @@ function msgSet(what, v) {
   if (!msg) return;
   if ($("msg-phone")) msg.phone = $("msg-phone").value;
   msg[what] = v;
+  msg.edited = undefined;                              // new words for the new choice
   renderMessage();
 }
 const msgWords = () => (($("msg-text") || {}).value || "").trim();
@@ -7973,11 +7989,13 @@ async function msgSend(app) {
     // Viber takes the number and, on most phones, the words as a draft; they
     // are copied as well, for a phone that drops them
     try { await navigator.clipboard.writeText(text); } catch { /* the draft may still carry them */ }
-    location.href = viberLink(phone, text);
+    openLink(viberLink(phone, text));
     toast(T("Also copied — paste it if Viber opens empty", "Копирано е — залепи ако Viber се отвори празен"));
   }
   msgKeepPhone(raw);
 }
+// opening the Viber app, in one place so it can be watched
+function openLink(url) { location.href = url; }
 async function msgShare() {
   const m = msg; if (!m) return;
   const text = msgWords();
@@ -8004,9 +8022,14 @@ async function msgShare() {
     return say(T("Could not share: ", "Не може да се сподели: ") + e.message);
   }
   msgKeepPhone(($("msg-phone") || {}).value || "");
-  closeSheet();
-  toast(m.ready ? T("Sent. If the words did not go with it, paste them — they are copied.", "Испратено. Ако текстот не отиде, залепи го — копиран е.")
-    : T("Sent", "Испратено"));
+  if (m.ready) {
+    // the sheet stays, on the second step: the words, which Viber left behind
+    m.phone = ($("msg-phone") || {}).value || "";
+    m.edited = text;
+    m.fileSent = true;
+    return renderMessage();
+  }
+  closeSheet(); toast(T("Sent", "Испратено"));
 }
 async function msgCopy() {
   try { await navigator.clipboard.writeText(msgWords()); toast(T("Copied", "Копирано")); }
