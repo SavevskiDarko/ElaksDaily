@@ -959,7 +959,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261029-113000";
+const BUILD = "20261029-172000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7922,16 +7922,24 @@ function renderMessage() {
       placeholder="${T("No number — you will pick the chat", "Нема број — ќе го избереш разговорот")}">
     <label>${T("Message", "Порака")}</label>
     <textarea id="msg-text" rows="9">${esc(m.text(m.lang, m.key))}</textarea>
-    <div class="grid2" style="margin-top:12px">
-      <button class="btn msg-wa" onclick="msgSend('wa')">WhatsApp</button>
-      <button class="btn msg-vb" onclick="msgSend('viber')">Viber</button>
-    </div>
     ${m.makeFile
-      ? `<button class="btn ghost" id="msg-share" onclick="msgShare()" disabled>${ICON.share}<span id="msg-share-l"></span></button>
+      // A link into WhatsApp or Viber can carry words but never a file, so
+      // with a PDF the first button is the phone's share menu, and the two
+      // app buttons say plainly that they send the words alone.
+      ? `<button class="btn" id="msg-share" onclick="msgShare()" disabled style="margin-top:12px">${ICON.share}<span id="msg-share-l"></span></button>
          <p class="muted" style="font-size:12.5px;margin-top:6px">${T(
-           "WhatsApp and Viber open the chat with the words in it. To send the PDF too, use Share and pick the chat.",
-           "WhatsApp и Viber го отвораат разговорот со текстот. За да го пратиш и PDF-от, користи Сподели и избери го разговорот.")}</p>`
-      : `<button class="btn ghost" onclick="msgShare()">${ICON.share}${T("Other apps…", "Други апликации…")}</button>`}
+           "Opens the phone's share menu: choose Viber or WhatsApp, then the chat. The words go with it, and are copied too.",
+           "Го отвора менито за споделување: избери Viber или WhatsApp, па разговорот. Текстот оди со него, а е и копиран.")}</p>
+         <div class="sec" style="margin-top:14px">${T("Only the words, without the PDF", "Само текстот, без PDF")}</div>
+         <div class="grid2">
+           <button class="btn sm msg-wa" style="width:100%" onclick="msgSend('wa')">WhatsApp</button>
+           <button class="btn sm msg-vb" style="width:100%" onclick="msgSend('viber')">Viber</button>
+         </div>`
+      : `<div class="grid2" style="margin-top:12px">
+           <button class="btn msg-wa" onclick="msgSend('wa')">WhatsApp</button>
+           <button class="btn msg-vb" onclick="msgSend('viber')">Viber</button>
+         </div>
+         <button class="btn ghost" onclick="msgShare()">${ICON.share}${T("Other apps…", "Други апликации…")}</button>`}
     <button class="btn ghost" onclick="msgCopy()">${T("Copy the words", "Копирај го текстот")}</button>`);
   msgShareReady();
 }
@@ -7939,7 +7947,7 @@ function msgShareReady() {
   const b = $("msg-share"), l = $("msg-share-l");
   if (!b || !msg) return;
   b.disabled = !msg.ready;
-  l.textContent = msg.ready ? T("Share with the PDF", "Сподели со PDF")
+  l.textContent = msg.ready ? T("Send with the PDF", "Испрати со PDF")
     : msg.fileErr ? T("The PDF could not be made", "PDF-от не може да се направи")
     : T("Preparing the PDF…", "Се подготвува PDF…");
 }
@@ -7986,6 +7994,9 @@ async function msgShare() {
     return say(T("This browser cannot pass things to other apps. The words are copied", "Овој прелистувач не може да праќа во други апликации. Текстот е копиран")
       + (m.ready ? T(" and the PDF is downloaded.", " и PDF-от е преземен.") : "."));
   }
+  // Viber takes the PDF but can leave the words behind, so they are on the
+  // clipboard as well; not awaited, so the share keeps the tap that started it
+  if (m.ready && navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
   try { await navigator.share(data); }
   catch (e) {
     if (e && e.name === "AbortError") return;          // closed the share sheet without choosing
@@ -7993,7 +8004,9 @@ async function msgShare() {
     return say(T("Could not share: ", "Не може да се сподели: ") + e.message);
   }
   msgKeepPhone(($("msg-phone") || {}).value || "");
-  closeSheet(); toast(T("Sent", "Испратено"));
+  closeSheet();
+  toast(m.ready ? T("Sent. If the words did not go with it, paste them — they are copied.", "Испратено. Ако текстот не отиде, залепи го — копиран е.")
+    : T("Sent", "Испратено"));
 }
 async function msgCopy() {
   try { await navigator.clipboard.writeText(msgWords()); toast(T("Copied", "Копирано")); }
