@@ -38,6 +38,13 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .topbar h1{font-family:var(--cond);font-weight:700;font-size:19px;letter-spacing:.02em}
 .topbar img{width:22px;height:22px;border-radius:6px;flex:none;align-self:center}
 .topbar .date{margin-left:auto;font-size:12.5px;opacity:.75;font-family:var(--mono)}
+/* a screen's own shortcuts sit in the bar, in place of the date */
+.bar-acts{margin-left:auto;display:flex;gap:6px}
+.bar-acts:empty{display:none}
+.bar-acts:not(:empty) + .date{display:none}
+.bar-acts button{display:flex;align-items:center;gap:5px;color:#fff;font-size:13px;font-weight:600;padding:6px 11px;
+  border-radius:999px;background:rgba(255,255,255,.13)}
+.bar-acts svg{width:15px;height:15px}
 
 /* ---- tab bar ---- */
 .tabbar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--navy-deep);
@@ -182,14 +189,15 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .task .tk-ico{width:24px;height:24px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted)}
 .task .tk-ico svg{width:19px;height:19px}
 .task .rec{font-size:11px;color:var(--muted)}
-/* how the day is going: done against all there is, and what is next */
-.tk-day{padding:13px 14px 12px}
-.tk-day-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-.tk-day-top b{font-family:var(--cond);font-weight:700;font-size:17px}
-.tk-day.all .tk-day-top b{color:var(--personal)}
+/* how the day is going, in the Today heading: done against all there is, a
+   thin bar, and what is next — it used to be a card of its own */
+.tk-prog{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.tk-day.all .tk-prog{color:var(--personal);font-weight:600}
+.tk-prog svg{width:14px;height:14px;vertical-align:-2px;margin-right:4px}
 .tk-bar{height:6px;border-radius:3px;background:var(--line);margin:9px 0 0;overflow:hidden}
+.tk-bar.thin{height:3px;margin:-3px 0 8px}
 .tk-bar i{display:block;height:100%;border-radius:3px;background:var(--personal);transition:width .35s ease}
-.tk-day-sub{display:block;width:100%;text-align:left;margin-top:8px;font-size:13px;color:var(--muted);
+.tk-day-sub{display:block;width:100%;text-align:left;margin:0 0 8px;font-size:13px;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tk-day-sub b{color:var(--ink);font-weight:600}
 /* a section heading with the one thing you can do to the whole section */
@@ -206,7 +214,6 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .task.tapp{cursor:pointer}
 .task.tapp:active{opacity:.7}
 button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
-.tk-day-top svg{width:17px;height:17px;vertical-align:-3px;margin-right:6px}
 #tk-img-prev:empty{display:none}
 .btn.msg-wa{background:#1FA855;color:#fff;margin:0}
 /* rent: six months at a glance, each tappable to record it */
@@ -552,7 +559,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 
 <!-- ================= APP ================= -->
 <div id="app" style="display:none">
-  <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="date" id="bar-date"></span></div>
+  <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="bar-acts" id="bar-acts"></span><span class="date" id="bar-date"></span></div>
   <div id="loadbar" style="display:none"><span id="loadmsg">Could not load data.</span><button onclick="retryLoad()">Retry</button></div>
 
   <!-- HOME -->
@@ -1010,7 +1017,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261031-220000";
+const BUILD = "20261031-235000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1120,6 +1127,7 @@ function tab(name, fromBack) {
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("bar-title").textContent = { home: "Home", today: "Tasks", elaks: "Elaks", apt: "Apartments",
     ins: "Insurance", set: "Settings" }[name] || "Home";
+  if (name !== "today") $("bar-acts").innerHTML = "";
   syncFab();
   render();
 }
@@ -1602,6 +1610,15 @@ function setViewDay(ds) {
   quickAddHint();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
+// Habits and Completed, in the bar at the top of Tasks — they sat halfway
+// down the list, between Done today and Upcoming
+function renderTaskBar() {
+  const el = $("bar-acts");
+  if (!el || state.tab !== "today") return;
+  el.innerHTML = (state.tasks.some((t) => isHabit(t) && taskInScope(t, state.ctxFilter))
+    ? `<button onclick="openHabits()" aria-label="${T("Habits", "Навики")}">${ICON.flame}${T("Habits", "Навики")}</button>` : "")
+    + `<button onclick="openHistory()" aria-label="${T("Completed", "Завршени")}">${ICON.check}${T("Completed", "Завршени")}</button>`;
+}
 function renderTaskStrip() {
   const el = $("tk-strip");
   if (!el) return;
@@ -1652,23 +1669,20 @@ function extraRow(r) {
 
 // How the day is going, at a glance: what is done against all there is, and
 // what comes next on the clock.
-function dayCard(B) {
+// The Today heading carries how the day is going: "Today · 5" with "1 of 6
+// done" beside it, a thin bar under it, and the next thing with a time.
+function todayHead(B) {
   const done = B.doneToday.length, left = B.todays.length, total = done + left;
   if (!total) return "";
   const now = nowHM();
   const next = B.todays.filter((t) => t.due_time && t.due_time.slice(0, 5) >= now)
     .sort((a, b) => a.due_time.localeCompare(b.due_time))[0];
-  const head = !left ? T("All done for today", "Сè е завршено за денес")
-    : done ? T(`${done} of ${total} done`, `${done} од ${total} завршени`)
-    : T(`${total} to do today`, `${total} за денес`);
-  const sub = next
-    ? `<button class="tk-day-sub" onclick="openTaskSheet('${next.id}')">${T("Next", "Следно")}: <b>${next.due_time.slice(0, 5)}</b> ${esc(next.title)}</button>`
-    : !left && B.late ? `<div class="tk-day-sub">${T(`${B.late} overdue still open`, `${B.late} задоцнети се уште отворени`)}</div>` : "";
-  return `<div class="card tk-day ${left ? "" : "all"}">
-    <div class="tk-day-top"><b>${left ? "" : ICON.check}${head}</b></div>
-    <div class="tk-bar"><i style="width:${Math.round(done / total * 100)}%"></i></div>
-    ${sub}
-  </div>`;
+  const prog = !left ? ICON.check + T("All done", "Сè е завршено")
+    : done ? T(`${done} of ${total} done`, `${done} од ${total} завршени`) : "";
+  return `<div class="sec-row tk-day ${left ? "" : "all"}"><div class="sec">${T("Today", "Денес")}${left ? " · " + left : ""}</div>
+      ${prog ? `<span class="tk-prog">${prog}</span>` : ""}</div>
+    ${done ? `<div class="tk-bar thin"><i style="width:${Math.round(done / total * 100)}%"></i></div>` : ""}
+    ${next ? `<button class="tk-day-sub" onclick="openTaskSheet('${next.id}')">${T("Next", "Следно")}: <b>${next.due_time.slice(0, 5)}</b> ${esc(next.title)}</button>` : ""}`;
 }
 
 function renderToday() {
@@ -1676,6 +1690,7 @@ function renderToday() {
   const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
   renderCtxChips();
   renderTaskStrip();
+  renderTaskBar();
   if (!q && viewDay()) return renderDayView(viewDay());
   if (q) {
     const hits = state.tasks.filter((t) => taskInScope(t, state.ctxFilter) && (
@@ -1706,7 +1721,7 @@ function renderToday() {
   // In the order you would deal with them: what slipped, what is on today,
   // what else is happening today, and only then what has no day yet — which
   // used to sit above today and push it off the screen.
-  let html = state.loading ? "" : dayCard(B);
+  let html = "";
   // A pile of late things used to push today off the screen. Two or fewer are
   // shown as they are; more fold into one line that opens.
   const lateN = overdue.length + missed.length;
@@ -1723,21 +1738,16 @@ function renderToday() {
       ${overdue.length ? `<button class="chip sm" onclick="moveAllOverdue()">${T("Move all to today", "Помести ги на денес")}</button>` : ""}
     </div>` + overdue.map(row).join("") + missed.map(missedRow).join("");
   }
-  if (todays.length) html += `<div class="sec">${T("Today", "Денес")} · ${todays.length}</div>` + todays.map(row).join("");
+  if (!state.loading) html += todayHead(B);
+  if (todays.length) html += todays.map(row).join("");
   if (extras.length) html += `<div class="sec">${T("Also today", "Исто денес")}</div>` + extras.map(extraRow).join("");
   if (inbox.length) html += `<div class="sec">${T("No date", "Без датум")} · ${inbox.length}</div>` + inbox.map(row).join("");
   if (!todays.length && !overdue.length && !missed.length && !inbox.length && !extras.length && !B.doneToday.length) {
     html += state.loading ? SKEL() : emptyToday();
   }
-  if (!state.loading) {
-    html += `<div class="sec-row">${B.doneToday.length
-      ? `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
-          ${T("Done today", "Завршени денес")} · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`
-      : "<span></span>"}
-      <span style="display:flex;gap:6px">${state.tasks.some((t) => isHabit(t) && vis(t))
-        ? `<button class="chip sm" onclick="openHabits()">${T("Habits", "Навики")} ›</button>` : ""}
-      <button class="chip sm" onclick="openHistory()">${T("Completed", "Завршени")} ›</button></span>
-    </div>`;
+  if (!state.loading && B.doneToday.length) {
+    html += `<div class="sec tapp" role="button" tabindex="0" onclick="state.showDone=!state.showDone;renderToday()">
+      ${T("Done today", "Завршени денес")} · ${B.doneToday.length} <span class="muted" style="font-weight:400">${state.showDone ? "▾" : "▸"}</span></div>`;
     if (state.showDone) html += B.doneToday.map(row).join("");
   }
   $("today-list").innerHTML = html;
