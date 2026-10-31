@@ -38,10 +38,16 @@ self.addEventListener("push", (e) => {
     vibrate: [100, 50, 100],
     data: { taskId: data.taskId || null },
   };
-  if (data.taskId) opts.actions = [
-    { action: "done", title: "\u2713 Done" },
-    { action: "snooze", title: "Snooze 1h" },
-  ];
+  // A phone shows two buttons at most on Android: Done, and Snooze 1h during
+  // the day or Tomorrow in the evening, when an hour on is no use. Where three
+  // fit, all three.
+  if (data.taskId) {
+    const done = { action: "done", title: "\u2713 Done" };
+    const snooze = { action: "snooze", title: "Snooze 1h" };
+    const later = { action: "tomorrow", title: "Tomorrow" };
+    const max = (self.Notification && Notification.maxActions) || 2;
+    opts.actions = max >= 3 ? [done, snooze, later] : [done, new Date().getHours() >= 20 ? later : snooze];
+  }
   e.waitUntil(self.registration.showNotification(data.title, opts));
 });
 
