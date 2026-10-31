@@ -812,6 +812,7 @@ async function startApp() {
   state.loading = false;
   render();
   updatePushState();
+  keepPushAlive();
   handleNotificationIntent();
   handleShortcut();
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
@@ -959,7 +960,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261029-190000";
+const BUILD = "20261031-120000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1960,9 +1961,9 @@ function openTaskSheet(id) {
           onclick="this.classList.toggle('on')">${wd(new Date(2026, 0, 4 + i))}</button>`).join("")}</div>
     </div>
     <label>${T("Remind me, how long before", "Потсети ме, колку порано")}</label>
-    <div class="chips wrap" id="tk-before">
+    <div class="chips wrap" id="tk-before" ${id ? "" : 'data-fresh="1"'}>
       ${REMIND.map(([v, l]) => `<button class="chip ${remindNow === v ? "on" : ""}" data-b="${v}"
-        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');tkRemChanged()">${l}</button>`).join("")}
+        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');delete this.parentNode.dataset.fresh;tkRemChanged()">${l}</button>`).join("")}
     </div>
     <p class="muted" style="font-size:12.5px;margin-top:4px" id="tk-rem-hint"></p>
     <div class="row" style="margin-top:12px">
@@ -2105,7 +2106,12 @@ function togglePersonalOwner() {
 function tkRemChanged() {
   const hint = $("tk-rem-hint");
   if (!hint) return;
-  const lead = tkRemindMins(), time = ($("tk-time") || {}).value;
+  // a new task given a time is reminded at that time, until a choice is made
+  const box = $("tk-before"), given = ($("tk-time") || {}).value;
+  if (box && box.dataset.fresh && given && tkRemindMins() < 0) {
+    box.querySelectorAll(".chip").forEach((x) => x.classList.toggle("on", x.dataset.b === "0"));
+  }
+  const lead = tkRemindMins(), time = given;
   if (lead < 0) { hint.textContent = ""; return; }
   if (!time) {
     hint.textContent = T("Give the task a time, otherwise there is nothing to count back from.",
@@ -2204,6 +2210,11 @@ async function saveTask(id) {
     checklist: tkChecklist.filter((it) => it.text.trim()).length ? tkChecklist.filter((it) => it.text.trim()) : null,
   };
   if (!row.title) return toast("Enter a title");
+  // the server sends a task's reminder once a day; moved to a new time, it
+  // must be free to come again at that time
+  const was = id ? state.tasks.find((x) => x.id === id) : null;
+  if (was && (was.due_date !== row.due_date || (was.due_time || "").slice(0, 5) !== (row.due_time || "").slice(0, 5)
+    || (parseInt(was.remind_before) || 0) !== row.remind_before || !!was.remind !== row.remind)) row.reminded_on = null;
   if (tkImg.mode === "new") row.photo_thumb = tkImg.thumb;
   if (tkImg.mode === "remove") row.photo_thumb = null;
   try {
@@ -6036,24 +6047,82 @@ function urlB64(s) {
   const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
+// On only when the phone allows it AND the server holds its sign-up: allowing
+// alone used to read as "on" while nothing could reach the phone.
 async function updatePushState() {
-  const supported = "Notification" in window;
-  state.pushOn = supported ? Notification.permission === "granted" : false;
+  const supported = "Notification" in window && "serviceWorker" in navigator;
+  const perm = supported ? Notification.permission : "unsupported";
+  state.pushOn = perm === "granted" && state.pushSaved === true;
   const el = $("push-state");                 // only present while the sheet is open
-  if (el) el.textContent = !supported ? "Not supported on this device"
-    : state.pushOn ? "On for this device" : "Off";
-  const btn = el && el.closest(".card") ? el.closest(".card").querySelector("button") : null;
-  if (btn) { btn.textContent = state.pushOn ? "Turn off" : "Enable"; btn.classList.toggle("ghost", state.pushOn); }
+  if (!el) return;
+  el.textContent = !supported ? T("Not supported on this device", "Не е поддржано на овој уред")
+    : perm === "denied" ? T("Blocked — allow notifications for Centrala in the phone's settings", "Блокирано — дозволи известувања за Centrala во поставките на телефонот")
+    : state.pushOn ? T("On for this phone", "Вклучено за овој телефон")
+    : perm === "granted" && state.pushSaved === false ? T("Allowed, but this phone is not signed up — tap Enable", "Дозволено, но телефонот не е пријавен — допри Вклучи")
+    : perm === "granted" ? T("Checking…", "Се проверува…")
+    : T("Off", "Исклучено");
+  const en = $("push-enable"), te = $("push-test");
+  if (en) en.style.display = state.pushOn || !supported || perm === "denied" ? "none" : "";
+  if (te) te.style.display = state.pushOn ? "" : "none";
+}
+// Notifications only reach a phone whose sign-up the server holds. The push
+// service can retire one at any time and the server then drops it, so the
+// phone went quiet while still showing as allowed. Each start, with
+// permission given, the sign-up is made again if it is gone or was made with
+// another key, and saved — so a phone mends itself just by being opened.
+async function keepPushAlive() {
+  try {
+    if (!state.uid || !("Notification" in window) || Notification.permission !== "granted"
+      || !navigator.serviceWorker || !("PushManager" in window)) return;
+    // ready never settles where the service worker could not start; give up rather than wait forever
+    const reg = await Promise.race([navigator.serviceWorker.ready,
+      new Promise((_, no) => setTimeout(() => no(new Error("no service worker")), 8000))]);
+    const key = urlB64(CONFIG.VAPID_PUBLIC_KEY);
+    let sub = await reg.pushManager.getSubscription();
+    const was = sub && sub.options && sub.options.applicationServerKey;
+    if (was && !(was.byteLength === key.length && new Uint8Array(was).every((x, i) => x === key[i]))) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    const { error } = await db.from("push_subscriptions")
+      .upsert({ endpoint: sub.endpoint, sub: sub.toJSON(), user_id: state.uid }, { onConflict: "endpoint" });
+    if (error) console.warn("push sign-up not saved", error);
+    state.pushSaved = !error;
+  } catch (e) {
+    console.warn("push sign-up", e);
+    state.pushSaved = false;
+  }
+  updatePushState();
 }
 async function enablePush() {
   try {
     const perm = await Notification.requestPermission();
-    if (perm !== "granted") return toast("Permission denied");
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(CONFIG.VAPID_PUBLIC_KEY) });
-    await db.from("push_subscriptions").upsert({ endpoint: sub.endpoint, sub: sub.toJSON(), user_id: state.uid }, { onConflict: "endpoint" });
-    updatePushState(); toast("Notifications enabled");
-  } catch (e) { console.error(e); toast("Error enabling push"); }
+    if (perm !== "granted") { updatePushState(); return toast(T("Permission denied", "Дозволата е одбиена")); }
+  } catch (e) { console.error(e); return toast(T("Error enabling push", "Грешка при вклучување")); }
+  await keepPushAlive();
+  toast(state.pushSaved ? T("Notifications on for this phone", "Известувањата се вклучени за овој телефон")
+    : T("This phone could not be signed up", "Телефонот не може да се пријави"));
+}
+// A notification sent now through the same server and route the reminders
+// take, to this person's phones only — so "do they reach me" has an answer.
+async function testPush() {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) return toast(T("Sign in first", "Прво најави се"));
+  let r, j = {};
+  try {
+    r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/push?test=1", { method: "POST",
+      headers: { Authorization: "Bearer " + session.access_token, apikey: CONFIG.SUPABASE_ANON_KEY } });
+    j = await r.json().catch(() => ({}));
+  } catch (e) { return say(T("Could not reach the server: ", "Серверот не е достапен: ") + e.message); }
+  if (!r.ok) return say(T(`The server did not send it (${r.status}).`, `Серверот не го испрати (${r.status}).`));
+  if (!j.sent) {
+    state.pushSaved = false; updatePushState();
+    return say(T("The server has no phone of yours to send to. Tap Enable, then try again.",
+      "Серверот нема твој телефон на кој да прати. Допри Вклучи, па пробај пак."));
+  }
+  toast(T(`Sent to ${j.sent} device${j.sent > 1 ? "s" : ""} — it should arrive in a few seconds`,
+    `Испратено на ${j.sent} уред(и) — треба да стигне за неколку секунди`));
 }
 async function getSetting(key, fallback) {
   try {
@@ -6106,14 +6175,16 @@ function renderSettings() {
 function openSetSheet(kind) {
   if (kind === "push") {
     openSheet(`<h2>Notifications</h2>
-      <div class="card"><div class="row" style="justify-content:space-between">
-        <div><b>Push notifications</b><div class="muted" id="push-state">—</div></div>
-        <button class="btn sm amber" onclick="enablePush()">Enable</button></div></div>
+      <div class="card"><div class="row" style="justify-content:space-between;gap:10px">
+        <div style="flex:1;min-width:0"><b>Push notifications</b><div class="muted" id="push-state">—</div></div>
+        <button class="btn sm amber" id="push-enable" onclick="enablePush()">${T("Enable", "Вклучи")}</button>
+        <button class="btn sm ghost" id="push-test" style="display:none" onclick="testPush()">${T("Send a test", "Прати проба")}</button></div></div>
       <label>Daily summary at</label>
       <div class="row"><input id="digest-hour" type="time" value="${setting("digest_hour", "07:30")}" style="flex:1">
         <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
       <p class="muted" style="font-size:12.5px">One message each morning with what is due — plus reminders for tasks with a time, guest arrivals the day before, and unpaid bills.</p>`);
     updatePushState();
+    keepPushAlive();
   } else if (kind === "templates") {
     openSheet(`<h2>Checklist templates</h2><div id="tpl-list"></div>
       <p class="muted" style="font-size:12.5px">Build a checklist on any task, then use "Save this checklist as a template" to reuse it.</p>`);
