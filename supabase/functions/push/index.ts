@@ -42,10 +42,14 @@ const aptVisible = (r: any, a: any) => r.role === "owner"
 // the owner hears about a task unless it belongs to a flat they have put away
 const ownerSees = (r: any, t: any) => r.role === "owner" && !(t.apartment_id && (r.hide_apts ?? []).includes(t.apartment_id));
 
+// How many phones it went to, how many had been retired by the push service
+// (dropped here; the app signs the phone up again when it is next opened),
+// and how many failed otherwise — those are logged, as they used to vanish.
 async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null) {
   const { data: subs } = await db.from("push_subscriptions").select("*");
   const { data: rr } = await db.from("user_roles").select("*");
   const rowOf = new Map((rr ?? []).map((r) => [r.user_id, r]));
+  const out = { sent: 0, gone: 0, failed: 0 };
   for (const s of subs ?? []) {
     if (allow) {
       const r = s.user_id ? rowOf.get(s.user_id) : null;
@@ -54,15 +58,42 @@ async function sendToAll(title: string, body: string, tag: string, allow: ((r: a
     try {
       // 12h so a phone that is off or out of signal still receives it
       await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId }), { urgency: "high", TTL: 43200 });
+      out.sent++;
     } catch (e: any) {
       if (e.statusCode === 404 || e.statusCode === 410) {
+        out.gone++;
         await db.from("push_subscriptions").delete().eq("id", s.id); // expired
+      } else {
+        out.failed++;
+        console.error("push failed", tag, e.statusCode ?? "", String(e.body ?? e.message ?? e).slice(0, 200));
       }
     }
   }
+  if (!out.sent && (out.gone || out.failed)) console.warn("push reached no phone", tag, JSON.stringify(out));
+  return out;
+}
+
+// The app's "Send a test": a signed-in person asks for a notification to their
+// own phones, through the same sending the reminders use. It answers to the
+// person's own sign-in, not the schedule's key, and can reach no one else.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+async function testPush(req: Request) {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...CORS, "content-type": "application/json" } });
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  const { data } = token ? await db.auth.getUser(token) : { data: null };
+  const uid = data?.user?.id;
+  if (!uid) return json({ error: "sign in" }, 401);
+  const out = await sendToAll("Centrala", "Проба: известувањата стигнуваат до овој телефон ✓", "test", (r: any) => r.user_id === uid);
+  return json(out);
 }
 
 Deno.serve(async (req) => {
+  if (new URL(req.url).searchParams.get("test")) return testPush(req);
   // The function is deployed with --no-verify-jwt, so this header is the only
   // thing standing between the schedule and the open internet. Refuse when the
   // secret is missing: without it anyone could fire notifications at every
