@@ -15,7 +15,7 @@
   --hb-miss:#C9D0D9;
   --navy:#1E3A5F; --navy-deep:#152A46; --amber:#F5B301; --paper:#F7F8FA;
   --card:#FFFFFF; --ink:#23272E; --muted:#6B7280; --line:#E5E8EC;
-  --work:#4C6EF5; --elaks:#1E3A5F; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
+  --work:#4C6EF5; --elaks:#E0782A; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
   --surface:#FFFFFF; --on-dark:#FFFFFF;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
@@ -476,6 +476,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .nw{white-space:nowrap}
 .calc{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
 .hok{color:var(--personal);font-weight:600}
+.hcard.push-warn{border-color:var(--danger)}
 .cal-apt{font-weight:600;margin:14px 0 6px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
 .cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px}
@@ -538,7 +539,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
   /* Elaks navy is the colour of the brand, and on a dark card it vanished:
      its dot read as no dot at all. Lighter here, and still apart from Work. */
   :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-    --elaks:#9DB4D6;--hb-miss:#3A4456}
+    --elaks:#F08E46;--hb-miss:#3A4456}
   .btn.ghost{background:var(--card);color:var(--ink)}
   .tick{border-color:#39424F}
 }
@@ -1017,7 +1018,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261031-235000";
+const BUILD = "20261031-235900";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1043,6 +1044,8 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   checkForUpdate();
+  // back from the phone's settings, perhaps with notifications allowed again
+  if (state.uid && "Notification" in window && Notification.permission === "granted" && state.pushSaved !== true) keepPushAlive();
   render();                       // check-out time may have passed while away
 });
 // "Currently staying" depends on the time of day, so keep it honest while open
@@ -2616,41 +2619,60 @@ async function delTask(id) {
   if (!row || !await ask("Delete this task?")) return;
   await deleteUndoable("tasks", row, T("Task deleted", "Задачата е избришана"), ["tasks", "completions"]);
 }
+// Completed lists one-off tasks first: a daily routine's ticks, every day,
+// buried them. Repeating ticks are a chip away, and a search finds either.
+let histKind = "one";
 function openHistory() {
+  openSheet(`<h2>${T("Completed tasks", "Завршени задачи")}</h2>
+    <input class="search" id="hist-q" placeholder="${T("Search completed…", "Барај завршени…")}" oninput="renderHistory()">
+    <div class="chips" id="hist-kind" style="margin-bottom:4px"></div>
+    <div id="hist-list"></div>`);
+  renderHistory();
+}
+function renderHistory() {
+  const list = $("hist-list");
+  if (!list) return;
+  const q = (($("hist-q") || {}).value || "").trim().toLowerCase();
   const rows = [];
   for (const t of state.tasks) {
     if (!t.recurrence) { if (t.done) rows.push({ t, on: t.last_done || "" }); continue; }
-    for (const c of state.completions) if (c.task_id === t.id) rows.push({ t, on: c.done_on, rec: true });
+    for (const c of state.completions) if (c.task_id === t.id && !c.skipped) rows.push({ t, on: c.done_on, rec: true });
   }
-  rows.sort((a, b) => (b.on || "").localeCompare(a.on || ""));
-  const done = rows;
+  const n = { one: rows.filter((r) => !r.rec).length, rep: rows.filter((r) => r.rec).length };
+  n.all = n.one + n.rep;
+  $("hist-kind").innerHTML = [["one", T("One-off", "Еднократни")], ["rep", T("Repeating", "Повторливи")], ["all", T("All", "Сите")]]
+    .map(([k, l]) => `<button class="chip sm ${histKind === k ? "on" : ""}" onclick="histKind='${k}';renderHistory()">${l} · ${n[k]}</button>`).join("");
+  const shown = rows.filter((r) => (histKind === "all" || (histKind === "rep") === !!r.rec)
+      && (!q || (r.t.title || "").toLowerCase().includes(q) || (r.t.notes || "").toLowerCase().includes(q)))
+    .sort((a, b) => (b.on || "").localeCompare(a.on || ""));
   const fmtD = (d) => !d ? T("Earlier", "Порано")
     : d === todayStr() ? `${T("Today", "Денес")} · ${wd(d)} ${dm(d)}`
     : d === backDays(1) ? `${T("Yesterday", "Вчера")} · ${wd(d)} ${dm(d)}`
     : wd(d) + " " + dmy(d);
-  let html = `<h2>Completed tasks</h2>`;
-  if (!done.length) html += '<p class="muted">Nothing completed yet.</p>';
+  let html = "";
+  if (!shown.length) html = `<p class="muted" style="margin-top:12px">${q ? T(`Nothing completed matches "${esc(q)}".`, `Ништо завршено не одговара на "${esc(q)}".`)
+    : T("Nothing completed yet.", "Сè уште ништо завршено.")}</p>`;
   let lastD = null;
-  for (const r of done.slice(0, 300)) {
+  for (const r of shown.slice(0, 300)) {
     const t = r.t;
     if (r.on !== lastD) { html += `<div class="sec">${fmtD(r.on)}</div>`; lastD = r.on; }
     html += `<div class="card task done">
       <span class="led ${t.context}"></span>
       <span class="t-title">${esc(t.title)}${r.rec ? '<span class="rec"> ↻</span>' : ""}</span>
-      ${r.rec ? "" : `<button class="btn sm ghost" onclick="restoreTask('${t.id}')">Restore</button>
+      ${r.rec ? "" : `<button class="btn sm ghost" onclick="restoreTask('${t.id}')">${T("Restore", "Врати")}</button>
       <button style="color:var(--danger);font-size:17px;padding:4px" onclick="histDelTask('${t.id}')" aria-label="delete">✕</button>`}
     </div>`;
   }
-  openSheet(html);
+  list.innerHTML = html;
 }
 async function restoreTask(id) {
   try { await dbq(db.from("tasks").update({ done: false, last_done: null, due_date: todayStr() }).eq("id", id), "Not restored"); } catch { return; }
-  await refreshAll(["tasks"]); openHistory(); renderToday(); updateBadges(); toast("Restored to today");
+  await refreshAll(["tasks"]); renderHistory(); renderToday(); updateBadges(); toast(T("Restored to today", "Вратено на денес"));
 }
 async function histDelTask(id) {
   if (!await ask("Delete this task permanently?")) return;
   try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
-  await refreshAll(["tasks"]); openHistory(); renderToday();
+  await refreshAll(["tasks"]); renderHistory(); renderToday();
 }
 
 /* ============================================================
@@ -6478,6 +6500,7 @@ async function keepPushAlive() {
     state.pushSaved = false;
   }
   updatePushState();
+  if (state.tab === "home") renderHome();
 }
 async function enablePush() {
   try {
@@ -9041,6 +9064,41 @@ function editSpokenTask() {
   }, 240);
 }
 
+// Reminders reach a phone only when it allows notifications and the server
+// holds its sign-up. When either is missing, Home says so — a phone can turn
+// them off for an app it thinks unused, and nothing else would tell you.
+function pushWarning() {
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return "";
+  const perm = Notification.permission;
+  if (perm === "granted" && state.pushSaved !== false) return "";
+  let until = 0;
+  try { until = Number(localStorage.getItem("centrala_push_nag")) || 0; } catch {}
+  if (Date.now() < until) return "";
+  const what = perm === "denied"
+    ? T("Notifications are blocked for Centrala on this phone, so reminders will not arrive. Allow them in the phone's settings: Apps → Centrala → Notifications.",
+      "Известувањата за Centrala се блокирани на овој телефон, па потсетниците нема да стигнат. Дозволи ги во поставките: Апликации → Centrala → Известувања.")
+    : perm === "granted" ? T("This phone is not signed up for notifications, so reminders will not arrive.",
+      "Овој телефон не е пријавен за известувања, па потсетниците нема да стигнат.")
+    : T("Notifications are off on this phone, so reminders will not arrive.", "Известувањата се исклучени на овој телефон, па потсетниците нема да стигнат.");
+  return `<div class="hcard push-warn">
+    <h3 style="color:var(--danger)">${T("Notifications off", "Известувањата се исклучени")}</h3>
+    <p class="hsub" style="margin:0 0 10px">${what}</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      ${perm === "denied"
+        ? `<button class="btn sm" onclick="openSetSheet('push')">${T("How to turn them on", "Како да ги вклучам")}</button>`
+        : `<button class="btn sm amber" onclick="pushTurnOn()">${T("Turn on", "Вклучи")}</button>`}
+      <button class="btn sm ghost" onclick="pushNagLater()">${T("Not now", "Не сега")}</button>
+    </div></div>`;
+}
+async function pushTurnOn() {
+  await enablePush();
+  if (state.tab === "home") renderHome();
+}
+// a week's quiet on this phone, then it asks again
+function pushNagLater() {
+  try { localStorage.setItem("centrala_push_nag", String(Date.now() + 7 * 86400000)); } catch {}
+  renderHome();
+}
 function renderHome() {
   if (state.loading) { $("home-body").innerHTML = SKEL(3, "tall"); return; }
   const today = todayStr();
@@ -9052,7 +9110,7 @@ function renderHome() {
     (b.priority ? 1 : 0) - (a.priority ? 1 : 0)
     || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
   const areas = myCtx().filter((c) => byCtx(c) > 0);
-  let html = `<div class="hcard" role="button" tabindex="0" onclick="tab('today')">
+  let html = pushWarning() + `<div class="hcard" role="button" tabindex="0" onclick="tab('today')">
     <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
     <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
       <span class="hbig">${B.todays.length}</span>
