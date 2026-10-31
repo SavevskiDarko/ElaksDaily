@@ -355,6 +355,18 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .qa-hint{font-size:12.5px;color:var(--muted);margin:-2px 2px 10px}
 .qa-hint:empty{display:none}
 .qa-hint b{color:var(--ink);font-weight:600}
+/* the week at a glance: seven days, how much is on each, tap one to see it */
+.tk-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:0 0 12px}
+.tk-strip:empty{display:none}
+.tk-strip button{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 0 5px;border-radius:12px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);min-width:0}
+.tk-strip .ds-wd{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.tk-strip .ds-n{font-family:var(--cond);font-weight:700;font-size:17px;line-height:1.15}
+.tk-strip .ds-c{font-size:11.5px;font-weight:700;min-height:15px;color:var(--muted)}
+.tk-strip .ds-c.none{font-weight:400;opacity:.5}
+.tk-strip button.today .ds-n{color:var(--amber)}
+.tk-strip button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.tk-strip button.on .ds-wd,.tk-strip button.on .ds-c{color:#dbe3ee}
 /* overdue, folded to a line when there is a pile of it */
 .late-line{display:flex;align-items:center;gap:10px;cursor:pointer;border-color:var(--danger)}
 .late-line .late-n{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--danger)}
@@ -560,6 +572,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
     <div class="qa-hint" id="tk-quick-hint"></div>
     <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()" style="display:none">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
+    <div class="tk-strip" id="tk-strip"></div>
     <div id="today-list"></div>
     <div id="week-list"></div>
   </div>
@@ -997,7 +1010,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261031-200000";
+const BUILD = "20261031-220000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1431,7 +1444,7 @@ function quickAddParse() {
   if (!p.title) return null;
   const ctx = p.context && myCtx().includes(p.context) ? p.context
     : state.ctxFilter !== "all" && myCtx().includes(state.ctxFilter) ? state.ctxFilter : defaultCtx();
-  return { ...p, context: ctx, due_date: p.due_date || todayStr() };
+  return { ...p, context: ctx, due_date: p.due_date || viewDay() || todayStr() };
 }
 // what will be saved, said under the line as it is typed
 function quickAddHint() {
@@ -1547,6 +1560,81 @@ function dayExtras(today) {
     || (a.time || "99:99").localeCompare(b.time || "99:99"));
 }
 
+// What else is on a day ahead: work booked for it, guests coming or going,
+// rent falling due. Today's own list (dayExtras) also carries what is late.
+function dayExtrasOn(ds) {
+  if (ds === todayStr()) return dayExtras(ds);
+  const rows = [];
+  const ctxOk = (c) => state.ctxFilter === "all" || state.ctxFilter === c;
+  if (state.perm.elaks && ctxOk("elaks")) {
+    for (const j of state.jobs) {
+      if (j.status === "done" || j.status === "cancelled" || j.scheduled_on !== ds) continue;
+      if (state.mineOnly && j.assigned_to && j.assigned_to !== state.uid) continue;
+      rows.push({ ctx: "elaks", ico: "job", time: j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : "",
+        tag: T("job", "работа"), title: j.title, sub: [jobClient(j), jobSite(j), j.address].filter(Boolean).join(" · "),
+        open: `openJobSheet('${j.id}')` });
+    }
+  }
+  if (state.perm.apts && ctxOk("apts")) {
+    for (const s of state.stays) {
+      const apt = (s.apartments && s.apartments.name) || "";
+      if (dOnly(s.check_in) === ds) rows.push({ ctx: "apts", ico: "arrive", time: "", tag: T("arriving", "пристига"),
+        title: s.guest_name, sub: [apt, s.source].filter(Boolean).join(" · "), open: `openStaySheet('${s.id}')` });
+      if (dOnly(s.check_out) === ds) rows.push({ ctx: "apts", ico: "leave", time: checkoutTimeFor(s.apartment_id),
+        tag: T("leaving", "заминува"), title: s.guest_name, sub: apt, open: `openStaySheet('${s.id}')` });
+    }
+    for (const l of state.leases || []) {
+      const m = ds.slice(0, 7);
+      if (rentDueDate(l, m) !== ds || rentLeft(l, m) <= 0.005) continue;
+      rows.push({ ctx: "apts", ico: "home", time: "", tag: T("rent", "кирија"), title: l.tenant_name,
+        sub: [aptName(l.apartment_id), fmt(rentLeft(l, m)) + " ден."].join(" · "), open: `openRentPay('${l.id}','${m}')` });
+    }
+  }
+  return rows.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+}
+// the tasks on a day, still to do — a repeating one counted on each day it comes round
+const openOn = (ds) => state.tasks.filter((t) => taskInScope(t, state.ctxFilter) && occursOn(t, ds) && !isDoneOn(t, ds));
+// the day being looked at, if not today; a day that has since passed lets go
+const viewDay = () => (state.viewDay && state.viewDay > todayStr() ? state.viewDay : null);
+function setViewDay(ds) {
+  state.viewDay = ds && ds !== todayStr() && ds !== state.viewDay ? ds : null;
+  renderToday();
+  quickAddHint();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function renderTaskStrip() {
+  const el = $("tk-strip");
+  if (!el) return;
+  const sel = viewDay() || todayStr();
+  el.innerHTML = Array.from({ length: 7 }, (_, i) => {
+    const ds = backDays(-i);
+    const n = openOn(ds).length + dayExtrasOn(ds).length;
+    return `<button class="${i === 0 ? "today" : ""} ${ds === sel ? "on" : ""}" onclick="setViewDay('${ds}')"
+        aria-label="${wd(ds, "long")} ${dm(ds)}: ${n}">
+      <span class="ds-wd">${i === 0 ? T("Today", "Денес") : wd(ds)}</span>
+      <span class="ds-n">${Number(ds.slice(8, 10))}</span>
+      <span class="ds-c ${n ? "" : "none"}">${n || "·"}</span></button>`;
+  }).join("");
+}
+// one day ahead, on its own: its tasks, what else is on, and a way to add to it
+function renderDayView(ds) {
+  const today = todayStr();
+  const list = state.tasks.filter((t) => taskInScope(t, state.ctxFilter) && occursOn(t, ds))
+    .sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0) || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
+  const ex = dayExtrasOn(ds);
+  $("today-list").innerHTML = `<div class="sec-row"><div class="sec">${wd(ds, "long")} · ${dm(ds)} · ${list.length}</div>
+      <button class="chip sm" onclick="setViewDay(null)">${T("Back to today", "Назад на денес")}</button></div>`
+    + (list.length ? list.map(taskRow(today, ds)).join("")
+      : `<div class="empty" style="padding:22px 0">${T("Nothing on this day yet.", "Сè уште ништо за овој ден.")}</div>`)
+    + (ex.length ? `<div class="sec">${T("Also that day", "Исто тој ден")}</div>` + ex.map(extraRow).join("") : "")
+    + `<button class="btn ghost" onclick="openTaskSheetOn('${ds}')">+ ${T("Add a task for this day", "Додај задача за овој ден")}</button>`;
+  $("week-list").innerHTML = "";
+}
+function openTaskSheetOn(ds) {
+  openTaskSheet();
+  if ($("tk-date")) { $("tk-date").value = ds; tkWhenSync(); }
+}
+
 // Not a task, so there is no box to tick: an icon in its place says what it
 // is, and keeps its name in line with the tasks around it.
 function extraRow(r) {
@@ -1587,6 +1675,8 @@ function renderToday() {
   const today = todayStr();
   const q = (($("tk-search") || {}).value || "").trim().toLowerCase();
   renderCtxChips();
+  renderTaskStrip();
+  if (!q && viewDay()) return renderDayView(viewDay());
   if (q) {
     const hits = state.tasks.filter((t) => taskInScope(t, state.ctxFilter) && (
       (t.title || "").toLowerCase().includes(q) || (t.notes || "").toLowerCase().includes(q) ||
@@ -1655,16 +1745,25 @@ function renderToday() {
   // what is coming
   const horizon = state.horizon || 7;
   const days = Array.from({ length: horizon }, (_, i) => backDays(-(i + 1)));
-  // Something that comes round every day would put the same row under every
-  // day below. It is said once, above them, instead.
-  const daily = state.tasks.filter((t) => vis(t) && t.recurrence && days.every((ds) => occursOn(t, ds)));
+  // Something that comes round more than once in the window — every day, or
+  // Tue, Thu and Sat — would put the same row under each of its days below.
+  // It is said once, above them, by how it repeats, instead.
+  const daily = state.tasks.filter((t) => vis(t) && t.recurrence && days.filter((ds) => occursOn(t, ds)).length > 1);
   let week = `<div class="sec-row"><div class="sec">${T("Upcoming", "Претстојни")}</div><div class="chips">
     ${[7, 30].map((n) => `<button class="chip sm ${horizon === n ? "on" : ""}" onclick="state.horizon=${n};renderToday()">${n} ${T("days", "дена")}</button>`).join("")}
   </div></div>`;
-  if (daily.length) {
-    week += `<div class="tk-daily">${ICON.repeat}<span>${T("Every day", "Секој ден")}:</span>${daily.map((t, i) =>
+  // one line per rhythm, every day first
+  const rhythms = new Map();
+  for (const t of daily.slice().sort((a, b) => (a.recurrence === "daily" ? 0 : 1) - (b.recurrence === "daily" ? 0 : 1)
+    || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"))) {
+    const k = repeatLabel(t);
+    if (!rhythms.has(k)) rhythms.set(k, []);
+    rhythms.get(k).push(t);
+  }
+  for (const [k, ts] of rhythms) {
+    week += `<div class="tk-daily">${ICON.repeat}<span>${esc(k)}:</span>${ts.map((t, i) =>
       `<button onclick="openTaskSheet('${t.id}')">${esc(t.title)}${t.due_time ? ` <span class="muted">${t.due_time.slice(0, 5)}</span>` : ""}</button>${
-        i < daily.length - 1 ? "<span>·</span>" : ""}`).join("")}</div>`;
+        i < ts.length - 1 ? "<span>·</span>" : ""}`).join("")}</div>`;
   }
   let any = daily.length > 0;
   days.forEach((ds, i) => {
