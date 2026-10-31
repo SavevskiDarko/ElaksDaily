@@ -333,6 +333,22 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .toast button{color:var(--amber);font-weight:700;font-size:13.5px;white-space:nowrap}
 .toast.on{opacity:1}
 .search{margin-bottom:10px}
+/* the line that adds a task in one go, and what it understood */
+.qa-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.qa-row input{flex:1;min-width:0}
+.qa-add{flex:none;width:46px;height:46px;border-radius:12px;background:var(--amber);color:var(--navy-deep);display:flex;align-items:center;justify-content:center}
+.qa-add svg{width:22px;height:22px}
+.qa-icon{flex:none;width:46px;height:46px;border-radius:12px;border:1px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center}
+.qa-icon svg{width:20px;height:20px}
+.qa-icon.on{color:var(--ink);border-color:var(--muted)}
+.qa-hint{font-size:12.5px;color:var(--muted);margin:-2px 2px 10px}
+.qa-hint:empty{display:none}
+.qa-hint b{color:var(--ink);font-weight:600}
+/* overdue, folded to a line when there is a pile of it */
+.late-line{display:flex;align-items:center;gap:10px;cursor:pointer;border-color:var(--danger)}
+.late-line .late-n{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--danger)}
+.late-line .late-what{flex:1;min-width:0;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.late-line .chev{color:var(--muted)}
 #loadbar{background:var(--danger-bg);color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
   align-items:center;gap:10px;border-bottom:1px solid var(--line)}
 #loadbar button{font-weight:700;text-decoration:underline;flex:none}
@@ -521,7 +537,17 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 
   <!-- TODAY -->
   <div class="view" id="v-today">
-    <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()">
+    <div class="qa-row">
+      <input id="tk-quick" placeholder="Add: Call Marko tomorrow 10" enterkeyhint="done" autocomplete="off"
+        onkeydown="quickAddKey(event)" oninput="quickAddHint()">
+      <!-- an arrow, not a second +: this one saves the line, the round + opens the full form -->
+      <button class="qa-add" onclick="quickAdd()" aria-label="Add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button>
+      <button class="qa-icon" id="tk-search-btn" onclick="toggleTaskSearch()" aria-label="Search"><svg viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+    </div>
+    <div class="qa-hint" id="tk-quick-hint"></div>
+    <input class="search" id="tk-search" placeholder="Search tasks…" oninput="renderToday()" style="display:none">
     <div class="chips" id="ctx-filter" style="margin-bottom:12px"></div>
     <div id="today-list"></div>
     <div id="week-list"></div>
@@ -960,7 +986,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261031-120000";
+const BUILD = "20261031-160000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1254,7 +1280,14 @@ function occursOn(t, dateStr) {
   return false;
 }
 
-const MISS_LOOKBACK = 30;
+// How far back a missed repeat is still asked about. A habit's misses are in
+// its record and are not chased here; a daily routine only its last day, as
+// the day before that has passed; anything else for a week, then it lets go.
+function missLookback(t) {
+  if (isHabit(t)) return 0;
+  if (t.recurrence === "daily") return Math.max(1, parseInt(t.recur_every) || 1);
+  return 7;
+}
 
 // "Mine" means what I could pick up: assigned to me, or to nobody.
 const taskInScope = (t, ctx) =>
@@ -1268,7 +1301,7 @@ function taskBuckets(today, ctx) {
   for (const t of state.tasks) {
     if (!taskInScope(t, ctx)) continue;
     if (t.recurrence) {
-      const m = missedDates(t, today, MISS_LOOKBACK);
+      const m = missedDates(t, today, missLookback(t));
       if (m.length) missed.push({ t, dates: m });
     } else if (!t.done && t.due_date && t.due_date < today) overdue.push(t);
     else if (!t.done && !t.due_date) undated.push(t);
@@ -1368,6 +1401,67 @@ function renderCtxChips() {
     + `<button class="chip ${state.mineOnly ? "on" : ""}" onclick="state.mineOnly=!state.mineOnly;renderToday()">Mine</button>`
     + ((state.perm.owner && (state.people || []).length > 1)
         ? `<button class="chip" onclick="openTeamWork()">${T("Team", "Тим")} ›</button>` : "");
+}
+/* ---------- adding a task in one line ----------
+   Typed as it would be said: "Call Marko tomorrow 10:00 elaks". The words
+   the voice entry understands — a day, a time, an area, "important" — are
+   taken out and the rest is the title. With no day it is for today; with a
+   time it reminds at that time. */
+function quickAddParse() {
+  const raw = (($("tk-quick") || {}).value || "").trim();
+  if (!raw) return null;
+  const p = parseSpoken(raw);
+  if (!p.title) return null;
+  const ctx = p.context && myCtx().includes(p.context) ? p.context
+    : state.ctxFilter !== "all" && myCtx().includes(state.ctxFilter) ? state.ctxFilter : defaultCtx();
+  return { ...p, context: ctx, due_date: p.due_date || todayStr() };
+}
+// what will be saved, said under the line as it is typed
+function quickAddHint() {
+  const el = $("tk-quick-hint");
+  if (!el) return;
+  const p = quickAddParse();
+  if (!p) { el.innerHTML = ""; return; }
+  const day = p.due_date === todayStr() ? T("today", "денес")
+    : p.due_date === backDays(-1) ? T("tomorrow", "утре") : wd(p.due_date) + " " + dm(p.due_date);
+  el.innerHTML = `${T("Adds", "Додава")} <b>${esc(p.title)}</b> · ${day}${p.due_time ? " " + p.due_time : ""}`
+    + ` · ${CTX[p.context]}${p.priority ? " · ★" : ""}${p.due_time ? " · " + T("reminds then", "потсетува тогаш") : ""}`;
+}
+function quickAddKey(e) {
+  if (e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();
+  quickAdd();
+}
+let quickBusy = false;
+async function quickAdd() {
+  const p = quickAddParse();
+  if (!p) { $("tk-quick").focus(); return toast(T("Type the task first", "Прво напиши ја задачата")); }
+  if (quickBusy) return;
+  quickBusy = true;
+  const row = {
+    title: p.title, context: p.context, due_date: p.due_date, due_time: p.due_time || null,
+    remind: !!p.due_time, remind_before: 0, priority: !!p.priority,
+    ...(p.context === "personal" ? { owner_uid: state.uid } : {}),
+  };
+  let made;
+  try { made = await dbq(db.from("tasks").insert(row).select().single(), T("Task not saved", "Задачата не е зачувана")); }
+  catch { quickBusy = false; return; }
+  quickBusy = false;
+  $("tk-quick").value = ""; quickAddHint();
+  await refreshAll(["tasks"]); renderToday(); updateBadges();
+  toastUndo(T("Added", "Додадено") + " · " + p.title, async () => {
+    await db.from("tasks").delete().eq("id", made.id);
+    await refreshAll(["tasks"]); renderToday(); updateBadges();
+  });
+}
+// search is one tap away rather than a second box above the list
+function toggleTaskSearch() {
+  const el = $("tk-search"), btn = $("tk-search-btn");
+  const show = el.style.display === "none";
+  el.style.display = show ? "" : "none";
+  btn.classList.toggle("on", show);
+  if (show) el.focus();
+  else if (el.value) { el.value = ""; renderToday(); }
 }
 // A search result needs its date and, if finished, when — the plain row shows neither.
 const searchRow = (today) => (t) => {
@@ -1506,8 +1600,19 @@ function renderToday() {
   // what else is happening today, and only then what has no day yet — which
   // used to sit above today and push it off the screen.
   let html = state.loading ? "" : dayCard(B);
-  if (overdue.length || missed.length) {
-    html += `<div class="sec-row"><div class="sec" style="color:var(--danger)">${T("Overdue", "Задоцнети")} · ${overdue.length + missed.length}</div>
+  // A pile of late things used to push today off the screen. Two or fewer are
+  // shown as they are; more fold into one line that opens.
+  const lateN = overdue.length + missed.length;
+  const fold = lateN > 2 && !state.showLate;
+  if (fold) {
+    const names = [...overdue.map((t) => t.title), ...missed.map((m) => m.t.title)];
+    html += `<div class="card late-line" role="button" tabindex="0" onclick="state.showLate=true;renderToday()">
+      <span class="late-n">${lateN}</span><b style="color:var(--danger)">${T("overdue", "задоцнети")}</b>
+      <span class="late-what">${esc(names.slice(0, 3).join(" · "))}</span><span class="chev">›</span></div>`;
+  } else if (lateN) {
+    html += `<div class="sec-row"><div class="sec ${lateN > 2 ? "tapp" : ""}" style="color:var(--danger)" ${lateN > 2
+      ? `role="button" tabindex="0" onclick="state.showLate=false;renderToday()"` : ""}>${T("Overdue", "Задоцнети")} · ${lateN}${
+      lateN > 2 ? ` <span class="muted" style="font-weight:400">▾</span>` : ""}</div>
       ${overdue.length ? `<button class="chip sm" onclick="moveAllOverdue()">${T("Move all to today", "Помести ги на денес")}</button>` : ""}
     </div>` + overdue.map(row).join("") + missed.map(missedRow).join("");
   }
@@ -1618,6 +1723,16 @@ async function skipOccurrence(id, day) {
   toast(T("Marked as missed", "Означено како пропуштено"));
 }
 
+// Which choice of the Repeat list a task is: weekdays, the last day and
+// yearly are kept as weekly, monthly on the 31st and every twelve months.
+function recKind(t) {
+  if (!t || !t.recurrence) return "";
+  const n = Math.max(1, parseInt(t.recur_every) || 1);
+  if (t.recurrence === "weekly" && n === 1 && recurDays(t).slice().sort().join() === "1,2,3,4,5") return "weekdays";
+  if (t.recurrence === "monthly" && n % 12 === 0) return "yearly";
+  if (t.recurrence === "monthly" && (t.recur_dom || 0) >= 31) return "monthly-last";
+  return t.recurrence;
+}
 // How a task repeats, said the way you would say it.
 const ordEn = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : (["th", "st", "nd", "rd"][n % 10] || "th"));
 const ordMk = (n) => n + "-" + ([11, 12, 17, 18].includes(n % 100) ? "ти" : ({ 1: "ви", 2: "ри", 7: "ми", 8: "ми" }[n % 10] || "ти"));
@@ -1633,6 +1748,15 @@ function repeatLabel(t) {
   }
   if (t.recurrence === "monthly") {
     const dom = t.recur_dom || parseInt(String(t.recur_from || t.due_date || "").slice(8, 10)) || 1;
+    if (n % 12 === 0) {
+      const from = String(t.recur_from || t.due_date || todayStr()).slice(0, 7), y = n / 12;
+      const when = langMk() ? `${dom} ${MONTHS_MK[Number(from.slice(5, 7)) - 1].toLowerCase()}`
+        : `${dom} ${monthIn("en", from).slice(0, 3)}`;
+      return y === 1 ? T(`Every year on ${when}`, `Секоја година на ${when}`)
+        : T(`Every ${y} years on ${when}`, `Секои ${y} години на ${when}`);
+    }
+    if (dom >= 31) return n === 1 ? T("Monthly on the last day", "Месечно, последниот ден")
+      : T(`Every ${n} months on the last day`, `Секои ${n} месеци, последниот ден`);
     return n === 1 ? T(`Monthly on the ${ordEn(dom)}`, `Месечно на ${ordMk(dom)}`)
       : T(`Every ${n} months on the ${ordEn(dom)}`, `Секои ${n} месеци на ${ordMk(dom)}`);
   }
@@ -1930,21 +2054,33 @@ function openTaskSheet(id) {
       ${[[today, T("Today", "Денес")], [backDays(-1), T("Tomorrow", "Утре")], [backDays(-7), T("Next week", "Следна недела")], ["", T("No date", "Без датум")]]
         .map(([v, l]) => `<button class="chip sm" data-v="${v}" onclick="tkWhen('${v}')">${l}</button>`).join("")}
     </div>
-    <div class="more" id="tk-more" ${(t.recurrence || t.remind || t.priority || t.client_id || t.apartment_id || t.photo_thumb || t.assigned_to) ? 'data-open="1"' : ""}>
+    <!-- with a time, the reminder sits right here: it used to hide under More options -->
+    <div id="tk-rem-row" style="display:none">
+      <label>${T("Remind me", "Потсети ме")}</label>
+      <div class="chips wrap" id="tk-before" ${id ? "" : 'data-fresh="1"'}>
+        ${REMIND.map(([v, l]) => `<button class="chip ${remindNow === v ? "on" : ""}" data-b="${v}"
+          onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');delete this.parentNode.dataset.fresh;tkRemChanged()">${l}</button>`).join("")}
+      </div>
+      <p class="muted" style="font-size:12.5px;margin-top:4px" id="tk-rem-hint"></p>
+    </div>
+    <div class="more" id="tk-more" ${(t.recurrence || t.priority || t.client_id || t.apartment_id || t.photo_thumb || t.assigned_to) ? 'data-open="1"' : ""}>
     <button class="morebtn" role="button" tabindex="0" onclick="toggleMore('tk-more')">
       <span>${T("More options", "Повеќе опции")}</span><span class="chev">▾</span></button>
     <div class="morebody">
     <label>Repeat</label>
-    <select id="tk-rec" onchange="tkRecChanged()">
-      <option value="">${T("Never", "Никогаш")}</option>
-      <option value="daily" ${t.recurrence === "daily" ? "selected" : ""}>${T("Daily", "Дневно")}</option>
-      <option value="weekly" ${t.recurrence === "weekly" ? "selected" : ""}>${T("Weekly, on the days you pick", "Неделно, во избраните денови")}</option>
-      <option value="monthly" ${t.recurrence === "monthly" ? "selected" : ""}>${T("Monthly, on that date", "Месечно, на тој датум")}</option>
+    <select id="tk-rec" onchange="tkRecChanged()">${[["", T("Never", "Никогаш")], ["daily", T("Daily", "Дневно")],
+      ["weekdays", T("Every weekday (Mon–Fri)", "Секој работен ден (пон–пет)")],
+      ["weekly", T("Weekly, on the days you pick", "Неделно, во избраните денови")],
+      ["monthly", T("Monthly, on that date", "Месечно, на тој датум")],
+      ["monthly-last", T("Monthly, on the last day", "Месечно, последниот ден")],
+      ["yearly", T("Yearly, on that date", "Годишно, на тој датум")]]
+      .map(([v, l]) => `<option value="${v}" ${recKind(t) === v ? "selected" : ""}>${l}</option>`).join("")}
     </select>
     <div id="tk-every" style="display:none">
       <div class="grid2">
         <div><label>Every</label>
-          <div class="row"><input id="tk-int" type="number" min="1" max="99" value="${t.recur_every || 1}" style="flex:1">
+          <div class="row"><input id="tk-int" type="number" min="1" max="99" value="${recKind(t) === "yearly"
+            ? Math.max(1, Math.round((t.recur_every || 12) / 12)) : (t.recur_every || 1)}" style="flex:1">
             <span class="muted nw" id="tk-int-unit"></span></div></div>
         <div><label>Until (opt.)</label><input id="tk-until" type="date" value="${t.recur_until || ""}"></div>
       </div>
@@ -1960,12 +2096,6 @@ function openTaskSheet(id) {
         `<button class="chip ${recurDays(t).includes(i) ? "on" : ""}" data-d="${i}"
           onclick="this.classList.toggle('on')">${wd(new Date(2026, 0, 4 + i))}</button>`).join("")}</div>
     </div>
-    <label>${T("Remind me, how long before", "Потсети ме, колку порано")}</label>
-    <div class="chips wrap" id="tk-before" ${id ? "" : 'data-fresh="1"'}>
-      ${REMIND.map(([v, l]) => `<button class="chip ${remindNow === v ? "on" : ""}" data-b="${v}"
-        onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');delete this.parentNode.dataset.fresh;tkRemChanged()">${l}</button>`).join("")}
-    </div>
-    <p class="muted" style="font-size:12.5px;margin-top:4px" id="tk-rem-hint"></p>
     <div class="row" style="margin-top:12px">
       <button class="clbox ${t.priority ? "on" : ""}" id="tk-prio"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2605':''">${t.priority ? "\u2605" : ""}</button>
@@ -2108,6 +2238,7 @@ function tkRemChanged() {
   if (!hint) return;
   // a new task given a time is reminded at that time, until a choice is made
   const box = $("tk-before"), given = ($("tk-time") || {}).value;
+  if ($("tk-rem-row")) $("tk-rem-row").style.display = given ? "" : "none";
   if (box && box.dataset.fresh && given && tkRemindMins() < 0) {
     box.querySelectorAll(".chip").forEach((x) => x.classList.toggle("on", x.dataset.b === "0"));
   }
@@ -2130,7 +2261,8 @@ function tkRecChanged() {
   const rec = $("tk-rec").value;
   const weekly = rec === "weekly";
   if ($("tk-every")) $("tk-every").style.display = rec ? "" : "none";
-  if ($("tk-int-unit")) $("tk-int-unit").textContent = rec === "daily" ? T("days", "дена") : rec === "weekly" ? T("weeks", "недели") : T("months", "месеци");
+  if ($("tk-int-unit")) $("tk-int-unit").textContent = rec === "daily" ? T("days", "дена")
+    : rec === "weekly" || rec === "weekdays" ? T("weeks", "недели") : rec === "yearly" ? T("years", "години") : T("months", "месеци");
   box.style.display = weekly ? "" : "none";
   if (weekly && !box.querySelector(".chip.on")) {
     const d = new Date(($("tk-date").value || todayStr()) + "T12:00").getDay();
@@ -2175,9 +2307,15 @@ function clAdd(id) {
 }
 async function saveTask(id) {
   const d = new Date(($("tk-date").value || todayStr()) + "T12:00");
-  const rec = $("tk-rec").value || null;
+  // the three newer choices are kept in the columns that were already there:
+  // weekdays are weekly on Mon–Fri, the last day is the 31st (which every
+  // month rounds down to its own last day), and a year is twelve months
+  const kind = $("tk-rec").value || null;
+  const rec = kind === "weekdays" ? "weekly" : kind === "monthly-last" || kind === "yearly" ? "monthly" : kind;
+  const every = Math.max(1, parseInt(($("tk-int") || {}).value) || 1);
   let days = [];
-  if (rec === "weekly") {
+  if (kind === "weekdays") days = [1, 2, 3, 4, 5];
+  else if (rec === "weekly") {
     days = [...$("tk-dow").querySelectorAll(".chip.on")].map((b) => parseInt(b.dataset.d));
     if (!days.length) days = [d.getDay()];
     days.sort((a, b) => a - b);
@@ -2194,8 +2332,8 @@ async function saveTask(id) {
     recurrence: rec,
     recur_dow: rec === "weekly" ? days[0] : null,
     recur_days: rec === "weekly" ? days : null,
-    recur_dom: rec === "monthly" ? d.getDate() : null,
-    recur_every: rec ? Math.max(1, parseInt(($("tk-int") || {}).value) || 1) : 1,
+    recur_dom: rec === "monthly" ? (kind === "monthly-last" ? 31 : d.getDate()) : null,
+    recur_every: rec ? (kind === "yearly" ? every * 12 : every) : 1,
     recur_from: rec ? ($("tk-date").value || todayStr()) : null,
     recur_until: rec ? (($("tk-until") || {}).value || null) : null,
     // only a repeating task can be a habit, and the field is only sent once it exists
@@ -9279,6 +9417,7 @@ const MK = {
   "All": "Сите", "Mine": "Мои", "Work": "Работа", "Personal": "Лично",
   "Done today": "Завршени денес",
   "New task": "Нова задача", "Save task": "Зачувај задача",
+  "Add: Call Marko tomorrow 10": "Додај: Јави се на Марко утре",
   "Edit before saving": "Уреди пред зачувување", "Say it again": "Кажи повторно",
   "Listening…": "Слушам…", "Done speaking": "Готово",
   "Search tasks…": "Барај задачи…", "Notes": "Белешка",
