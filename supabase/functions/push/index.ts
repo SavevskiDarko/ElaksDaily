@@ -514,6 +514,42 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error("assignment notices", e); }
 
+  // ---- 10. work you gave someone, finished ----
+  // Every tick is a row in task_completions with who made it. Since the last
+  // look, a delegated task ticked by anyone but the person who gave it tells
+  // that person. The first run only marks where to start from, so old ticks
+  // are not announced; the mark moves to the newest tick seen, so none is
+  // told twice and none is missed between two runs.
+  try {
+    const { data: mk } = await db.from("app_settings").select("value").eq("key", "done_told_at").maybeSingle();
+    const since = String(mk?.value ?? "").replace(/"/g, "");
+    let mark = since || new Date().toISOString();
+    if (since) {
+      const { data: ticks } = await db.from("task_completions").select("task_id, done_by, created_at, skipped")
+        .gt("created_at", since).order("created_at");
+      const real = (ticks ?? []).filter((c: any) => !c.skipped && c.done_by);
+      if (real.length) {
+        const ids = [...new Set(real.map((c: any) => c.task_id))];
+        const { data: ts } = await db.from("tasks").select("id, title, assigned_to, created_by").in("id", ids);
+        const { data: people } = await db.from("user_roles").select("user_id, role, display_name");
+        const nameOf = (u: string) => (people ?? []).find((p: any) => p.user_id === u)?.display_name || "Некој";
+        const owners = (people ?? []).filter((p: any) => p.role === "owner").map((p: any) => p.user_id);
+        for (const c of real) {
+          const t = (ts ?? []).find((x: any) => x.id === c.task_id);
+          if (!t || !t.assigned_to) continue;
+          // who gave it: whoever made the task, or the owner for one made before that was kept
+          const givers: string[] = t.created_by ? [t.created_by] : owners;
+          const tell = givers.filter((g) => g !== c.done_by);
+          if (!tell.length) continue;
+          await sendToAll(`${nameOf(c.done_by)} заврши задача`, `\u2713 ${t.title}`, `done-${t.id}`,
+            (r: any) => tell.includes(r.user_id), null);
+        }
+      }
+      if ((ticks ?? []).length) mark = ticks![ticks!.length - 1].created_at;
+    }
+    if (mark !== since) await db.from("app_settings").upsert({ key: "done_told_at", value: mark }, { onConflict: "key" });
+  } catch (e) { console.error("done notices", e); }
+
   return new Response("ok");
 });
 

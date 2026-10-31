@@ -139,6 +139,17 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 
 /* ---- tasks ---- */
 .task{display:flex;align-items:center;gap:11px}
+/* A row can be swiped: right to finish, left for later. What it will do shows
+   in the gap it leaves, and turns solid once far enough to count. Held down,
+   it opens its menu — so no text selection or callout in the way. */
+.task[data-id]{position:relative;touch-action:pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.task.sw-back{transition:transform .2s ease}
+.task.sw-r::before,.task.sw-l::after{content:attr(data-sw);position:absolute;top:0;bottom:0;width:100vw;display:flex;align-items:center;
+  font-weight:700;font-size:14px;color:#fff;border-radius:var(--r);opacity:.55}
+.task.sw-r::before{right:calc(100% + 6px);justify-content:flex-end;padding-right:16px;background:var(--personal)}
+.task.sw-l::after{left:calc(100% + 6px);justify-content:flex-start;padding-left:16px;background:var(--navy)}
+.task.sw-go::before,.task.sw-go::after{opacity:1}
+#today-list,#week-list{overflow-x:clip}
 /* The box is drawn wherever a task can be ticked, Home included — it used to
    be styled only inside a task row, which left Home's boxes invisible but
    still live. It is drawn small and answers a thumb: a near miss used to open
@@ -986,7 +997,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261031-160000";
+const BUILD = "20261031-200000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1065,6 +1076,12 @@ async function runTaskIntent(id, action) {
     await refreshAll(["tasks"]); tab("today"); render();
     toast("Snoozed until " + hhmm);
     return;
+  }
+  if (action === "tomorrow") {
+    tab("today");
+    // a repeating task does not move; today's turn is let go instead
+    if (t.recurrence) return skipOccurrence(id, todayStr());
+    return moveTaskQuiet(id, backDays(-1));
   }
   tab("today"); openTaskSheet(id);
 }
@@ -1700,6 +1717,126 @@ async function moveTask(id, date) {
   toast(date ? T("Moved to ", "Поместено на ") + wd(date) + " " + dmy(date) : T("Date removed", "Датумот е тргнат"));
 }
 
+/* ---------- swipe and hold ----------
+   Swipe a task right to finish it. Swipe it left for later: a one-off moves
+   a day on — to tomorrow from today or earlier — and a repeating one skips
+   that day. Hold it for the rest: when, edit, delete. Only a clear sideways
+   move counts as a swipe, so scrolling the list is untouched. */
+const SW_GO = 90;                         // how far before letting go acts
+let sw = null, heldAt = 0;
+// what a left swipe will do to this task on this day
+function laterOf(t, day) {
+  if (t.recurrence) return { label: T("Skip", "Прескокни"), skip: true };
+  const base = t.due_date && t.due_date > todayStr() ? t.due_date : todayStr();
+  const d = new Date(base + "T12:00"); d.setDate(d.getDate() + 1);
+  const to = d.toLocaleDateString("sv-SE");
+  return { label: base === todayStr() ? T("Tomorrow", "Утре") : "+1 " + T("day", "ден"), to };
+}
+function swStart(e) {
+  const row = e.target.closest(".task[data-id]");
+  if (!row || e.touches.length !== 1) return;
+  const p = e.touches[0];
+  sw = { row, x: p.clientX, y: p.clientY, dx: 0, on: false };
+  // held still for half a second: the menu
+  sw.hold = setTimeout(() => {
+    if (!sw || sw.on) return;
+    if (Date.now() - heldAt < 800) { sw = null; return; }    // the phone's own hold got there first
+    heldAt = Date.now();
+    try { navigator.vibrate && navigator.vibrate(12); } catch {}
+    openTaskMenu(row.dataset.id, row.dataset.day);
+    sw = null;
+  }, 500);
+}
+function swMove(e) {
+  if (!sw) return;
+  const p = e.touches[0], dx = p.clientX - sw.x, dy = p.clientY - sw.y;
+  if (!sw.on) {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    clearTimeout(sw.hold);
+    if (Math.abs(dy) >= Math.abs(dx)) { sw = null; return; }       // scrolling
+    sw.on = true;
+    const t = state.tasks.find((x) => x.id === sw.row.dataset.id);
+    sw.t = t;
+    sw.later = t ? laterOf(t, sw.row.dataset.day) : null;
+  }
+  // a finished row has nothing to finish
+  const done = sw.row.classList.contains("done");
+  sw.dx = dx > 0 && done ? 0 : dx;
+  sw.row.style.transform = `translateX(${sw.dx}px)`;
+  sw.row.classList.toggle("sw-r", sw.dx > 0);
+  sw.row.classList.toggle("sw-l", sw.dx < 0);
+  sw.row.classList.toggle("sw-go", Math.abs(sw.dx) >= SW_GO);
+  sw.row.dataset.sw = sw.dx > 0 ? "\u2713 " + T("Done", "Готово") : sw.later ? sw.later.label + " \u2192" : "";
+}
+async function swEnd() {
+  if (!sw) return;
+  const s0 = sw; sw = null;
+  clearTimeout(s0.hold);
+  if (!s0.on) return;
+  const { row, dx, t } = s0;
+  const go = Math.abs(dx) >= SW_GO && t;
+  row.classList.add("sw-back");
+  row.style.transform = go ? `translateX(${dx > 0 ? 110 : -110}%)` : "";
+  setTimeout(() => { row.classList.remove("sw-back", "sw-r", "sw-l", "sw-go"); if (!go) row.style.transform = ""; }, 220);
+  if (!go) return;
+  const day = row.dataset.day;
+  if (dx > 0) return toggleTask(t.id, day);
+  if (s0.later.skip) return skipOccurrence(t.id, day);
+  return moveTaskQuiet(t.id, s0.later.to);
+}
+// moved by a swipe or from the menu: no sheet to close, and a way back
+async function moveTaskQuiet(id, date) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const was = t.due_date || null;
+  try { await dbq(db.from("tasks").update({ due_date: date || null, reminded_on: null }).eq("id", id), T("Not moved", "Не е поместено")); }
+  catch { render(); return; }
+  await refreshAll(["tasks"]); render();
+  toastUndo(T("Moved to ", "Поместено на ") + wd(date) + " " + dm(date), async () => {
+    await db.from("tasks").update({ due_date: was }).eq("id", id);
+    await refreshAll(["tasks"]); render();
+  });
+}
+// everything you can do to a task without opening it
+function openTaskMenu(id, day) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  day = day || todayStr();
+  const done = isDoneOn(t, day);
+  const b = (label, call, cls = "ghost") => `<button class="btn ${cls}" onclick="closeSheet();setTimeout(()=>{${call}},240)">${label}</button>`;
+  const plus = (n) => { const d = new Date(todayStr() + "T12:00"); d.setDate(d.getDate() + n); return d.toLocaleDateString("sv-SE"); };
+  openSheet(`<h2>${esc(t.title)}</h2>
+    <p class="muted">${t.recurrence ? repeatLabel(t) + " · " + wd(day) + " " + dm(day)
+      : t.due_date ? T("Due", "Рок") + " " + wd(t.due_date) + " " + dmy(t.due_date) : T("No date", "Без датум")}</p>
+    ${b(done ? T("Not done after all", "Сепак не е завршено") : "\u2713 " + T("Done", "Готово"), `toggleTask('${id}','${day}')`, done ? "ghost" : "")}
+    ${t.recurrence
+      ? (!done ? b(T("Skip this day — it is not happening", "Прескокни го денов — нема да се случи"), `skipOccurrence('${id}','${day}')`) : "")
+      : !done ? `<div class="grid2">
+          ${b(T("Tomorrow", "Утре"), `moveTaskQuiet('${id}','${plus(1)}')`)}
+          ${b(T("Next week", "Следна недела"), `moveTaskQuiet('${id}','${plus(7)}')`)}
+        </div>
+        ${b(T("Pick a date…", "Избери датум…"), `moveTaskSheet('${id}')`)}` : ""}
+    ${b(T("Edit", "Уреди"), `openTaskSheet('${id}')`)}
+    <button class="btn danger" onclick="delTask('${id}')">${T("Delete", "Избриши")}</button>`);
+}
+// a hold must not also open the task once the finger lifts
+document.addEventListener("click", (e) => {
+  if (Date.now() - heldAt < 700 && e.target.closest(".task[data-id]")) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+document.addEventListener("touchstart", swStart, { passive: true });
+document.addEventListener("touchmove", swMove, { passive: true });
+document.addEventListener("touchend", swEnd);
+document.addEventListener("touchcancel", swEnd);
+// right-click on a computer, or a hold where the phone reports it this way
+document.addEventListener("contextmenu", (e) => {
+  const row = e.target.closest(".task[data-id]");
+  if (!row) return;
+  e.preventDefault();
+  if (Date.now() - heldAt < 800) return;               // already opened by the hold
+  heldAt = Date.now();
+  openTaskMenu(row.dataset.id, row.dataset.day);
+});
+
 // the morning triage: everything that slipped, brought forward at once
 async function moveAllOverdue() {
   const B = taskBuckets(todayStr(), state.ctxFilter);
@@ -1809,7 +1946,7 @@ const taskRow = (today, on) => (t) => {
       : `<span class="t-time">${label}</span>`)
     : (movable ? `<button class="t-when" onclick="moveTaskSheet('${t.id}')" aria-label="${
       t.due_date ? T("Move", "Помести") : T("Give it a date", "Стави датум")}">${ICON.calendar}</button>` : "");
-  return `<div class="card task ${done ? "done" : ""}">
+  return `<div class="card task ${done ? "done" : ""}" data-id="${t.id}" data-day="${day}">
     <button class="tick" onclick="toggleTask('${t.id}','${day}',this)" aria-label="${T("Done", "Готово")}">${done ? "✓" : ""}</button>
     <span class="led ${t.context}"></span>
     <div class="t-body" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">
@@ -1826,7 +1963,7 @@ const taskRow = (today, on) => (t) => {
 const missedRow = ({ t, dates }) => {
   const first = dates[0] === backDays(1) ? T("yesterday", "вчера") : `${wd(dates[0])} ${dm(dates[0])}`;
   const more = dates.length > 1 ? T(` · +${dates.length - 1} more`, ` · уште ${dates.length - 1}`) : "";
-  return `<div class="card task">
+  return `<div class="card task" data-id="${t.id}" data-day="${dates[0]}">
     <button class="tick" onclick="toggleTask('${t.id}','${dates[0]}',this)" aria-label="${T("Done", "Готово")}"></button>
     <span class="led ${t.context}"></span>
     <div class="t-body" role="button" tabindex="0" onclick="openTaskSheet('${t.id}')">
@@ -8826,6 +8963,18 @@ function renderHome() {
         ${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
     ${B.todays.length > 3 ? `<div class="hrow"><span class="muted">+ ${B.todays.length - 3} more</span><span class="muted">›</span></div>` : ""}
   </div>`;
+  // Work given to other people, one line each: what they have open, what is
+  // for today, what is late. Tap a line for their list.
+  const team = (state.people || []).filter((p) => p.user_id && p.user_id !== state.uid)
+    .map((p) => ({ p, w: personWork(p.user_id) })).filter(({ w }) => w.all.length);
+  if (team.length) {
+    html += `<div class="hcard"><h3>${T("Team", "Тим")}</h3>${team.map(({ p, w }) => `<div class="hrow tapp" role="button" tabindex="0"
+        onclick="openPersonWork('${p.user_id}')">
+      <span style="display:flex;align-items:center;gap:9px;min-width:0"><span class="who">${initials(p.display_name)}</span>
+        <span class="htxt">${esc(p.display_name || T("Unnamed", "Без име"))}</span></span>
+      <span class="nw">${w.all.length} ${T("open", "отворени")}${w.today.length ? ` · ${w.today.length} ${T("today", "денес")}` : ""}${
+        w.overdue.length ? ` · <span class="hflag">${w.overdue.length} ${T("late", "доцнат")}</span>` : ""} ›</span></div>`).join("")}</div>`;
+  }
 
   if (state.perm.elaks) {
     const low = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock);
