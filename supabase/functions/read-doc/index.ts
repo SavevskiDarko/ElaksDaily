@@ -80,10 +80,14 @@ Deno.serve(async (req) => {
         "content-type": "application/json",
         "x-api-key": secret.value,
         "anthropic-version": "2023-06-01",
+        // a photo the model declines is tried again on the model Anthropic recommends for that case
+        "anthropic-beta": "server-side-fallback-2026-07-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 4000,
+        model: "claude-sonnet-5-5",
+        fallbacks: "default",
+        // it thinks before it answers, and that counts here too: room for a long note's lines
+        max_tokens: 16000,
         messages: [{
           role: "user",
           content: [
@@ -104,6 +108,14 @@ Deno.serve(async (req) => {
     }
 
     const out = await res.json();
+    if (out.stop_reason === "refusal") {
+      console.error("refused", JSON.stringify(out.stop_details ?? null).slice(0, 200));
+      return json({ error: "That photo could not be read — try another shot of the note." }, 422);
+    }
+    if (out.stop_reason === "max_tokens") {
+      console.error("cut short", JSON.stringify(out.usage ?? null));
+      return json({ error: "The note is too long to read in one go — photograph it in two halves." }, 422);
+    }
     const text = (out.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
     const cleaned = text.replace(/```json|```/g, "").trim();
     let parsed: any;
