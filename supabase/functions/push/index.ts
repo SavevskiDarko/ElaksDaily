@@ -2,9 +2,10 @@
 // Runs on a schedule (every 5 min). Sends:
 //  1. task reminders (tasks with remind=true, due today at/past due_time)
 //  2. daily digest at the configured hour (today's tasks + low stock)
-//  3. low-stock alerts (once per day per article)
+//  3. low stock: one message as articles reach their minimum
 //  …and further down: jobs — told to whoever is given one (?job=, from the
-//  app), and the evening before to everyone going somewhere tomorrow
+//  app), and the evening before to everyone going somewhere tomorrow — and
+//  money: invoices not paid on time, supplier bills coming due
 //
 // Secrets needed (supabase secrets set):
 //  VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (mailto:you@example.com)
@@ -47,7 +48,9 @@ const ownerSees = (r: any, t: any) => r.role === "owner" && !(t.apartment_id && 
 // How many phones it went to, how many had been retired by the push service
 // (dropped here; the app signs the phone up again when it is next opened),
 // and how many failed otherwise — those are logged, as they used to vanish.
-async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null, jobId: string | null = null) {
+// go: where the app opens when it is tapped — "order", "unpaid", "bills",
+// "invoice:<id>", "purchase:<id>" (a task or a job has taskId / jobId)
+async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null, jobId: string | null = null, go: string | null = null) {
   const { data: subs } = await db.from("push_subscriptions").select("*");
   const { data: rr } = await db.from("user_roles").select("*");
   const rowOf = new Map((rr ?? []).map((r) => [r.user_id, r]));
@@ -59,7 +62,7 @@ async function sendToAll(title: string, body: string, tag: string, allow: ((r: a
     }
     try {
       // 12h so a phone that is off or out of signal still receives it
-      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId, jobId }), { urgency: "high", TTL: 43200 });
+      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId, jobId, go }), { urgency: "high", TTL: 43200 });
       out.sent++;
     } catch (e: any) {
       if (e.statusCode === 404 || e.statusCode === 410) {
@@ -93,6 +96,20 @@ async function testPush(req: Request) {
   const out = await sendToAll("Centrala", "Проба: известувањата стигнуваат до овој телефон ✓", "test", (r: any) => r.user_id === uid);
   return json(out);
 }
+
+const money = (n: number) => Math.round(n).toLocaleString("en-US");
+// Client invoices still owed: not marked paid, not cancelled, and not covered
+// by payments on their offer (the app marks those paid; this is for any it
+// has not reached yet), with what is still owed on each.
+async function unpaidInvoices() {
+  const { data: inv } = await db.from("invoices").select("id, number, total, due_date, client_id, offer_id")
+    .is("paid_on", null).eq("cancelled", false);
+  const ids = [...new Set((inv ?? []).map((i: any) => i.offer_id).filter(Boolean))];
+  const { data: offs } = ids.length ? await db.from("offers").select("id, paid_amount").in("id", ids) : { data: [] };
+  const paid = (i: any) => parseFloat((offs ?? []).find((o: any) => o.id === i.offer_id)?.paid_amount ?? 0) || 0;
+  return (inv ?? []).map((i: any) => ({ ...i, owed: (parseFloat(i.total) || 0) - paid(i) })).filter((i: any) => i.owed > 0.005);
+}
+const billOwed = (p: any) => (parseFloat(p.total) || 0) - (parseFloat(p.paid_amount) || 0);
 
 // When and where a job is, said the way you would say it: "утре 09:00", "пет 13.11. 09:00".
 const WD_MK = ["нед", "пон", "вто", "сре", "чет", "пет", "саб"];
@@ -208,15 +225,29 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ---- 2. low stock (once per article per day) ----
+  // ---- 2. low stock: one message, as articles reach their minimum ----
+  // It used to be a message per article every day until restocked — five
+  // articles low, five messages every morning. Now an article is told once,
+  // as it reaches its minimum, with any others that did so in one message;
+  // back above it, its mark is cleared, so running low again is news again.
+  // The morning digest still counts what is low. Tapped, it opens the order list.
   const { data: stock } = await db.from("article_stock").select("*").eq("active", true);
-  const low = (stock ?? []).filter((a) =>
-    a.min_stock > 0 && a.stock <= a.min_stock && a.low_alerted_on !== today
-  );
-  for (const a of low) {
-    await sendToAll("Low stock", `${a.name}: ${a.stock} ${a.unit} (min. ${a.min_stock})`, `low-${a.id}`, (r) => r.role === "owner" || !!r.see_elaks);
-    await db.from("articles").update({ low_alerted_on: today }).eq("id", a.id);
-  }
+  const isLow = (a: any) => a.min_stock > 0 && a.stock <= a.min_stock;
+  try {
+    const fresh = (stock ?? []).filter((a: any) => isLow(a) && !a.low_alerted_on);
+    if (fresh.length) {
+      const allLow = (stock ?? []).filter(isLow).length;
+      const a = fresh[0];
+      const body = (fresh.length === 1 ? `${a.name}: ${a.stock} ${a.unit} (мин. ${a.min_stock})`
+        : fresh.slice(0, 4).map((x: any) => x.name).join(", ") + (fresh.length > 4 ? ` и уште ${fresh.length - 4}` : ""))
+        + (allLow > fresh.length ? ` · вкупно на минимум: ${allLow}` : "");
+      await sendToAll(fresh.length === 1 ? "Залиха на минимум" : `Залиха на минимум: ${fresh.length} артикли`, body,
+        "low-stock", (r) => r.role === "owner" || !!r.see_elaks, null, null, "order");
+      for (const x of fresh) await db.from("articles").update({ low_alerted_on: today }).eq("id", x.id);
+    }
+    for (const x of (stock ?? []).filter((a: any) => !isLow(a) && a.low_alerted_on))
+      await db.from("articles").update({ low_alerted_on: null }).eq("id", x.id);
+  } catch (e) { console.error("low stock", e); }
 
   // ---- 3. daily digest ----
   const { data: hourRow } = await db.from("app_settings").select("value").eq("key", "digest_hour").single();
@@ -259,6 +290,10 @@ Deno.serve(async (req) => {
     let body = lateN ? `${lateN} overdue · ` : "";
     body += `Work: ${byCtx("work")} · Elaks: ${byCtx("elaks")} · Personal: ${byCtx("personal")} · Apts: ${byCtx("apts")}`;
     if (lowCount) body += ` · Low stock: ${lowCount}`;
+    try {
+      const lateInv = (await unpaidInvoices()).filter((i: any) => i.due_date && i.due_date < today).length;
+      if (lateInv) body += ` · Overdue invoices: ${lateInv}`;
+    } catch (e) { console.error("digest invoices", e); }
     await sendToAll(`Good morning — ${open.length} today`, body, "digest", (r) => r.role === "owner");
     await db.from("app_settings").update({ value: today + "@" + hhmm }).eq("key", "digest_sent_on");
   }
@@ -595,6 +630,42 @@ Deno.serve(async (req) => {
     }
     if (mark !== since) await db.from("app_settings").upsert({ key: "done_told_at", value: mark }, { onConflict: "key" });
   } catch (e) { console.error("done notices", e); }
+
+  // ---- 12. money: invoices not paid on time, supplier bills coming due ----
+  // To the owner, once a day in the morning digest's window:
+  //  · each client invoice, the day after its due date passes with it unpaid
+  //  · each supplier bill not paid, two days before it is due and on the day
+  //  · on Mondays, everything still overdue, together
+  // Each opens what it is about: the invoice, the bill, the unpaid list.
+  try {
+    const { data: mk } = await db.from("app_settings").select("value").eq("key", "money_told_on").maybeSingle();
+    const told = String(mk?.value ?? "").replace(/"/g, "").slice(0, 10);
+    if (minutesPast >= 0 && minutesPast <= DIGEST_WINDOW_MIN && told !== today) {
+      const owner = (r: any) => r.role === "owner";
+      const unpaid = await unpaidInvoices();
+      const cids = [...new Set(unpaid.map((i: any) => i.client_id).filter(Boolean))];
+      const { data: cl } = cids.length ? await db.from("clients").select("id, name").in("id", cids) : { data: [] };
+      const nameOf = (id: string) => (cl ?? []).find((c: any) => c.id === id)?.name ?? "";
+      const yesterday = dayAfter(today, -1);
+      for (const i of unpaid.filter((x: any) => x.due_date === yesterday))
+        await sendToAll("Фактурата не е платена на рок", [i.number, nameOf(i.client_id), money(i.owed) + " ден."].filter(Boolean).join(" · "),
+          `inv-${i.id}`, owner, null, null, "invoice:" + i.id);
+      const { data: soon } = await db.from("purchases").select("id, supplier, doc_no, total, paid_amount, due_date")
+        .gte("due_date", today).lte("due_date", dayAfter(today, 2));
+      for (const p of (soon ?? []).filter((x: any) => billOwed(x) > 0.005 && (x.due_date === today || x.due_date === dayAfter(today, 2))))
+        await sendToAll(p.due_date === today ? "Сметка доспева денес" : "Сметка доспева за 2 дена",
+          [p.supplier, p.doc_no, money(billOwed(p)) + " ден."].filter(Boolean).join(" · "), `bill-${p.id}`, owner, null, null, "purchase:" + p.id);
+      if (now.getDay() === 1) {
+        const late = unpaid.filter((i: any) => i.due_date && i.due_date < today);
+        const { data: lb } = await db.from("purchases").select("id, total, paid_amount, due_date").lt("due_date", today);
+        const lateBills = (lb ?? []).filter((x: any) => billOwed(x) > 0.005);
+        const parts = [late.length ? `${late.length} ${late.length === 1 ? "фактура" : "фактури"} · ${money(late.reduce((s: number, i: any) => s + i.owed, 0))} ден.` : "",
+          lateBills.length ? `${lateBills.length} ${lateBills.length === 1 ? "сметка кон добавувач" : "сметки кон добавувачи"} · ${money(lateBills.reduce((s: number, x: any) => s + billOwed(x), 0))} ден.` : ""].filter(Boolean);
+        if (parts.length) await sendToAll("Неплатено по рок", parts.join(" · "), "money-week", owner, null, null, late.length ? "unpaid" : "bills");
+      }
+      await db.from("app_settings").upsert({ key: "money_told_on", value: today }, { onConflict: "key" });
+    }
+  } catch (e) { console.error("money reminders", e); }
 
   // ---- 11. tomorrow's jobs, the evening before ----
   // Once a day from 19:00, with the digest's three-hour window, everyone going

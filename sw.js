@@ -65,7 +65,7 @@ self.addEventListener("push", (e) => {
     icon: "./icon-192.png?v=3",
     badge: "./icon-192.png?v=3",
     vibrate: [100, 50, 100],
-    data: { taskId: data.taskId || null, jobId: data.jobId || null },
+    data: { taskId: data.taskId || null, jobId: data.jobId || null, go: data.go || null },
   };
   // A phone shows two buttons at most on Android: Done, and Snooze 1h during
   // the day or Tomorrow in the evening, when an hour on is no use. Where three
@@ -82,16 +82,18 @@ self.addEventListener("push", (e) => {
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const id = (e.notification.data || {}).taskId, jobId = (e.notification.data || {}).jobId;
+  const id = (e.notification.data || {}).taskId, jobId = (e.notification.data || {}).jobId, go = (e.notification.data || {}).go;
   // The session lives in the page, not here, so the action is handed to the
   // app through the URL and carried out the moment it opens or focuses.
   // A job opens on its card ("list": tomorrow's jobs).
-  const url = jobId ? `./?job=${encodeURIComponent(jobId)}` : id ? `./?task=${id}${e.action ? "&do=" + e.action : ""}` : "./";
+  // Money and stock open where they are about ("go": an invoice, a bill, the order list).
+  const url = jobId ? `./?job=${encodeURIComponent(jobId)}` : go ? `./?go=${encodeURIComponent(go)}`
+    : id ? `./?task=${id}${e.action ? "&do=" + e.action : ""}` : "./";
   e.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const c of list) {
         if ("focus" in c) {
-          c.postMessage({ centrala: true, taskId: id || null, jobId: jobId || null, action: e.action || "open" });
+          c.postMessage({ centrala: true, taskId: id || null, jobId: jobId || null, go: go || null, action: e.action || "open" });
           return c.focus();
         }
       }

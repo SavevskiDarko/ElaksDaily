@@ -831,7 +831,7 @@ const PAYMENTS = { limit: 400 };
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
 async function dbq(q, failMsg) {
   if (offlineNow()) {
-    toast(T("No signal — not saved. Only tasks save without a signal.", "Нема сигнал — не е зачувано. Без сигнал се зачувуваат само задачите."));
+    toast(T("No signal — not saved. Only tasks and jobs save without a signal.", "Нема сигнал — не е зачувано. Без сигнал се зачувуваат само задачите и работите."));
     throw new Error("offline");
   }
   const { data, error } = await q;
@@ -839,23 +839,33 @@ async function dbq(q, failMsg) {
   return data;
 }
 
-/* ---------- tasks with no signal ----------
+/* ---------- tasks and jobs with no signal ----------
    On a site with no coverage a task is still added, ticked, moved, changed or
-   deleted. The change shows at once and waits on this phone, in order, until
-   there is a signal; then it goes up by itself. Only tasks: everything else
-   still needs the signal to save. The last tasks seen are kept on the phone
-   too, so the list is there even when the app opens with no signal.
-   Every change can safely be sent twice — a new task carries the id it was
+   deleted, and a job started, finished (its cable metres too), changed and
+   photographed. The change shows at once and waits on this phone, in order,
+   until there is a signal; then it goes up by itself. Everything else still
+   needs the signal to save. The last tasks and jobs seen are kept on the
+   phone too, so they are there even when the app opens with no signal.
+   Every change can safely be sent twice — a new row carries the id it was
    made with — so one that may or may not have arrived is simply sent again. */
 const OUTBOX = "centrala_outbox", KEPT = "centrala_kept", WHO = "centrala_who";
 let outbox = (() => { try { return JSON.parse(localStorage.getItem(OUTBOX) || "[]"); } catch { return []; } })();
 let sentLately = [];          // just sent: still laid over a load that may have left before they landed
 const ownChange = (o) => !o.uid || o.uid === state.uid;
-// counted as tasks, not as steps: a tick is two writes but one task
+// counted as tasks and jobs, not as steps: a tick is two writes but one task,
+// and finishing a job with its cable three writes but one job ("of")
 const opRows = (o) => [].concat(o.row);
-const opTasks = (o) => o.t === "tasks" ? (o.do === "insert" ? opRows(o).map((r) => r.id) : [].concat(o.id))
-  : o.t === "task_photos" ? [o.id || o.row.task_id] : opRows(o).map((r) => r.task_id);
-const waitingCount = () => new Set(outbox.filter(ownChange).flatMap(opTasks)).size;
+const opKeys = (o) => o.of ? [o.of]
+  : o.t === "tasks" ? (o.do === "insert" ? opRows(o).map((r) => "task:" + r.id) : [].concat(o.id).map((id) => "task:" + id))
+  : o.t === "task_photos" ? ["task:" + (o.id || o.row.task_id)] : opRows(o).map((r) => "task:" + r.task_id);
+const waitingKeys = () => new Set(outbox.filter(ownChange).flatMap(opKeys));
+const waitingCount = () => waitingKeys().size;
+// "2 tasks and 1 job"
+function countWords(keys) {
+  const all = [...keys], t = all.filter((k) => k.startsWith("task:")).length, j = all.filter((k) => k.startsWith("job:")).length;
+  return T([t ? `${t} task${t > 1 ? "s" : ""}` : "", j ? `${j} job${j > 1 ? "s" : ""}` : ""].filter(Boolean).join(" and "),
+    [t ? `${t} ${t > 1 ? "задачи" : "задача"}` : "", j ? `${j} ${j > 1 ? "работи" : "работа"}` : ""].filter(Boolean).join(" и "));
+}
 function keepOutbox() {
   try { localStorage.setItem(OUTBOX, JSON.stringify(outbox)); return true; } catch { return false; }
 }
@@ -896,6 +906,13 @@ function applyOp(o) {
       state.completions = state.completions.filter((c) => c.task_id !== o.id);
     }
   }
+  // a job, and the offer its metres go on: rows as they are, changed in place
+  if (o.t === "jobs" || o.t === "offers") {
+    const ids = [].concat(o.id);
+    if (o.do === "insert") for (const r of opRows(o)) { if (!state[o.t].some((x) => x.id === r.id)) state[o.t].push({ ...r }); }
+    if (o.do === "update") for (const x of state[o.t]) if (ids.includes(x.id)) Object.assign(x, JSON.parse(JSON.stringify(o.set)));
+    if (o.do === "delete") state[o.t] = state[o.t].filter((x) => x.id !== o.id);
+  }
   if (o.t === "task_completions") {
     const key = (c) => c.task_id + ":" + c.done_on, rows = opRows(o), gone = new Set(rows.map(key));
     state.completions = state.completions.filter((c) => !gone.has(key(c)));
@@ -933,7 +950,7 @@ function sendOutbox(fresh) {
 }
 async function sendWaiting() {
   const late = new Set();
-  let refused = 0;
+  let refused = 0, stockMoved = false;
   if (!outbox.some(ownChange) || offlineNow() || !state.uid) return;
   // hours without a signal may have run the sign-in out; without it renewed the database would see a stranger
   const s = await within(15000, db.auth.getSession(), { data: {}, error: { timedOut: true } });
@@ -958,20 +975,28 @@ async function sendWaiting() {
     // sent before and it did arrive: the task is already there
     if (r.error && !(o.do === "insert" && r.error.code === "23505")) {
       refused++;
-      console.error("task change refused", o, r.error);
-      toast(T("A task change was not saved", "Промена на задача не е зачувана") + " — " + r.error.message);
+      console.error("change refused", o, r.error);
+      toast((String(o.of || "").startsWith("job:") ? T("A job change was not saved", "Промена на работа не е зачувана")
+        : T("A task change was not saved", "Промена на задача не е зачувана")) + " — " + r.error.message);
       // what came after a new task that never made it has nothing to land on
       if (o.t === "tasks" && o.do === "insert") {
         const ids = new Set(opRows(o).map((x) => x.id));
         outbox = outbox.filter((x) => !(ids.has(x.id) || opRows(x).some((y) => y && ids.has(y.task_id))));
       }
-    } else { if (o.waited) opTasks(o).forEach((x) => late.add(x)); sentLately.push({ ...o, sentAt: Date.now() }); }
+      // nor what came after a new job
+      if (o.t === "jobs" && o.do === "insert") outbox = outbox.filter((x) => x.of !== o.of);
+    } else {
+      if (o.waited) opKeys(o).forEach((x) => late.add(x));
+      if (o.t === "movements") stockMoved = true;
+      sentLately.push({ ...o, sentAt: Date.now() });
+    }
     keepOutbox();
   }
   clearTimeout(retryTimer);
-  if (late.size) toast("✓ " + T(`${late.size} task${late.size > 1 ? "s" : ""} sent`, `Испратени задачи: ${late.size}`));
-  // the server's word on what it refused
-  if (refused) { await refreshAll(["tasks", "completions"]); render(); }
+  if (late.size) toast("✓ " + T(`${countWords(late)} sent`, `Испратено: ${countWords(late)}`));
+  // the server's word on what it refused; and the stock, which the server counts
+  if (refused) { await refreshAll(["tasks", "completions", "jobs", "offers"]); render(); }
+  else if (stockMoved) { await refreshAll(["stock"]); render(); }
 }
 function waitForSignal() {
   clearTimeout(retryTimer);
@@ -983,6 +1008,12 @@ function keepCopy() {
   if (!state.uid) return;
   const copy = { uid: state.uid, at: Date.now(), habitCol: state.habitCol, tasks: state.tasks, people: state.people,
     templates: state.templates, c: state.completions.map((c) => [c.task_id, c.done_on, c.skipped ? 1 : 0]) };
+  // the jobs, and for their cards the clients, the sites and the offers of the ones still to do
+  if (state.perm.elaks) {
+    const open = new Set(state.jobs.filter((j) => j.status !== "done" && j.status !== "cancelled").map((j) => j.offer_id).filter(Boolean));
+    Object.assign(copy, { jobs: state.jobs, sites: state.sites, clients: state.clients,
+      jobOffers: state.offers.filter((o) => open.has(o.id)) });
+  }
   try { localStorage.setItem(KEPT, JSON.stringify(copy)); }
   catch {
     copy.tasks = copy.tasks.map((t) => ({ ...t, photo_thumb: null }));
@@ -998,6 +1029,11 @@ function useKeptCopy() {
   if ((k.people || []).length) state.people = k.people;
   state.completions = (k.c || []).map(([task_id, done_on, s]) => ({ task_id, done_on, skipped: !!s }));
   if (k.habitCol !== undefined) state.habitCol = k.habitCol;
+  if (state.perm.elaks && k.jobs) {
+    state.jobs = k.jobs; state.sites = k.sites || []; state.clients = k.clients || [];
+    const have = new Set(state.offers.map((o) => o.id));
+    state.offers = state.offers.concat((k.jobOffers || []).filter((o) => !have.has(o.id)));
+  }
   state.keptAt = k.at;
   state.tasksLoaded = true; state.fromCopy = true;
   applyPending();
@@ -1023,8 +1059,8 @@ async function login() {
 }
 async function logout() {
   const n = waitingCount();
-  if (n && !await ask(T(`${n} task${n > 1 ? "s" : ""} changed with no signal ${n > 1 ? "have" : "has"} not been sent yet. They are sent when you sign in on this phone again. Sign out?`,
-    `Задачи сменети без сигнал што сè уште не се испратени: ${n}. Ќе се испратат кога пак ќе се најавиш на овој телефон. Да се одјавам?`), T("Sign out", "Одјави се"))) return;
+  if (n && !await ask(T(`${countWords(waitingKeys())} changed with no signal ${n > 1 ? "have" : "has"} not been sent yet. They are sent when you sign in on this phone again. Sign out?`,
+    `Сменети без сигнал, сè уште неиспратени: ${countWords(waitingKeys())}. Ќе се испратат кога пак ќе се најавиш на овој телефон. Да се одјавам?`), T("Sign out", "Одјави се"))) return;
   // the next person on this phone sees none of it, nor opens as you with no
   // signal; what is still waiting stays, and only you signing in again sends it
   for (const k of [KEPT, WHO]) try { localStorage.removeItem(k); } catch { /* nothing kept */ }
@@ -1093,6 +1129,7 @@ async function startApp(signedIn) {
   handleShortcut();
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
     if (e.data && e.data.centrala && e.data.jobId) openJobFromNotice(e.data.jobId);
+    else if (e.data && e.data.centrala && e.data.go) runGo(e.data.go);
     else if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
   });
   if (state.role === "owner") {
@@ -1281,7 +1318,8 @@ async function refreshAll(only) {
   // tasks: what is still on its way laid over what came, and kept for a start with no signal
   if (keys.includes("tasks") && !failed.includes("tasks")) { state.tasksLoaded = true; state.fromCopy = false; }
   if (["tasks", "completions"].some((k) => keys.includes(k) && failed.includes(k))) { if (!state.tasksLoaded) useKeptCopy(); }
-  else if (["tasks", "completions", "people", "templates"].some((k) => keys.includes(k))) { applyPending(); keepCopy(); }
+  else if (["tasks", "completions", "people", "templates", "jobs"].some((k) => keys.includes(k))) { applyPending(); keepCopy(); }
+  else if (keys.includes("offers")) applyPending();
   state.netDown = noSignal;
   if (noSignal) return netStatus();
   if (failed.length) {
@@ -1332,7 +1370,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261102-090000";
+const BUILD = "20261102-120000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1375,6 +1413,21 @@ function handleShortcut() {
   const go = new URLSearchParams(location.search).get("go");
   if (!go) return;
   history.replaceState({}, "", location.pathname);
+  return runGo(go);
+}
+// Where a shortcut or a notification takes you. The money and stock ones go
+// to what they are about: an invoice, a supplier bill, the unpaid list, the order list.
+async function runGo(go) {
+  if (/^(order|unpaid|bills|invoice:|purchase:)/.test(go)) {
+    if (!state.perm.elaks) return tab("home");
+    const [what, id] = go.split(":");
+    if (what === "order") { state.elaksView = "inv"; tab("elaks"); return openOrderSheet(); }
+    if (what === "unpaid" || what === "invoice") { state.elaksView = "invoice"; state.invFilter = "unpaid"; tab("elaks"); }
+    if (what === "bills" || what === "purchase") { state.elaksView = "pur"; tab("elaks"); }
+    if (what === "invoice" && await ensureLoaded("invoices", id)) openInvoiceSheet(id);
+    if (what === "purchase" && await ensureLoaded("purchases", id)) openPurchaseSheet(id);
+    return;
+  }
   if (go === "today") return tab("today");
   if (go === "task") { tab("today"); return openTaskSheet(); }
   if (go === "voice") { tab("today"); return startVoice(); }
@@ -1444,12 +1497,12 @@ function netStatus() {
   let msg = "";
   if (offlineNow() || state.netDown || state.slowLoad)
     msg = (state.slowLoad && !offlineNow() ? T("Weak signal, still loading.", "Слаб сигнал, сè уште се вчитува.") : T("No signal.", "Нема сигнал."))
-      + " " + T("Tasks still save here and are sent when it is back", "Задачите се чуваат тука и се испраќаат кога ќе се врати")
+      + " " + T("Tasks and jobs still save here and are sent when it is back", "Задачите и работите се чуваат тука и се испраќаат кога ќе се врати")
       + (n ? " · " + T(`${n} waiting`, `чекаат ${n}`) : "") + "." + seen;
   else if (n && state.signedOut) msg = T(`Sign out and in again to send ${n} task${n > 1 ? "s" : ""}: this phone's sign-in has run out.`,
     `Одјави се и најави се повторно за да се испратат задачи (${n}): најавата на телефонот истекла.`);
-  else if (n && stuck) msg = T(`Waiting for a signal to send ${n} task${n > 1 ? "s" : ""}; it happens by itself.`,
-    `Чека сигнал за да се испратат задачи: ${n}; ќе се случи само.`);
+  else if (n && stuck) msg = T(`Waiting for a signal to send ${countWords(waitingKeys())}; it happens by itself.`,
+    `Чека сигнал за да се испратат: ${countWords(waitingKeys())}; ќе се случи само.`);
   if (msg) { $("loadmsg").textContent = msg; bar.style.display = "flex"; bar.dataset.net = "1"; }
   else if (bar.dataset.net) { bar.style.display = "none"; delete bar.dataset.net; }
 }
@@ -5022,11 +5075,11 @@ async function closeJob(id, then) {
       const v = parseFloat(raw);
       if (raw === "" || !isFinite(v) || v < 0) return toast(T("Enter the metres for every line — 0 if none was used", "Внеси метри за секоја ставка — 0 ако не е потрошено"));
       it.consumed = v;
-      if (it.article_id && v > 0) movRows.push({ article_id: it.article_id, type: "out", qty: v, ref: o.number, note: "Offer " + o.number });
+      if (it.article_id && v > 0) movRows.push({ id: newId(), article_id: it.article_id, type: "out", qty: v, ref: o.number, note: "Offer " + o.number });
     }
   }
   if (!o.stock_deducted) items.forEach((it) => {
-    if (it.article_id && it.unit !== "m") movRows.push({ article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number });
+    if (it.article_id && it.unit !== "m") movRows.push({ id: newId(), article_id: it.article_id, type: "out", qty: it.qty || 0, ref: o.number, note: "Offer " + o.number });
   });
   const total = items.reduce((s, it) => {
     const t = it.unit === "m" ? it.consumed * (it.price || 0) : (it.free ? (it.price || 0) : (it.qty || 0) * (it.price || 0));
@@ -5034,12 +5087,11 @@ async function closeJob(id, then) {
   }, 0);
   // the metres are in once the work is over: its job is finished with them
   const job = state.jobs.find((j) => j.offer_id === id && j.status !== "done" && j.status !== "cancelled");
-  try {
-    if (movRows.length) await dbq(db.from("movements").insert(movRows), "Stock not updated");
-    await dbq(db.from("offers").update({ items, grand_total: total, total_note: null, stock_deducted: true }).eq("id", id), "Offer not updated");
-    if (job) await dbq(db.from("jobs").update({ status: "done", done_at: new Date().toISOString() }).eq("id", job.id), T("Job not updated", "Работата не е ажурирана"));
-  } catch { return; }
-  closeSheet(); await refreshAll(["offers", "stock", "jobs"]); render();
+  const of = "job:" + (job ? job.id : id);
+  taskSave([...(movRows.length ? [{ t: "movements", do: "insert", row: movRows, of }] : []),
+    { t: "offers", do: "update", id, set: { items, grand_total: total, total_note: null, stock_deducted: true }, of },
+    ...(job ? [{ t: "jobs", do: "update", id: job.id, set: { status: "done", done_at: new Date().toISOString() }, of }] : [])]);
+  closeSheet(); render();
   const wasPaid = parseFloat(o.paid_amount) || 0;
   if (o.paid_at && Math.abs(total - wasPaid) > 0.005) {   // the invoice moved after it was paid
     setTimeout(() => reconcileSheet(id, wasPaid, total), 260);
@@ -11053,6 +11105,11 @@ async function openJobCard(id) {
     const { data } = await db.from("job_photos").select("id, thumb, sort").eq("job_id", id).order("sort");
     jobPhotos = (data || []).map((r) => ({ id: r.id, thumb: r.thumb }));
   } catch (e) { console.warn("job photos", e); }
+  // photos still on their way — taken with no signal — are on the card too, and removed ones are not
+  for (const op of [...sentLately, ...outbox].filter((x) => x.t === "job_photos")) {
+    if (op.do === "delete") { jobPhotos = jobPhotos.filter((p) => p.id !== op.id); continue; }
+    for (const r of opRows(op)) if (r.job_id === id && !jobPhotos.some((p) => p.id === r.id)) jobPhotos.push({ id: r.id, thumb: r.thumb, full: r.data });
+  }
   if (j.offer_id) await ensureLoaded("offers", j.offer_id);
   const c = state.clients.find((x) => x.id === j.client_id);
   const site = state.sites.find((x) => x.id === j.site_id);
@@ -11125,10 +11182,9 @@ async function openJobCard(id) {
   `);
   renderJobImg();
 }
-async function startJob(id) {
-  try { await dbq(db.from("jobs").update({ status: "started", started_at: new Date().toISOString() }).eq("id", id), T("Not saved", "Не е зачувано")); }
-  catch { return; }
-  await refreshAll(["jobs"]); render();
+function startJob(id) {
+  taskSave([{ t: "jobs", do: "update", id, set: { status: "started", started_at: new Date().toISOString() }, of: "job:" + id }]);
+  render();
   openJobCard(id);
 }
 // a photo taken on the card is kept at once: nothing to forget to save
@@ -11140,12 +11196,9 @@ async function addJobPhotosNow(input, id) {
     const url = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(null); fr.readAsDataURL(f); });
     const im = url ? await loadImg(url) : null;
     if (!im) { toast(T("Could not read that image", "Не можев да ја прочитам сликата")); continue; }
-    const thumb = imgResize(im, 110, 0.6), full = imgResize(im, 1400, 0.8);
-    try {
-      const row = await dbq(db.from("job_photos").insert({ job_id: id, data: full, thumb, sort: jobPhotos.length }).select("id").single(),
-        T("A photo was not saved", "Слика не е зачувана"));
-      jobPhotos.push({ id: row && row.id, thumb, full });
-    } catch { break; }
+    const thumb = imgResize(im, 110, 0.6), full = imgResize(im, 1400, 0.8), pid = newId();
+    taskSave([{ t: "job_photos", do: "insert", row: { id: pid, job_id: id, data: full, thumb, sort: jobPhotos.length }, of: "job:" + id }]);
+    jobPhotos.push({ id: pid, thumb, full });
     renderJobImg();
   }
   if (files.length) toast(T("Photo kept", "Сликата е зачувана"));
@@ -11246,26 +11299,23 @@ async function saveJob(id, forceStatus, noCard) {
   if (!row.title) return toast(T("What is the work?", "Што е работата?"));
   const stateEl = $("jb-state") && $("jb-state").querySelector(".chip.on");
   const status = forceStatus || (stateEl ? stateEl.dataset.s : "scheduled");
-  row.status = status;
-  if (status === "done") row.done_at = new Date().toISOString();
-  if (status === "started" && !row.started_at) row.started_at = new Date().toISOString();
-
   const before = id ? { ...(state.jobs.find((x) => x.id === id) || {}) } : null;
-  let saved;
-  try {
-    saved = await dbq(id ? db.from("jobs").update(row).eq("id", id).select().single()
-                        : db.from("jobs").insert(row).select().single(), T("Not saved", "Не е зачувано"));
-    if (jobRemoved.length) await db.from("job_photos").delete().in("id", jobRemoved);
-    const fresh = jobPhotos.filter((p) => p.isNew && p.full);
-    if (fresh.length) {
-      await dbq(db.from("job_photos").insert(fresh.map((p) => ({
-        job_id: saved.id, data: p.full, thumb: p.thumb, sort: jobPhotos.indexOf(p),
-      }))), T("A photo was not saved", "Слика не е зачувана"));
-    }
-  } catch { return; }
-  closeSheet(); await refreshAll(["jobs"]); render(); toast(T("Saved", "Зачувано"));
+  row.status = status;
+  // the moment it was started or finished is kept, not moved by a later save
+  if (status === "done") row.done_at = (before && before.done_at) || new Date().toISOString();
+  if (status === "started") row.started_at = (before && before.started_at) || new Date().toISOString();
+
+  // saved like a task: on the phone at once, to the server when there is a signal
+  const jid = id || newId(), of = "job:" + jid;
+  const fresh = jobPhotos.filter((p) => p.isNew && p.full);
+  taskSave([id ? { t: "jobs", do: "update", id, set: row, of } : { t: "jobs", do: "insert", row: { id: jid, ...row }, of },
+    ...jobRemoved.map((pid) => ({ t: "job_photos", do: "delete", id: pid, of })),
+    ...(fresh.length ? [{ t: "job_photos", do: "insert", of, row: fresh.map((p) => ({
+      id: newId(), job_id: jid, data: p.full, thumb: p.thumb, sort: jobPhotos.indexOf(p) })) }] : [])]);
+  const saved = state.jobs.find((x) => x.id === jid) || { id: jid, ...row };
+  closeSheet(); render(); toast(T("Saved", "Зачувано"));
   tellJobChange(saved, before);
-  if (!noCard) setTimeout(() => openJobCard(saved.id), 240);
+  if (!noCard) setTimeout(() => openJobCard(jid), 240);
 }
 // Whoever is given a job hears of it at once, and again when it moves —
 // not when it is your own, nor once it is done. The server sends it, to
@@ -11303,9 +11353,8 @@ async function finishJob(id) {
   if (fromForm) await saveJob(id, "done");
   else {
     // from the card or the Work screen there is no form to read: the job is just marked finished
-    try { await dbq(db.from("jobs").update({ status: "done", done_at: new Date().toISOString() }).eq("id", id), T("Not saved", "Не е зачувано")); }
-    catch { return; }
-    closeSheet(); await refreshAll(["jobs"]); render();
+    taskSave([{ t: "jobs", do: "update", id, set: { status: "done", done_at: new Date().toISOString() }, of: "job:" + id }]);
+    closeSheet(); render();
     if (fromCard) setTimeout(() => openJobCard(id), 240);     // the card again, with the invoice on it
   }
   toast(T("Finished — time to invoice", "Завршена — време за фактура"));
