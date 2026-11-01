@@ -620,14 +620,17 @@ a.btn{text-decoration:none;display:block;text-align:center}
       <div id="pur-list"></div>
     </div>
     <div id="el-body-work" style="display:none">
+      <input class="search" id="work-search" placeholder="Search work…" oninput="renderWork()">
       <div class="chips" id="work-filter" style="margin-bottom:10px"></div>
       <div id="work-list"></div>
     </div>
     <div id="el-body-job" style="display:none">
+      <input class="search" id="job-search" placeholder="Search jobs…" oninput="renderJobs()">
       <div class="chips" id="job-filter" style="margin-bottom:10px"></div>
       <div id="job-list"></div>
     </div>
     <div id="el-body-invoice" style="display:none">
+      <input class="search" id="invoice-search" placeholder="Search invoices…" oninput="renderInvoices()">
       <div class="chips" id="invoice-filter" style="margin-bottom:10px"></div>
       <div id="invoice-list"></div>
     </div>
@@ -731,8 +734,12 @@ const myCtx = () => state.perm.owner ? ["work", "elaks", "personal", "apts"] : (
 // the one context that is private, so it is the safer thing to land on.
 const defaultCtx = () => myCtx().includes("personal") ? "personal" : (myCtx()[0] || "personal");
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
-const STATUS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected" };
-const unitLbl = (u) => u === "m" ? "m" : "pcs";
+// read each time, so they come out in the language chosen
+const STATUS = {
+  get draft() { return T("Draft", "Нацрт"); }, get sent() { return T("Sent", "Испратена"); },
+  get accepted() { return T("Accepted", "Прифатена"); }, get rejected() { return T("Rejected", "Одбиена"); },
+};
+const unitLbl = (u) => u === "m" ? "m" : T("pcs", "ком");
 const fmt = (n) => (Math.round((parseFloat(n) || 0) * 100) / 100).toLocaleString("mk-MK");
 const todayStr = () => new Date().toLocaleDateString("sv-SE");
 // Every date shown to the user is dd-mm-yyyy. ISO strings (sv-SE) stay
@@ -1370,7 +1377,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261102-150000";
+const BUILD = "20261102-180000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3079,6 +3086,7 @@ function renderInv() {
     seesCosts() ? tool(`onclick="openReportSheet()"`, T("Monthly report", "Месечен извештај")) : "",
     tool(`onclick="openOrderSheet()"`, T("To order", "За нарачка"), lowN || "", "bad"),
     tool(`onclick="openSerialSearch()"`, T("Find by serial", "Најди по сериски")),
+    tool(`onclick="openCountAll()"`, T("Count stock", "Попис")),
     state.stock.some(photoToClean) ? tool(`onclick="openPhotoClean()"`, T("White backgrounds", "Бели позадини")) : "",
     warrN ? tool(`onclick="openWarranties()"`, T("Warranties ending", "Гаранции истекуваат"), warrN, "warn") : "",
     dupN ? tool(`onclick="openDuplicates()"`, T("Possible duplicates", "Можни дупликати"), dupN, "bad") : "",
@@ -3155,9 +3163,10 @@ async function openArticleDetail(id) {
     ${low ? `<p class="hflag" style="font-size:12.5px;margin-top:6px">
       ${T("At or below the minimum of", "На или под минимумот од")} ${fmt(a.min_stock)} — ${T("worth ordering", "вреди да се нарача")}</p>` : ""}
 
-    <div class="grid3" style="margin-top:12px">
+    <div class="grid3" style="margin-top:12px;grid-template-columns:repeat(4,1fr)">
       <button class="btn sm" style="width:100%" onclick="moveSheet('${id}','in')">+ ${T("In", "Влез")}</button>
       <button class="btn sm ghost" style="width:100%" onclick="moveSheet('${id}','out')">− ${T("Out", "Излез")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="countSheet('${id}')">${T("Count", "Брои")}</button>
       <button class="btn sm ghost" style="width:100%" onclick="openArticleSheet('${id}')">${T("Edit", "Уреди")}</button>
     </div>
 
@@ -3169,16 +3178,107 @@ async function openArticleDetail(id) {
 
     <div class="sec">${T("Recent movements", "Последни движења")}</div>
     ${(movs || []).map((m) => `<div class="mov">
-      <span><b class="mono" style="color:${m.type === "in" ? "var(--personal)" : "var(--danger)"}">${m.type === "in" ? "+" : m.type === "out" ? "−" : "±"}${fmt(Math.abs(m.qty))}</b>
+      <span><b class="mono" style="color:${m.type === "in" || (m.type === "corr" && m.qty >= 0) ? "var(--personal)" : "var(--danger)"}">${
+        m.type === "in" ? "+" : m.type === "out" ? "−" : m.qty >= 0 ? "+" : "−"}${fmt(Math.abs(m.qty))}</b>${m.type === "corr" ? ` <span class="muted">${T("count", "попис")}</span>` : ""}
         ${esc(m.note || m.ref || "")}${authorTag(m.created_by)}</span>
       <span class="muted">${dmy(m.created_at)}</span></div>`).join("")
       || `<p class="muted">${T("No movements.", "Нема движења.")}</p>`}
   `);
 }
+/* ---------- counting what is on the shelf ----------
+   The app's number drifts from the shelf — a cable cut and not booked, a
+   camera taken to a site in a hurry. Counting books the difference as a
+   correction ("corr", signed), so the history says what changed and when. */
+function countSheet(id) {
+  const a = state.stock.find((x) => x.id === id);
+  if (!a) return;
+  openSheet(`
+    <h2>${T("Count", "Брои")} — ${esc(a.name)}</h2>
+    <p class="muted">${T("What is on the shelf now. The difference from the app is booked as a correction.",
+      "Колку има на полица сега. Разликата од апликацијата се книжи како корекција.")}</p>
+    <label>${T("On the shelf", "На полица")} (${unitLbl(a.unit)})</label>
+    <input id="ct-qty" type="number" inputmode="decimal" min="0" step="any" value="${rawQty(a.stock)}" oninput="countDiffNote('${id}')">
+    <p class="muted" id="ct-diff" style="font-size:13px"></p>
+    <label>${T("Note (opt.)", "Белешка (опц.)")}</label><input id="ct-note" placeholder="${T("e.g. the yearly count", "на пр. годишен попис")}">
+    <button class="btn" onclick="saveCount('${id}')">${T("Book the count", "Книжи го пописот")}</button>
+  `);
+  countDiffNote(id);
+  setTimeout(() => { const el = $("ct-qty"); if (el) { el.focus(); el.select(); } }, 250);
+}
+// a quantity as a number box takes it — never the formatted "1.234,5"
+const rawQty = (v) => String(Math.round((parseFloat(v) || 0) * 1000) / 1000);
+const countWord = (d, unit) => d === 0 ? T("Matches the app", "Се совпаѓа со апликацијата")
+  : d > 0 ? T(`${fmt(d)} ${unit} more than the app had`, `${fmt(d)} ${unit} повеќе од апликацијата`)
+  : T(`${fmt(-d)} ${unit} fewer than the app had`, `${fmt(-d)} ${unit} помалку од апликацијата`);
+function countDiffNote(id) {
+  const a = state.stock.find((x) => x.id === id), el = $("ct-diff"), v = parseFloat(($("ct-qty") || {}).value);
+  if (!a || !el) return;
+  el.textContent = isFinite(v) ? countWord(Math.round((v - (parseFloat(a.stock) || 0)) * 1000) / 1000, unitLbl(a.unit)) : "";
+}
+const countNote = (note) => T("Count", "Попис") + " " + dmy(todayStr()) + (note ? " · " + note : "");
+async function saveCount(id) {
+  const a = state.stock.find((x) => x.id === id), v = parseFloat($("ct-qty").value);
+  if (!a || !isFinite(v) || v < 0) return toast(T("Enter what is on the shelf", "Внеси колку има на полица"));
+  const was = parseFloat(a.stock) || 0, d = Math.round((v - was) * 1000) / 1000;
+  if (!d) { closeSheet(); return toast(T("Matches the app — nothing to book", "Се совпаѓа — нема што да се книжи")); }
+  try { await dbq(db.from("movements").insert({ article_id: id, type: "corr", qty: d, ref: "count", note: countNote($("ct-note").value.trim()) }), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["stock"]); render();
+  toast(T(`Counted: ${fmt(was)} → ${fmt(v)} ${unitLbl(a.unit)}`, `Пописано: ${fmt(was)} → ${fmt(v)} ${unitLbl(a.unit)}`));
+}
+// The whole shelf, or one category of it: each article with what the app has,
+// to be overwritten where the shelf says otherwise; only the ones that differ are booked.
+let countDraft = {}, countCat = "all";
+function openCountAll() {
+  countDraft = {}; countCat = state.catFilter || "all";
+  openSheet(`
+    <h2>${T("Count stock", "Попис")}</h2>
+    <p class="muted">${T("Write what is on the shelf where it differs from the app. Only the ones that differ are booked.",
+      "Внеси колку има на полица каде што се разликува од апликацијата. Се книжат само тие што се разликуваат.")}</p>
+    <div class="chips" id="ca-cats"></div>
+    <div id="ca-list"></div>
+    <p class="muted" id="ca-sum" style="font-size:13px"></p>
+    <button class="btn" id="ca-go" onclick="saveCountAll()"></button>
+  `);
+  renderCountAll();
+}
+function renderCountAll() {
+  const cats = $("ca-cats"), list = $("ca-list");
+  if (!cats || !list) return;
+  cats.innerHTML = ["all", ...CATS].map((c) => `<button class="chip ${countCat === c ? "on" : ""}" onclick="countCat='${c}';renderCountAll()">${c === "all" ? T("All", "Сите") : c}</button>`).join("");
+  const arts = state.stock.filter((a) => countCat === "all" || a.category === countCat).slice().sort((a, b) => a.name.localeCompare(b.name));
+  list.innerHTML = arts.map((a) => `<div class="mov" style="align-items:center;gap:10px">
+      <span style="flex:1;min-width:0"><b>${esc(a.name)}</b><br><span class="muted" style="font-size:12px">${esc(a.code || a.category || "")} · ${T("app", "апл.")} ${fmt(a.stock)} ${unitLbl(a.unit)}</span></span>
+      <input type="number" inputmode="decimal" min="0" step="any" style="max-width:96px" data-id="${a.id}"
+        value="${countDraft[a.id] ?? rawQty(a.stock)}" oninput="countDraft['${a.id}']=this.value;countAllSum()"></div>`).join("")
+    || `<p class="muted">${T("No articles here.", "Нема артикли тука.")}</p>`;
+  countAllSum();
+}
+function countAllDiffs() {
+  return Object.entries(countDraft).map(([id, v]) => {
+    const a = state.stock.find((x) => x.id === id), n = parseFloat(v);
+    return a && String(v).trim() !== "" && isFinite(n) && n >= 0 ? { a, n, d: Math.round((n - (parseFloat(a.stock) || 0)) * 1000) / 1000 } : null;
+  }).filter((x) => x && x.d);
+}
+function countAllSum() {
+  const ds = countAllDiffs(), el = $("ca-sum"), b = $("ca-go");
+  if (el) el.textContent = ds.length ? ds.map((x) => `${x.a.name} ${x.d > 0 ? "+" : "−"}${fmt(Math.abs(x.d))}`).join(" · ") : T("Everything matches the app so far.", "Засега сè се совпаѓа со апликацијата.");
+  if (b) { b.disabled = !ds.length; b.textContent = ds.length ? T(`Book ${ds.length} correction${ds.length > 1 ? "s" : ""}`, `Книжи ${ds.length} корекции`) : T("Nothing to book", "Нема што да се книжи"); }
+}
+async function saveCountAll() {
+  const ds = countAllDiffs();
+  if (!ds.length) return;
+  const note = countNote("");
+  try { await dbq(db.from("movements").insert(ds.map((x) => ({ article_id: x.a.id, type: "corr", qty: x.d, ref: "count", note }))), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  closeSheet(); await refreshAll(["stock"]); render();
+  toast(T(`Count booked: ${ds.length} article${ds.length > 1 ? "s" : ""} corrected`, `Пописот е книжен: поправени ${ds.length} артикли`));
+}
+
 function moveSheet(id, type) {
   const a = state.stock.find((x) => x.id === id);
   openSheet(`
-    <h2>${type === "in" ? "Stock in" : "Stock out"} — ${esc(a.name)}</h2>
+    <h2>${type === "in" ? T("Stock in", "Влез во магацин") : T("Stock out", "Излез од магацин")} — ${esc(a.name)}</h2>
     <label>Quantity (${unitLbl(a.unit)})</label><input id="mv-qty" type="number" inputmode="decimal" min="0" step="any">
     <label>Note (opt.)</label><input id="mv-note" placeholder="e.g. purchase · site Markovski">
     <div class="row" style="margin-top:12px${seesCosts() ? "" : ";display:none"}">
@@ -3281,7 +3381,7 @@ async function openCashSheet() {
   state.cash = rows;   // the edit sheet reads from here
   const inSum = rows.reduce((s, e) => s + Math.max(0, parseFloat(e.amount) || 0), 0);
   const outSum = rows.reduce((s, e) => s + Math.min(0, parseFloat(e.amount) || 0), 0);
-  const label = new Date(month + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const label = monthName(month) + " " + month.slice(0, 4);
   openSheet(`
     <h2>Elaks cash register</h2>
     <div class="totalbar"><span>Balance now</span><span class="mono">${fmt(cashBal())} ден.</span></div>
@@ -3395,7 +3495,7 @@ function openArticleSheet(id) {
       <div><label>Category</label><select id="ar-cat">${CATS.map((c) => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
     </div>
     <div class="grid2">
-      <div><label>Unit</label><select id="ar-unit"><option value="ком" ${a.unit === "ком" ? "selected" : ""}>pcs</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
+      <div><label>Unit</label><select id="ar-unit"><option value="ком" ${a.unit === "ком" ? "selected" : ""}>${T("pcs", "ком")}</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
       <div><label>Min. stock</label><input id="ar-min" type="number" inputmode="decimal" value="${a.min_stock ?? 0}"></div>
     </div>
     <div class="grid2">
@@ -3965,12 +4065,12 @@ async function openOfferSheet(id) {
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
   openSheet(`
-    <h2>${id ? "Offer " + o.number : "New offer " + o.number}</h2>
+    <h2>${id ? T("Offer ", "Понуда ") + o.number : T("New offer ", "Нова понуда ") + o.number}</h2>
     <label>System title</label><input id="of-title" value="${esc(o.title)}" placeholder="e.g. 2 Камери + Аларм Систем">
     <label>Description (Систем:)</label><input id="of-system" value="${esc(o.system || "")}" placeholder="e.g. 2 IP камери + DVR + Централа">
     <div class="grid2">
       <div><label>Client</label><select id="of-client">
-        <option value="">— select —</option>
+        <option value="">${T("— select —", "— избери —")}</option>
         ${state.clients.filter((c) => c.active !== false || o.client_id === c.id)
         .map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}${c.active === false ? " · " + T("hidden", "скриен") : ""}</option>`).join("")}
       </select></div>
@@ -3987,7 +4087,7 @@ async function openOfferSheet(id) {
     <div class="sec" style="margin-top:10px">${T("Items", "Ставки")}</div>
     <div class="lhead"><span></span><span>${T("Name", "Име")}</span><span>${T("Qty", "Кол.")}</span><span>${T("Price", "Цена")}</span><span>${T("Total", "Вкупно")}</span><span></span></div>
     <div id="of-items"></div>
-    <button class="btn sm ghost" onclick="addFreeItem()">+ Manual item (installation…)</button>
+    <button class="btn sm ghost" onclick="addFreeItem()">${T("+ Manual item (installation…)", "+ Рачна ставка (монтажа…)")}</button>
     <div class="totalbar"><span>Total</span><span class="mono" id="of-total">0 ден.</span></div>
     <div class="row" style="justify-content:space-between;margin-top:6px">
       <span class="muted nw">Основа / ДДВ</span>
@@ -4560,7 +4660,7 @@ async function openReportSheet(month) {
   const buys = state.purchases.filter((p) => (p.doc_date || "").slice(0, 7) === mo);
   const vatIn = buys.reduce((s, p) => s + purchaseTotals(p.items).vat, 0);
   const buySum = sumBy(buys, (p) => p.total);
-  const label = new Date(mo + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const label = monthName(mo) + " " + mo.slice(0, 4);
   lastReport = { mo, label, received, inCash, cashIn, cashOut, profit, settled, top, owed, vatOut, netOut, vatIn, buySum, buys };
 
   const row = (l, v, colour) => `<div class="row bankrow"><span class="muted nw">${l}</span>
@@ -4651,12 +4751,13 @@ function openOrderSheet() {
   orderGroups = Object.entries(map).map(([supplier, items]) => ({ supplier, items }));
   openSheet(`
     <h2>Order list</h2>
-    <p class="muted">${low.length} article(s) at or below minimum. Adjust the quantities, then copy the list or make a PDF for each supplier.</p>
+    <p class="muted">${T(`${low.length} article${low.length === 1 ? " is" : "s are"} at or below the minimum. Adjust the quantities, then copy the list or make a PDF for each supplier.`,
+      `Артикли на или под минимумот: ${low.length}. Поправи ги количините, па копирај ја листата или направи PDF за секој добавувач.`)}</p>
     ${orderGroups.map((g, gi) => `
       <div class="sec">${esc(g.supplier)}</div>
       ${g.items.map((a) => `<div class="row" style="gap:10px;align-items:center;margin-bottom:8px">
         <div style="flex:1;min-width:0"><b>${esc(a.name)}</b>
-          <div class="muted">${esc(a.code || "")}${a.code ? " · " : ""}stock ${fmt(a.stock)} / min ${fmt(a.min_stock)} ${unitLbl(a.unit)}</div></div>
+          <div class="muted">${esc(a.code || "")}${a.code ? " · " : ""}${T("stock", "залиха")} ${fmt(a.stock)} / ${T("min", "мин.")} ${fmt(a.min_stock)} ${unitLbl(a.unit)}</div></div>
         <input class="mono" type="number" inputmode="decimal" min="0" step="any" style="width:78px;text-align:right"
           value="${orderQty[a.id]}" oninput="orderQty['${a.id}']=parseFloat(this.value)||0">
       </div>`).join("")}
@@ -4943,7 +5044,7 @@ function paymentsBlock(o) {
           ${p.method === "cash" ? "cash" : (p.method === "bank" ? "bank" : esc(p.method))}${p.note ? " · " + esc(p.note) : ""}</span>
         <span class="muted">${dmy(p.paid_on)} ›</span></div>`).join("")}
       <button class="btn sm ghost" style="margin-top:10px" onclick="payOfferSheet('${o.id}')">
-        ${rows.length ? "+ Add another payment" : "+ Record a payment / deposit"}</button>
+        ${rows.length ? T("+ Add another payment", "+ Додај уште едно плаќање") : T("+ Record a payment / deposit", "+ Запиши плаќање / аванс")}</button>
     </div>`;
 }
 function payOfferSheet(id) {
@@ -6598,7 +6699,7 @@ function relatedTasks(field, id) {
 function openClientSheet(id) {
   const c = id ? state.clients.find((x) => x.id === id) : {};
   openSheet(`
-    <h2>${id ? "Edit client" : "New client"}</h2>
+    <h2>${id ? T("Edit client", "Уреди клиент") : T("New client", "Нов клиент")}</h2>
     <label>Name / company</label><input id="cl-name" value="${esc(c.name || "")}">
     <label>Contact person</label><input id="cl-contact" value="${esc(c.contact || "")}">
     <div class="grid2">
@@ -9853,7 +9954,7 @@ function openPurchaseSheet(id) {
   const bal = id ? purchaseBalance(p) : 0;
   openSheet(`
     <h2>${id ? esc(p.supplier) : "New purchase"}</h2>
-    ${id ? `<p class="muted">${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)}</p>` : ""}
+    ${id ? `<p class="muted">${esc(p.doc_no || T("no number", "без број"))} · ${dmy(p.doc_date)}</p>` : ""}
     <label>${T("Supplier", "Добавувач")}</label>
     ${supplierSelect("pu-sup", p.supplier || "")}
     <div class="grid2">
@@ -9884,9 +9985,9 @@ function openPurchaseSheet(id) {
       ? `<p class="muted">Everything has arrived${p.received_at ? " · " + dmy(p.received_at) : ""}.</p>`
       : `<div class="card">
            <div class="row" style="justify-content:space-between"><b>Waiting to arrive</b>
-             <span class="mono">${purArrivedCount(p)}/${(p.items || []).length} lines in</span></div>
+             <span class="mono">${purArrivedCount(p)}/${(p.items || []).length} ${T("lines in", "ставки стигнати")}</span></div>
            ${purPending(p).map((it) => `<div class="mov"><span>${esc(it.name)}</span>
-             <span class="mono">${fmt(linePending(p, it))} of ${fmt(lineQty(it))} to come</span></div>`).join("")}
+             <span class="mono">${T(`${fmt(linePending(p, it))} of ${fmt(lineQty(it))} to come`, `уште ${fmt(linePending(p, it))} од ${fmt(lineQty(it))}`)}</span></div>`).join("")}
            <button class="btn amber" style="margin-top:10px" onclick="receiveSheet('${id}')">They arrived →</button>
          </div>`) : ""}
     ${id ? (bal > 0.005
@@ -9990,7 +10091,7 @@ function receiveSheet(id) {
       const pen = linePending(p, it);
       return `<div class="oitem" style="grid-template-columns:1fr 62px 62px">
         <div style="min-width:0"><b>${esc(it.name)}</b>
-          ${pen < lineQty(it) ? `<div class="muted">${fmt(lineRecv(p, it))} already in</div>` : ""}</div>
+          ${pen < lineQty(it) ? `<div class="muted">${T(`${fmt(lineRecv(p, it))} already in`, `${fmt(lineRecv(p, it))} веќе стигнати`)}</div>` : ""}</div>
         <input class="mono" value="${fmt(lineQty(it))}" disabled>
         <input type="number" inputmode="decimal" min="0" step="any" value="${pen || 0}"
           ${pen ? "" : "disabled"} oninput="recvQty[${i}]=parseFloat(this.value)||0">
@@ -10198,16 +10299,16 @@ function renderPurchases() {
   </div></div>`;
   $("pur-list").innerHTML = list.length ? list.map((p) => {
     const bal = purchaseBalance(p);
-    const state_ = bal <= 0.005 ? '<span style="color:var(--personal)">paid</span>'
-      : purchaseOverdue(p) ? '<span style="color:var(--danger)">overdue</span>'
-      : (p.due_date ? "due " + dmy(p.due_date) : "unpaid");
+    const state_ = bal <= 0.005 ? `<span style="color:var(--personal)">${T("paid", "платена")}</span>`
+      : purchaseOverdue(p) ? `<span style="color:var(--danger)">${T("overdue", "задоцнета")}</span>`
+      : (p.due_date ? T("due ", "рок ") + dmy(p.due_date) : T("unpaid", "неплатена"));
     return `<div class="card offer row" role="button" tabindex="0" onclick="openPurchaseSheet('${p.id}')">
       <span class="led ${bal <= 0.005 ? "accepted" : "sent"}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(p.supplier)}</b>
-        <div class="o-num">${esc(p.doc_no || "no number")} · ${dmy(p.doc_date)} · ${state_}${
+        <div class="o-num">${esc(p.doc_no || T("no number", "без број"))} · ${dmy(p.doc_date)} · ${state_}${
           purFullyArrived(p) ? ""
-            : ` · <span style="color:var(--amber)">${purArrivedCount(p) ? `${purArrivedCount(p)}/${(p.items || []).length} arrived` : "on order"}${p.expected_date ? " · exp. " + dmy(p.expected_date) : ""}</span>`}${authorTag(p.created_by)}</div>
+            : ` · <span style="color:var(--amber)">${purArrivedCount(p) ? `${purArrivedCount(p)}/${(p.items || []).length} ${T("arrived", "стигнати")}` : T("on order", "нарачано")}${p.expected_date ? T(" · exp. ", " · се очекува ") + dmy(p.expected_date) : ""}</span>`}${authorTag(p.created_by)}</div>
       </div>
       <span class="mono">${fmt(p.total)}</span>
     </div>`;
@@ -10223,6 +10324,9 @@ function renderPurchases() {
    not in the list simply stays in English.
 ============================================================ */
 const MK = {
+  "Search work…": "Барај работа…", "Search jobs…": "Барај работи…", "Search invoices…": "Барај фактури…",
+  // Elaks, whole labels
+  "Total received": "Вкупно примено", "of that in cash": "од тоа во готово", "Jobs fully settled": "Целосно наплатени работи", "In": "Влез", "Out": "Излез", "Base (основа)": "Основа", "ДДВ payable": "ДДВ за плаќање", "ДДВ collected (output)": "Пресметан ДДВ (излезен)", "ДДВ on purchases (input)": "ДДВ на набавки (влезен)", "ДДВ on settled jobs": "ДДВ на наплатени работи", "Entries · tap to edit": "Ставки · допри за уредување", "Stock in": "Влез во магацин", "Stock out": "Излез од магацин",
   // tabs and screens
   "Retry": "Пак", "Home": "Дома", "Tasks": "Задачи", "Elaks": "Елакс", "Apts": "Станови",
   "Settings": "Поставки", "Apartments": "Станови", "Stock": "Магацин",
@@ -10469,10 +10573,10 @@ const warrantyDaysLeft = (i) => !i.warranty_until ? null
   : Math.round((Date.parse(i.warranty_until + "T12:00") - Date.parse(todayStr() + "T12:00")) / 86400000);
 function warrantyLabel(i) {
   const d = warrantyDaysLeft(i);
-  if (d === null) return '<span class="muted">no warranty date</span>';
-  if (d < 0) return `<span class="muted">warranty ended ${dmy(i.warranty_until)}</span>`;
-  if (d <= 60) return `<span style="color:var(--amber)">warranty ends ${dmy(i.warranty_until)} · ${d}d</span>`;
-  return `<span style="color:var(--personal)">under warranty to ${dmy(i.warranty_until)}</span>`;
+  if (d === null) return `<span class="muted">${T("no warranty date", "без датум на гаранција")}</span>`;
+  if (d < 0) return `<span class="muted">${T("warranty ended", "гаранцијата истече")} ${dmy(i.warranty_until)}</span>`;
+  if (d <= 60) return `<span style="color:var(--amber)">${T("warranty ends", "гаранцијата истекува")} ${dmy(i.warranty_until)} · ${d}${T("d", " дена")}</span>`;
+  return `<span style="color:var(--personal)">${T("under warranty to", "под гаранција до")} ${dmy(i.warranty_until)}</span>`;
 }
 const expiringSoon = () => state.installs.filter((i) => {
   const d = warrantyDaysLeft(i);
@@ -10505,11 +10609,19 @@ function workItem(o) {
   return { o, job, inv, stage };
 }
 
+// Every word typed must be somewhere in what a row is about — so "дента 041" finds the offer.
+function searchHit(boxId, ...fields) {
+  const q = (($(boxId) || {}).value || "").trim().toLowerCase();
+  if (!q) return true;
+  const hay = fields.filter(Boolean).join(" ").toLowerCase();
+  return q.split(/\s+/).every((w) => hay.includes(w));
+}
 function renderWork() {
   const items = state.offers
     .filter((o) => o.status !== "rejected")
     .map(workItem)
-    .filter((w) => w.stage !== "quote" || w.o.status === "sent" || w.o.status === "draft");
+    .filter((w) => w.stage !== "quote" || w.o.status === "sent" || w.o.status === "draft")
+    .filter((w) => searchHit("work-search", w.o.title, w.o.number, invClient(w.o), w.inv && w.inv.number, w.job && w.job.title));
 
   const counts = {
     schedule: items.filter((w) => w.stage === "schedule").length,
@@ -10750,7 +10862,7 @@ function awaitingInvoice() {
 function renderInvoices() {
   // what is finished is what is ready to bill — the same rule as Work's "to invoice";
   // accepted work still to be done is listed apart, under its own heading
-  const todo = awaitingInvoice();
+  const todo = awaitingInvoice().filter((o) => searchHit("invoice-search", o.number, o.title, invClient(o)));
   const ready = todo.filter((o) => workItem(o).stage === "invoice"), ahead = todo.filter((o) => workItem(o).stage !== "invoice");
   const unpaid = state.invoices.filter((i) => !i.cancelled && !invPaid(i));
   const counts = { todo: ready.length, unpaid: unpaid.length, all: state.invoices.length };
@@ -10781,7 +10893,9 @@ function renderInvoices() {
     return;
   }
 
-  const list = (state.invFilter === "unpaid" ? unpaid : state.invoices);
+  const offerOf = (i) => state.offers.find((o) => o.id === i.offer_id) || {};
+  const list = (state.invFilter === "unpaid" ? unpaid : state.invoices)
+    .filter((i) => searchHit("invoice-search", i.number, invClient(i), offerOf(i).number, offerOf(i).title));
   $("invoice-list").innerHTML = list.length ? list.map((i) => {
     const late = !invPaid(i) && i.due_date && i.due_date < todayStr();
     return `<div class="card offer row ${i.cancelled ? "done" : ""}" role="button" tabindex="0" onclick="openInvoiceSheet('${i.id}')">
@@ -11001,7 +11115,8 @@ function renderJobs() {
     .map(([v, l]) => `<button class="chip ${state.jobFilter === v ? "on" : ""}"
       onclick="state.jobFilter='${v}';renderJobs()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
 
-  let list = state.jobs;
+  const siteName = (id) => (state.sites.find((x) => x.id === id) || {}).name;
+  let list = state.jobs.filter((j) => searchHit("job-search", j.title, invClient(j), siteName(j.site_id), j.address, j.note, personName(j.assigned_to)));
   if (state.jobFilter === "today") list = list.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled");
   else if (state.jobFilter === "upcoming") list = list.filter((j) => j.status !== "done" && j.status !== "cancelled");
   else if (state.jobFilter === "done") list = list.filter((j) => j.status === "done");
