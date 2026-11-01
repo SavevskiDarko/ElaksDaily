@@ -1,30 +1,59 @@
 const CACHE = "centrala-v6";
 const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./brand-logo.png", "./brand-banner.png", "./brand-footer.png", "./icon-192.png?v=3", "./icon-512.png?v=3"];
 
+// The scripts and fonts the app loads from elsewhere, kept too: without the
+// database's script the app cannot even open with no signal. The scripts are
+// fetched on install, so the first start with no signal already has them.
+const CDN = "centrala-cdn-v1";
+const CDN_HOSTS = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"];
+const CDN_FILES = [
+  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js",
+  "https://cdn.jsdelivr.net/npm/pizzip@3.2.0/dist/pizzip.min.js",
+  "https://cdn.jsdelivr.net/npm/docxtemplater@3.69.0/build/docxtemplater.min.js",
+];
+
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  const scripts = caches.open(CDN).then((c) => Promise.all(CDN_FILES.map((u) =>
+    fetch(u).then((res) => res.ok && c.put(u, res)).catch(() => {}))));       // best effort: kept on first use otherwise
+  e.waitUntil(Promise.all([caches.open(CACHE).then((c) => c.addAll(SHELL)), scripts]).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== CDN).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
-// Network-first for the app shell (so updates arrive), cache fallback offline.
+// Network first, so updates arrive, and the kept copy when there is no
+// signal. A weak signal can leave a request hanging for a minute, so after a
+// few seconds the kept copy is used instead, and the network's answer, when
+// it comes, is kept for next time.
+const WAIT = 5000;
+function netOrKept(req, cacheName, fallback) {
+  const net = fetch(req).then((res) => {
+    // the app's own "is there a new version" check asks for no-store: not kept
+    if ((res.ok || res.type === "opaque") && req.cache !== "no-store") {
+      const copy = res.clone();
+      caches.open(cacheName).then((c) => c.put(req, copy));
+    }
+    return res;
+  });
+  const kept = () => caches.match(req).then((r) => r || (fallback ? caches.match(fallback) : undefined));
+  return new Promise((answer) => {
+    let done = false;
+    const give = (r) => { if (!done && r) { done = true; answer(r); } };
+    const slow = setTimeout(() => kept().then(give), WAIT);
+    net.then((r) => { clearTimeout(slow); give(r); })
+      .catch(() => { clearTimeout(slow); kept().then((r) => { give(r); if (!done) { done = true; answer(Response.error()); } }); });
+  });
+}
+
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
-        return res;
-      })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
-  );
+  if (e.request.method !== "GET") return;
+  if (url.origin === location.origin) return e.respondWith(netOrKept(e.request, CACHE, "./index.html"));
+  if (CDN_HOSTS.includes(url.hostname)) e.respondWith(netOrKept(e.request, CDN));
 });
 
 self.addEventListener("push", (e) => {
