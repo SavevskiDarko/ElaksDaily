@@ -16,6 +16,7 @@
   --navy:#1E3A5F; --navy-deep:#152A46; --amber:#F5B301; --paper:#F7F8FA;
   --card:#FFFFFF; --ink:#23272E; --muted:#6B7280; --line:#E5E8EC;
   --work:#4C6EF5; --elaks:#E0782A; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
+  --net-bg:#FFF4D6; --net-ink:#7A5500;
   --surface:#FFFFFF; --on-dark:#FFFFFF;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
@@ -33,7 +34,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
 
 /* ---- top bar ---- */
-.topbar{position:sticky;top:0;z-index:20;background:var(--navy);color:#fff;
+/* the top bar and the line under it stay in sight: "no signal" must not scroll away */
+.app-head{position:sticky;top:0;z-index:20}
+.topbar{background:var(--navy);color:#fff;
   padding:calc(10px + env(safe-area-inset-top)) var(--pad) 10px;display:flex;align-items:baseline;gap:10px}
 .topbar h1{font-family:var(--cond);font-weight:700;font-size:19px;letter-spacing:.02em}
 .topbar img{width:22px;height:22px;border-radius:6px;flex:none;align-self:center}
@@ -382,6 +385,8 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 #loadbar{background:var(--danger-bg);color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
   align-items:center;gap:10px;border-bottom:1px solid var(--line)}
 #loadbar button{font-weight:700;text-decoration:underline;flex:none}
+/* no signal is a state to know about, not an error */
+#loadbar[data-net]{background:var(--net-bg);color:var(--net-ink)}
 .hcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
 .hcard h3{font-family:var(--cond);font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
 .hrow{display:flex;justify-content:space-between;align-items:center;padding:4px 0;gap:10px;flex-wrap:wrap}
@@ -536,10 +541,9 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
 @media (prefers-color-scheme: dark){
-  /* Elaks navy is the colour of the brand, and on a dark card it vanished:
-     its dot read as no dot at all. Lighter here, and still apart from Work. */
+  /* Elaks's orange a shade lighter, to stand out on a dark card */
   :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-    --elaks:#F08E46;--hb-miss:#3A4456}
+    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C}
   .btn.ghost{background:var(--card);color:var(--ink)}
   .tick{border-color:#39424F}
 }
@@ -560,8 +564,10 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 
 <!-- ================= APP ================= -->
 <div id="app" style="display:none">
+  <div class="app-head">
   <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="bar-acts" id="bar-acts"></span><span class="date" id="bar-date"></span></div>
   <div id="loadbar" style="display:none"><span id="loadmsg">Could not load data.</span><button onclick="retryLoad()">Retry</button></div>
+  </div>
 
   <!-- HOME -->
   <div class="view on" id="v-home"><div id="home-body"></div></div>
@@ -816,33 +822,228 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
 async function dbq(q, failMsg) {
-  if (offlineNow()) { toast("You are offline — not saved"); throw new Error("offline"); }
+  if (offlineNow()) {
+    toast(T("No signal — not saved. Only tasks save without a signal.", "Нема сигнал — не е зачувано. Без сигнал се зачувуваат само задачите."));
+    throw new Error("offline");
+  }
   const { data, error } = await q;
   if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + error.message); throw error; }
   return data;
 }
 
+/* ---------- tasks with no signal ----------
+   On a site with no coverage a task is still added, ticked, moved, changed or
+   deleted. The change shows at once and waits on this phone, in order, until
+   there is a signal; then it goes up by itself. Only tasks: everything else
+   still needs the signal to save. The last tasks seen are kept on the phone
+   too, so the list is there even when the app opens with no signal.
+   Every change can safely be sent twice — a new task carries the id it was
+   made with — so one that may or may not have arrived is simply sent again. */
+const OUTBOX = "centrala_outbox", KEPT = "centrala_kept", WHO = "centrala_who";
+let outbox = (() => { try { return JSON.parse(localStorage.getItem(OUTBOX) || "[]"); } catch { return []; } })();
+let sentLately = [];          // just sent: still laid over a load that may have left before they landed
+const ownChange = (o) => !o.uid || o.uid === state.uid;
+// counted as tasks, not as steps: a tick is two writes but one task
+const opRows = (o) => [].concat(o.row);
+const opTasks = (o) => o.t === "tasks" ? (o.do === "insert" ? opRows(o).map((r) => r.id) : [].concat(o.id))
+  : o.t === "task_photos" ? [o.id || o.row.task_id] : opRows(o).map((r) => r.task_id);
+const waitingCount = () => new Set(outbox.filter(ownChange).flatMap(opTasks)).size;
+function keepOutbox() {
+  try { localStorage.setItem(OUTBOX, JSON.stringify(outbox)); return true; } catch { return false; }
+}
+// a request that never reached the server, or got no answer, as against one the server refused
+const netFailed = (r) => !!r && (r.timedOut || r.status === 0 || (r.status >= 502 && r.status <= 599)
+  || /failed to fetch|networkerror|network request failed|load failed|fetch failed|timed out|retryable/i
+    .test(((r.error || r).message || "") + " " + ((r.error || r).name || "")));
+const within = (ms, p, late) => Promise.race([p, new Promise((ok) => setTimeout(() => ok(late), ms))]);
+function newId() {
+  const c = window.crypto;
+  if (c.randomUUID) return c.randomUUID();
+  const b = c.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+// the change as the database is asked for it
+function opQuery(o) {
+  const q = db.from(o.t);
+  if (o.do === "insert") return q.insert(o.row);
+  if (o.do === "upsert") return q.upsert(o.row, { onConflict: o.t === "task_photos" ? "task_id" : "task_id,done_on" });
+  if (o.do === "update") return Array.isArray(o.id) ? q.update(o.set).in("id", o.id) : q.update(o.set).eq("id", o.id);
+  if (o.t === "task_completions") return q.delete().eq("task_id", o.row.task_id).eq("done_on", o.row.done_on);
+  return q.delete().eq(o.t === "task_photos" ? "task_id" : "id", o.id);
+}
+// the same change, on the screen; doing it twice leaves it as once
+function applyOp(o) {
+  if (o.t === "tasks") {
+    if (o.do === "insert") for (const r of opRows(o)) {
+      if (state.tasks.some((x) => x.id === r.id)) continue;      // already loaded from the server
+      state.tasks.push({ done: false, last_done: null, recurrence: null, recur_every: 1, priority: false, remind: false,
+        remind_before: 0, checklist: null, notes: null, assigned_to: null, owner_uid: o.uid, created_by: o.uid,
+        created_at: new Date(o.at || Date.now()).toISOString(), ...r });
+    }
+    if (o.do === "update") { const ids = [].concat(o.id); for (const x of state.tasks) if (ids.includes(x.id)) Object.assign(x, o.set); }
+    if (o.do === "delete") {
+      state.tasks = state.tasks.filter((x) => x.id !== o.id);
+      state.completions = state.completions.filter((c) => c.task_id !== o.id);
+    }
+  }
+  if (o.t === "task_completions") {
+    const key = (c) => c.task_id + ":" + c.done_on, rows = opRows(o), gone = new Set(rows.map(key));
+    state.completions = state.completions.filter((c) => !gone.has(key(c)));
+    if (o.do === "upsert") state.completions.push(...rows.map((r) => ({ task_id: r.task_id, done_on: r.done_on, skipped: !!r.skipped })));
+  }
+}
+function completionSets() {
+  state.doneSet = new Set(state.completions.filter((c) => !c.skipped).map((c) => c.task_id + ":" + c.done_on));
+  state.skipSet = new Set(state.completions.filter((c) => c.skipped).map((c) => c.task_id + ":" + c.done_on));
+}
+// what is still on its way, laid over what was loaded
+function applyPending() {
+  sentLately = sentLately.filter((o) => Date.now() - o.sentAt < 15000);
+  for (const o of [...sentLately, ...outbox.filter(ownChange)]) applyOp(o);
+  completionSets();
+}
+// Make the change here and now, and send it — straight away with a signal,
+// whenever one comes without.
+function taskSave(ops) {
+  for (const o of ops) { o.uid = state.uid; o.at = Date.now(); if (offlineNow()) o.waited = true; applyOp(o); }
+  completionSets();
+  outbox.push(...ops);
+  if (!keepOutbox()) toast(T("This phone's storage is full — keep Centrala open until there is a signal",
+    "Меморијата на телефонот е полна — држи го Централа отворено додека има сигнал"));
+  sendOutbox();
+  return true;
+}
+let sending = null, retryTimer = null, cutShort = null;
+// fresh: the signal looks back (Retry, back online, back in the app), so a
+// request still hanging from before is given up on and the lot sent again
+function sendOutbox(fresh) {
+  if (sending && fresh && cutShort) { cutShort(); return sending.then(() => sendOutbox()); }
+  if (!sending) sending = sendWaiting().catch((e) => console.warn("outbox", e)).finally(() => { sending = null; netStatus(); });
+  return sending;
+}
+async function sendWaiting() {
+  const late = new Set();
+  let refused = 0;
+  if (!outbox.some(ownChange) || offlineNow() || !state.uid) return;
+  // hours without a signal may have run the sign-in out; without it renewed the database would see a stranger
+  const s = await within(15000, db.auth.getSession(), { data: {}, error: { timedOut: true } });
+  // and a sign-in the server has ended for good wants signing in again
+  state.signedOut = !(s.data && s.data.session) && !offlineNow() && !netFailed(s.error);
+  if (!s.data || !s.data.session) return waitForSignal();
+  while (outbox.some(ownChange)) {
+    if (offlineNow()) return;
+    const o = outbox.find(ownChange);
+    let q = opQuery(o);
+    const stop = typeof AbortController !== "undefined" && q.abortSignal ? new AbortController() : null;
+    if (stop) q = q.abortSignal(stop.signal);
+    const r = await Promise.race([within(20000, q, { timedOut: true }), new Promise((ok) => { cutShort = () => ok({ timedOut: true }); })]);
+    cutShort = null;
+    if (r.timedOut && stop) stop.abort();
+    // no answer, or a sign-in that has to be renewed first: it waits, it is not refused
+    if (netFailed(r) || r.status === 401) {
+      for (const x of outbox) if (ownChange(x)) x.waited = true;     // all of it waits for the signal now
+      keepOutbox(); return waitForSignal();
+    }
+    outbox.splice(outbox.indexOf(o), 1);
+    // sent before and it did arrive: the task is already there
+    if (r.error && !(o.do === "insert" && r.error.code === "23505")) {
+      refused++;
+      console.error("task change refused", o, r.error);
+      toast(T("A task change was not saved", "Промена на задача не е зачувана") + " — " + r.error.message);
+      // what came after a new task that never made it has nothing to land on
+      if (o.t === "tasks" && o.do === "insert") {
+        const ids = new Set(opRows(o).map((x) => x.id));
+        outbox = outbox.filter((x) => !(ids.has(x.id) || opRows(x).some((y) => y && ids.has(y.task_id))));
+      }
+    } else { if (o.waited) opTasks(o).forEach((x) => late.add(x)); sentLately.push({ ...o, sentAt: Date.now() }); }
+    keepOutbox();
+  }
+  clearTimeout(retryTimer);
+  if (late.size) toast("✓ " + T(`${late.size} task${late.size > 1 ? "s" : ""} sent`, `Испратени задачи: ${late.size}`));
+  // the server's word on what it refused
+  if (refused) { await refreshAll(["tasks", "completions"]); render(); }
+}
+function waitForSignal() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(sendOutbox, 30000);
+}
+// What was last seen, for opening with no signal. A photo's preview is the
+// first thing let go when the phone is short of room.
+function keepCopy() {
+  if (!state.uid) return;
+  const copy = { uid: state.uid, at: Date.now(), habitCol: state.habitCol, tasks: state.tasks, people: state.people,
+    templates: state.templates, c: state.completions.map((c) => [c.task_id, c.done_on, c.skipped ? 1 : 0]) };
+  try { localStorage.setItem(KEPT, JSON.stringify(copy)); }
+  catch {
+    copy.tasks = copy.tasks.map((t) => ({ ...t, photo_thumb: null }));
+    try { localStorage.setItem(KEPT, JSON.stringify(copy)); } catch { console.warn("no room to keep the tasks"); }
+  }
+}
+function useKeptCopy() {
+  let k = null;
+  try { k = JSON.parse(localStorage.getItem(KEPT) || "null"); } catch { /* nothing kept */ }
+  if (!k || k.uid !== state.uid) return false;
+  state.tasks = k.tasks || [];
+  state.templates = k.templates || [];
+  if ((k.people || []).length) state.people = k.people;
+  state.completions = (k.c || []).map(([task_id, done_on, s]) => ({ task_id, done_on, skipped: !!s }));
+  if (k.habitCol !== undefined) state.habitCol = k.habitCol;
+  state.keptAt = k.at;
+  state.tasksLoaded = true; state.fromCopy = true;
+  applyPending();
+  return true;
+}
+// who was signed in here, and what they may see, for opening with no signal
+function keptWho() { try { return JSON.parse(localStorage.getItem(WHO) || "null"); } catch { return null; } }
+
 /* ---------------- AUTH ---------------- */
 async function boot() {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
-  const { data: { session } } = await db.auth.getSession();
-  if (session) startApp(); else $("login").style.display = "block";
+  const { data: { session }, error } = await within(10000, db.auth.getSession(), { data: {}, error: { timedOut: true } });
+  if (session) return startApp(session);
+  // the sign-in could not be renewed for want of a signal: open as the one
+  // who was here last; the database asks again once there is a signal
+  if (keptWho() && (offlineNow() || netFailed(error))) return startApp(null);
+  $("login").style.display = "block";
 }
 async function login() {
   const { error } = await db.auth.signInWithPassword({ email: $("lg-email").value.trim(), password: $("lg-pass").value });
   if (error) { $("lg-err").textContent = "Wrong email or password."; return; }
   $("login").style.display = "none"; startApp();
 }
-async function logout() { await db.auth.signOut(); location.reload(); }
+async function logout() {
+  const n = waitingCount();
+  if (n && !await ask(T(`${n} task${n > 1 ? "s" : ""} changed with no signal ${n > 1 ? "have" : "has"} not been sent yet. They are sent when you sign in on this phone again. Sign out?`,
+    `Задачи сменети без сигнал што сè уште не се испратени: ${n}. Ќе се испратат кога пак ќе се најавиш на овој телефон. Да се одјавам?`), T("Sign out", "Одјави се"))) return;
+  // the next person on this phone sees none of it, nor opens as you with no
+  // signal; what is still waiting stays, and only you signing in again sends it
+  for (const k of [KEPT, WHO]) try { localStorage.removeItem(k); } catch { /* nothing kept */ }
+  await db.auth.signOut(); location.reload();
+}
 
-async function startApp() {
+async function startApp(signedIn) {
   $("app").style.display = "block";
   $("bar-date").textContent = wd() + " " + dmy(new Date());
   try {
-    const { data: { user } } = await db.auth.getUser();
+    // who is signed in, from the sign-in kept on the phone: no trip to the
+    // server, which with a weak signal could take a long while
+    const who = keptWho();
+    // already asked on the way in, unless a sign-in has just been made
+    const { data: { session }, error: serr } = signedIn !== undefined
+      ? { data: { session: signedIn }, error: signedIn ? null : { timedOut: true } }
+      : await within(10000, db.auth.getSession(), { data: {}, error: { timedOut: true } });
+    let user = session ? session.user : null;
+    // no signal to renew the sign-in: the one who was here last
+    if (!user && who && (offlineNow() || netFailed(serr))) user = { id: who.uid };
     state.uid = user ? user.id : null;
     if (user) {
-      let { data: r, error: rerr } = await db.from("user_roles").select("*").eq("user_id", user.id).maybeSingle();
+      const known = who && who.uid === user.id && who.role;
+      let { data: r, error: rerr } = await within(known ? 5000 : 15000, db.from("user_roles").select("*").eq("user_id", user.id).maybeSingle(),
+        { data: null, error: { timedOut: true } });
+      if (rerr && who && who.uid === user.id && who.role && netFailed(rerr)) { r = who.role; rerr = null; }
+      if (!rerr && r) try { localStorage.setItem(WHO, JSON.stringify({ uid: user.id, role: r })); } catch { /* no room */ }
       if (!rerr && !r) {  // first sign-in: register with zero access; owner grants from Team
         await db.from("user_roles").insert({ user_id: user.id, role: "employee" });
         r = { role: "employee", task_contexts: [], see_elaks: false, see_apts: false, see_insurance: false };
@@ -863,12 +1064,20 @@ async function startApp() {
       }
     }
     applyTabVisibility();
-    if (state.perm.owner) loadTeam();
+    if (state.perm.owner && !offlineNow()) loadTeam();
   } catch (e) { console.warn("permission lookup", e); }
   tab("home");                    // paint skeletons before the data lands
+  // a weak signal can keep the load going a long while: meanwhile, the tasks as last seen
+  const slow = setTimeout(() => {
+    if (state.tasksLoaded || !useKeptCopy()) return;
+    state.loading = false; state.slowLoad = true; render(); netStatus();
+  }, 4000);
   await refreshAll();
-  state.loading = false;
+  clearTimeout(slow);
+  state.loading = false; state.slowLoad = false;
   render();
+  netStatus();
+  sendOutbox();                   // changes made with no signal last time the app was open
   updatePushState();
   keepPushAlive();
   handleNotificationIntent();
@@ -949,13 +1158,17 @@ const LOADERS = {
 const missingTable = (e) => !!e && (e.code === "42P01" || e.code === "PGRST205" || /does not exist|schema cache/i.test(e.message || ""));
 
 async function refreshAll(only) {
+  // no signal: what is on screen stays, and the tasks as last seen if nothing was loaded yet
+  if (offlineNow()) { if (!state.tasksLoaded) useKeptCopy(); netStatus(); return; }
   const keys = (only || Object.keys(LOADERS)).filter((k) => LOADERS[k] && LOADERS[k].need());
-  const res = await Promise.all(keys.map((k) => LOADERS[k].q()));
+  // a weak signal can leave a request hanging; after half a minute it counts as no signal
+  const res = await Promise.all(keys.map((k) => within(30000, LOADERS[k].q(), { data: null, error: { message: "timed out" }, timedOut: true })));
   const failed = [];
+  let noSignal = false;
   keys.forEach((k, i) => {
     const r = res[i];
     if (r.error && LOADERS[k].optional && missingTable(r.error)) { state[k] = []; return; }
-    if (r.error) { console.error("load", k, r.error); failed.push(k); return; }
+    if (r.error) { console.error("load", k, r.error); failed.push(k); if (netFailed(r)) noSignal = true; return; }
     if (LOADERS[k].scalar) state[k] = (r.data && r.data.balance != null) ? parseFloat(r.data.balance) : 0;
     else state[k] = r.data ?? [];
     // tasks.habit arrives with migration 0004; until it is run, every
@@ -971,14 +1184,21 @@ async function refreshAll(only) {
     }
   });
   applyAptHiding(keys);
+  // tasks: what is still on its way laid over what came, and kept for a start with no signal
+  if (keys.includes("tasks") && !failed.includes("tasks")) { state.tasksLoaded = true; state.fromCopy = false; }
+  if (["tasks", "completions"].some((k) => keys.includes(k) && failed.includes(k))) { if (!state.tasksLoaded) useKeptCopy(); }
+  else if (["tasks", "completions", "people", "templates"].some((k) => keys.includes(k))) { applyPending(); keepCopy(); }
+  state.netDown = noSignal;
+  if (noSignal) return netStatus();
   if (failed.length) {
     $("loadmsg").textContent = "Could not load: " + failed.join(", ") + ". Data shown may be incomplete.";
     $("loadbar").style.display = "flex";
-  } else if (!only) $("loadbar").style.display = "none";
+    delete $("loadbar").dataset.net;
+  } else if (!only) { $("loadbar").style.display = "none"; netStatus(); }
 }
 
 /* ---------------- NAV ---------------- */
-async function retryLoad() { await refreshAll(); render(); }
+async function retryLoad() { await sendOutbox(true); await refreshAll(); render(); }
 
 /* ---------- asking things, in the app's own language and style ----------
    Replaces the browser's confirm/alert/prompt, which cannot be translated,
@@ -1018,7 +1238,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261031-235900";
+const BUILD = "20261101-120000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1046,6 +1266,7 @@ document.addEventListener("visibilitychange", () => {
   checkForUpdate();
   // back from the phone's settings, perhaps with notifications allowed again
   if (state.uid && "Notification" in window && Notification.permission === "granted" && state.pushSaved !== true) keepPushAlive();
+  if (waitingCount()) sendOutbox(true); // task changes made with no signal
   render();                       // check-out time may have passed while away
 });
 // "Currently staying" depends on the time of day, so keep it honest while open
@@ -1093,10 +1314,8 @@ async function runTaskIntent(id, action) {
     const now = new Date();
     now.setHours(now.getHours() + 1);
     const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
-    try {
-      await dbq(db.from("tasks").update({ due_time: hhmm, reminded_on: null }).eq("id", id), "Could not snooze");
-    } catch { return; }
-    await refreshAll(["tasks"]); tab("today"); render();
+    taskSave([{ t: "tasks", do: "update", id, set: { due_time: hhmm, reminded_on: null } }]);
+    tab("today");
     toast("Snoozed until " + hhmm);
     return;
   }
@@ -1108,18 +1327,37 @@ async function runTaskIntent(id, action) {
   }
   tab("today"); openTaskSheet(id);
 }
+// The line under the top bar while there is no signal, or task changes are
+// still waiting for one.
 function netStatus() {
   const bar = $("loadbar");
-  if (offlineNow()) {
-    $("loadmsg").textContent = "You are offline — you can read, but changes cannot be saved.";
-    bar.style.display = "flex";
-  } else if ($("loadmsg").textContent.startsWith("You are offline")) {
-    bar.style.display = "none";
-    refreshAll().then(render);
-  }
+  if (!bar) return;
+  const n = waitingCount(), stuck = outbox.some((o) => ownChange(o) && o.waited);
+  // opened with no signal: the tasks are the ones last seen, and from when
+  const at = state.keptAt ? new Date(state.keptAt) : null, atDay = at ? at.toLocaleDateString("sv-SE") : "";
+  const seen = state.fromCopy && at ? " " + T("Tasks as last seen", "Задачите како последно видени") + " "
+    + (atDay === todayStr() ? "" : dm(atDay) + " ") + at.toTimeString().slice(0, 5) + "." : "";
+  let msg = "";
+  if (offlineNow() || state.netDown || state.slowLoad)
+    msg = (state.slowLoad && !offlineNow() ? T("Weak signal, still loading.", "Слаб сигнал, сè уште се вчитува.") : T("No signal.", "Нема сигнал."))
+      + " " + T("Tasks still save here and are sent when it is back", "Задачите се чуваат тука и се испраќаат кога ќе се врати")
+      + (n ? " · " + T(`${n} waiting`, `чекаат ${n}`) : "") + "." + seen;
+  else if (n && state.signedOut) msg = T(`Sign out and in again to send ${n} task${n > 1 ? "s" : ""}: this phone's sign-in has run out.`,
+    `Одјави се и најави се повторно за да се испратат задачи (${n}): најавата на телефонот истекла.`);
+  else if (n && stuck) msg = T(`Waiting for a signal to send ${n} task${n > 1 ? "s" : ""}; it happens by itself.`,
+    `Чека сигнал за да се испратат задачи: ${n}; ќе се случи само.`);
+  if (msg) { $("loadmsg").textContent = msg; bar.style.display = "flex"; bar.dataset.net = "1"; }
+  else if (bar.dataset.net) { bar.style.display = "none"; delete bar.dataset.net; }
 }
-window.addEventListener("online", netStatus);
-window.addEventListener("offline", netStatus);
+window.addEventListener("online", async () => {
+  netStatus();
+  await sendOutbox(true);
+  await refreshAll(); render();
+  if (state.pushSaved !== true) keepPushAlive();
+});
+window.addEventListener("offline", () => { netStatus(); render(); });
+// a change still waiting is tried again now and then, and whenever the app comes back to the front
+setInterval(() => { if (waitingCount() && !offlineNow() && !document.hidden) sendOutbox(); }, 60000);
 function tab(name, fromBack) {
   if (name !== "home" && !tabPushed) { tabPushed = true; history.pushState({ centrala: "tab" }, ""); }
   else if (name === "home" && tabPushed && !fromBack) { tabPushed = false; goBackSilently(); }
@@ -1473,26 +1711,20 @@ function quickAddKey(e) {
   e.preventDefault();
   quickAdd();
 }
-let quickBusy = false;
-async function quickAdd() {
+function quickAdd() {
   const p = quickAddParse();
   if (!p) { $("tk-quick").focus(); return toast(T("Type the task first", "Прво напиши ја задачата")); }
-  if (quickBusy) return;
-  quickBusy = true;
   const row = {
-    title: p.title, context: p.context, due_date: p.due_date, due_time: p.due_time || null,
+    id: newId(), title: p.title, context: p.context, due_date: p.due_date, due_time: p.due_time || null,
     remind: !!p.due_time, remind_before: 0, priority: !!p.priority,
     ...(p.context === "personal" ? { owner_uid: state.uid } : {}),
   };
-  let made;
-  try { made = await dbq(db.from("tasks").insert(row).select().single(), T("Task not saved", "Задачата не е зачувана")); }
-  catch { quickBusy = false; return; }
-  quickBusy = false;
+  taskSave([{ t: "tasks", do: "insert", row }]);
   $("tk-quick").value = ""; quickAddHint();
-  await refreshAll(["tasks"]); renderToday(); updateBadges();
-  toastUndo(T("Added", "Додадено") + " · " + p.title, async () => {
-    await db.from("tasks").delete().eq("id", made.id);
-    await refreshAll(["tasks"]); renderToday(); updateBadges();
+  renderToday(); updateBadges();
+  toastUndo(T("Added", "Додадено") + " · " + p.title, () => {
+    taskSave([{ t: "tasks", do: "delete", id: row.id }]);
+    renderToday(); updateBadges();
   });
 }
 // search is one tap away rather than a second box above the list
@@ -1822,10 +2054,9 @@ function moveTaskSheet(id) {
     ${t.due_date ? `<button class="btn ghost" onclick="moveTask('${id}','')">${T("Take the date off", "Тргни го датумот")}</button>` : ""}
   `);
 }
-async function moveTask(id, date) {
-  try { await dbq(db.from("tasks").update({ due_date: date || null }).eq("id", id), T("Not moved", "Не е поместено")); }
-  catch { return; }
-  closeSheet(); await refreshAll(["tasks"]); render();
+function moveTask(id, date) {
+  taskSave([{ t: "tasks", do: "update", id, set: { due_date: date || null, reminded_on: null } }]);
+  closeSheet(); render();
   toast(date ? T("Moved to ", "Поместено на ") + wd(date) + " " + dmy(date) : T("Date removed", "Датумот е тргнат"));
 }
 
@@ -1897,16 +2128,15 @@ async function swEnd() {
   return moveTaskQuiet(t.id, s0.later.to);
 }
 // moved by a swipe or from the menu: no sheet to close, and a way back
-async function moveTaskQuiet(id, date) {
+function moveTaskQuiet(id, date) {
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return;
   const was = t.due_date || null;
-  try { await dbq(db.from("tasks").update({ due_date: date || null, reminded_on: null }).eq("id", id), T("Not moved", "Не е поместено")); }
-  catch { render(); return; }
-  await refreshAll(["tasks"]); render();
-  toastUndo(T("Moved to ", "Поместено на ") + wd(date) + " " + dm(date), async () => {
-    await db.from("tasks").update({ due_date: was }).eq("id", id);
-    await refreshAll(["tasks"]); render();
+  taskSave([{ t: "tasks", do: "update", id, set: { due_date: date || null, reminded_on: null } }]);
+  render();
+  toastUndo(T("Moved to ", "Поместено на ") + wd(date) + " " + dm(date), () => {
+    taskSave([{ t: "tasks", do: "update", id, set: { due_date: was } }]);
+    render();
   });
 }
 // everything you can do to a task without opening it
@@ -1955,20 +2185,15 @@ async function moveAllOverdue() {
   const ids = B.overdue.map((t) => t.id);
   if (!ids.length) return;
   if (!await ask(T(`Move ${ids.length} overdue task(s) to today?`, `Помести ${ids.length} задоцнети задачи на денес?`))) return;
-  try { await dbq(db.from("tasks").update({ due_date: todayStr() }).in("id", ids), T("Not moved", "Не е поместено")); }
-  catch { return; }
-  await refreshAll(["tasks"]); render();
+  taskSave([{ t: "tasks", do: "update", id: ids, set: { due_date: todayStr() } }]);
+  render();
   toast(T(`${ids.length} moved to today`, `${ids.length} поместени на денес`));
 }
 
 // a recurring day that simply did not happen — settled, but not done
-async function skipOccurrence(id, day) {
-  try {
-    await dbq(db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid, skipped: true },
-      { onConflict: "task_id,done_on" }), T("Not saved", "Не е зачувано"));
-  } catch { return; }
-  state.skipSet.add(id + ":" + day);
-  await refreshAll(["completions"]); render();
+function skipOccurrence(id, day) {
+  taskSave([{ t: "task_completions", do: "upsert", row: { task_id: id, done_on: day, done_by: state.uid, skipped: true } }]);
+  render();
   toast(T("Marked as missed", "Означено како пропуштено"));
 }
 
@@ -2094,7 +2319,7 @@ async function toggleTask(id, onDate, btn) {
   const day = t.recurrence ? (onDate || todayStr()) : todayStr();
   const was = isDoneOn(t, day);
   const clearOn = !t.recurrence && was ? (t.last_done || day) : day;
-  // the box answers the tap at once; the list catches up once it is saved
+  // the box answers the tap at once; the list catches up a moment later
   const tapped = Date.now();
   if (btn) {
     btn.classList.toggle("on", !was);
@@ -2106,19 +2331,9 @@ async function toggleTask(id, onDate, btn) {
   const upd = t.recurrence
     ? { last_done: was ? null : day }
     : { done: !was, last_done: !was ? day : null };
-  try {
-    await dbq(db.from("tasks").update(upd).eq("id", id), "Not updated");
-    if (was) {
-      const r = await db.from("task_completions").delete().eq("task_id", id).eq("done_on", clearOn);
-      if (r.error) { console.error(r.error); toast("Could not un-tick that day"); render(); return; }
-      state.doneSet.delete(id + ":" + clearOn);
-    } else {
-      const r = await db.from("task_completions").upsert({ task_id: id, done_on: day, done_by: state.uid }, { onConflict: "task_id,done_on" });
-      if (r.error) { console.error(r.error); toast("Could not record that day"); render(); return; }
-      state.doneSet.add(id + ":" + day);
-    }
-  } catch { render(); return; }
-  Object.assign(t, upd);
+  taskSave([{ t: "tasks", do: "update", id, set: upd },
+    was ? { t: "task_completions", do: "delete", row: { task_id: id, done_on: clearOn } }
+      : { t: "task_completions", do: "upsert", row: { task_id: id, done_on: day, done_by: state.uid } }]);
   // long enough to see the tick land before the row moves down to Done
   const wait = 420 - (Date.now() - tapped);
   if (btn && wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -2537,16 +2752,11 @@ function clKey(e, id) {
   e.preventDefault();
   clAdd(id);
 }
-async function clToggle(i, id) {
+function clToggle(i, id) {
   tkChecklist[i].done = !tkChecklist[i].done;
   renderCl(id);
-  if (id) {  // existing task: persist the tick immediately
-    try {
-      await dbq(db.from("tasks").update({ checklist: tkChecklist }).eq("id", id), "Not saved");
-      const t = state.tasks.find((x) => x.id === id);
-      if (t) t.checklist = JSON.parse(JSON.stringify(tkChecklist));
-    } catch { tkChecklist[i].done = !tkChecklist[i].done; renderCl(id); }
-  }
+  // existing task: the tick is kept at once
+  if (id) taskSave([{ t: "tasks", do: "update", id, set: { checklist: JSON.parse(JSON.stringify(tkChecklist)) } }]);
 }
 function clAdd(id) {
   tkChecklist.push({ text: "", done: false });
@@ -2604,20 +2814,26 @@ async function saveTask(id) {
     || (parseInt(was.remind_before) || 0) !== row.remind_before || !!was.remind !== row.remind)) row.reminded_on = null;
   if (tkImg.mode === "new") row.photo_thumb = tkImg.thumb;
   if (tkImg.mode === "remove") row.photo_thumb = null;
-  try {
-    let tid = id;
-    if (id) await dbq(db.from("tasks").update(row).eq("id", id), "Task not saved");
-    else tid = (await dbq(db.from("tasks").insert(row).select().single(), "Task not saved")).id;
-    if (tkImg.mode === "new") await dbq(db.from("task_photos").upsert({ task_id: tid, data: tkImg.full }, { onConflict: "task_id" }), "Photo not saved");
-    if (tkImg.mode === "remove") await db.from("task_photos").delete().eq("task_id", tid);
-  } catch { return; }
-  closeSheet(); await refreshAll(["tasks"]); renderToday(); toast("Saved");
+  const tid = id || newId();
+  taskSave([id ? { t: "tasks", do: "update", id, set: row } : { t: "tasks", do: "insert", row: { id: tid, ...row } },
+    ...(tkImg.mode === "new" ? [{ t: "task_photos", do: "upsert", row: { task_id: tid, data: tkImg.full } }] : []),
+    ...(tkImg.mode === "remove" ? [{ t: "task_photos", do: "delete", id: tid }] : [])]);
+  closeSheet(); renderToday(); toast(T("Saved", "Зачувано"));
   return true;
 }
 async function delTask(id) {
   const row = state.tasks.find((x) => x.id === id);
   if (!row || !await ask("Delete this task?")) return;
-  await deleteUndoable("tasks", row, T("Task deleted", "Задачата е избришана"), ["tasks", "completions"]);
+  const copy = { ...row }, days = state.completions.filter((c) => c.task_id === id)
+    .map((c) => ({ task_id: id, done_on: c.done_on, skipped: !!c.skipped }));
+  ["clients", "apartments"].forEach((k) => delete copy[k]);
+  taskSave([{ t: "tasks", do: "delete", id }]);
+  closeSheet(); render();
+  // its ticks go with it in the database, so they come back with it too
+  toastUndo(T("Task deleted", "Задачата е избришана"), () => {
+    taskSave([{ t: "tasks", do: "insert", row: copy }, ...(days.length ? [{ t: "task_completions", do: "upsert", row: days }] : [])]);
+    render(); toast(T("Restored", "Вратено"));
+  });
 }
 // Completed lists one-off tasks first: a daily routine's ticks, every day,
 // buried them. Repeating ticks are a chip away, and a search finds either.
@@ -2665,14 +2881,14 @@ function renderHistory() {
   }
   list.innerHTML = html;
 }
-async function restoreTask(id) {
-  try { await dbq(db.from("tasks").update({ done: false, last_done: null, due_date: todayStr() }).eq("id", id), "Not restored"); } catch { return; }
-  await refreshAll(["tasks"]); renderHistory(); renderToday(); updateBadges(); toast(T("Restored to today", "Вратено на денес"));
+function restoreTask(id) {
+  taskSave([{ t: "tasks", do: "update", id, set: { done: false, last_done: null, due_date: todayStr() } }]);
+  renderHistory(); renderToday(); updateBadges(); toast(T("Restored to today", "Вратено на денес"));
 }
 async function histDelTask(id) {
   if (!await ask("Delete this task permanently?")) return;
-  try { await dbq(db.from("tasks").delete().eq("id", id), "Not deleted"); } catch { return; }
-  await refreshAll(["tasks"]); renderHistory(); renderToday();
+  taskSave([{ t: "tasks", do: "delete", id }]);
+  renderHistory(); renderToday();
 }
 
 /* ============================================================
@@ -4528,8 +4744,8 @@ async function createJobTask(id) {
     checklist: checklist.length ? checklist : null,
     notes: `Offer ${o.number}${o.system ? " · " + o.system : ""}`,
   };
-  try { await dbq(db.from("tasks").insert(row), "Task not created"); } catch { return; }
-  closeSheet(); await refreshAll(["tasks"]); tab("today"); toast("Installation task created");
+  taskSave([{ t: "tasks", do: "insert", row: { id: newId(), ...row } }]);
+  closeSheet(); tab("today"); toast("Installation task created");
 }
 let payMethod = "cash";
 function paymentsBlock(o) {
@@ -6491,13 +6707,14 @@ async function keepPushAlive() {
       sub = null;
     }
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    const { error } = await db.from("push_subscriptions")
+    const r = await db.from("push_subscriptions")
       .upsert({ endpoint: sub.endpoint, sub: sub.toJSON(), user_id: state.uid }, { onConflict: "endpoint" });
-    if (error) console.warn("push sign-up not saved", error);
-    state.pushSaved = !error;
+    if (r.error) console.warn("push sign-up not saved", r.error);
+    // with no signal it is not known either way: no warning, and asked again once there is one
+    state.pushSaved = !r.error ? true : netFailed(r) ? undefined : false;
   } catch (e) {
     console.warn("push sign-up", e);
-    state.pushSaved = false;
+    state.pushSaved = offlineNow() || netFailed(e) ? undefined : false;
   }
   updatePushState();
   if (state.tab === "home") renderHome();
@@ -8859,7 +9076,7 @@ function parseSpoken(raw) {
   return out;
 }
 
-let rec = null, voiceText = "", voiceFinal = "", voiceSession = "", voiceParsed = null, voiceBusy = false;
+let rec = null, voiceText = "", voiceFinal = "", voiceSession = "", voiceParsed = null;
 let voiceStopping = false, silenceT = null, maxT = null, tickT = null, voiceStart = 0, voiceErr = "";
 
 const VOICE_SILENCE_MS = 4000;   // how long a pause may last before it counts as "finished"
@@ -9021,20 +9238,16 @@ function speak(txt) {
     speechSynthesis.speak(u);
   } catch {}
 }
-async function saveSpokenTask() {
-  if (voiceBusy) return;
+function saveSpokenTask() {
   const p = voiceParsed;
   if (!p || !p.title) return toast("Nothing to save");
-  voiceBusy = true;
   const row = {
-    title: p.title, context: p.context || defaultCtx(),
+    id: newId(), title: p.title, context: p.context || defaultCtx(),
     due_date: p.due_date, due_time: p.due_time,
     remind: !!(p.due_time && p.remind !== false), priority: p.priority, notes: null,
   };
-  try { await dbq(db.from("tasks").insert(row), "Task not saved"); }
-  catch { voiceBusy = false; return; }
-  voiceBusy = false;
-  closeSheet(); await refreshAll(["tasks"]); render();
+  taskSave([{ t: "tasks", do: "insert", row }]);
+  closeSheet(); render();
   const rem = !!(p.due_time && p.remind !== false);
   toast("Saved: " + p.title + (rem ? " · reminder " + p.due_time : ""));
   speak(voiceLang().startsWith("mk")
@@ -9724,7 +9937,7 @@ function renderPurchases() {
 ============================================================ */
 const MK = {
   // tabs and screens
-  "Home": "Дома", "Tasks": "Задачи", "Elaks": "Елакс", "Apts": "Станови",
+  "Retry": "Пак", "Home": "Дома", "Tasks": "Задачи", "Elaks": "Елакс", "Apts": "Станови",
   "Settings": "Поставки", "Apartments": "Станови", "Stock": "Магацин",
   "Offers": "Понуди", "Purchases": "Набавки", "Clients": "Клиенти",
   "Stays": "Гости", "Calendar": "Календар",
