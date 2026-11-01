@@ -1377,7 +1377,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261102-230000";
+const BUILD = "20261103-090000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -4060,8 +4060,9 @@ async function openOfferSheet(id, forClient, preset) {
   if (id && !await ensureLoaded("offers", id)) return toast(T("That offer could not be loaded", "Понудата не може да се вчита"));
   if (id) await ensurePaymentsOf(id);
   const o = id ? state.offers.find((x) => x.id === id) : {
-    number: await nextOfferNumber(), title: (preset && preset.title) || "", system: "", validity: 7, status: "draft",
-    offer_date: todayStr(), items: [], total_note: "", client_id: forClient || "",
+    number: await nextOfferNumber(), title: (preset && preset.title) || "", system: (preset && preset.system) || "",
+    validity: (preset && preset.validity) || 7, status: "draft",
+    offer_date: todayStr(), items: (preset && preset.items) || [], total_note: "", client_id: forClient || "",
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
   if (!id && preset) for (const aid of preset.articles || []) {
@@ -5176,16 +5177,17 @@ async function settleDiff(id, diff, cash) {
   } catch { return; }
   closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal", "invoices"]); render(); toast("Balance recorded");
 }
+// The copy goes into the new sheet as it is drawn. Filling it in afterwards
+// lost it: the new sheet waits for its number first, then starts empty.
 function duplicateOffer(id) {
   const src = state.offers.find((x) => x.id === id);
+  if (!src) return;
   closeSheet();
-  setTimeout(() => {
-    openOfferSheet();
-    $("of-title").value = src.title; $("of-system").value = src.system || "";
-    $("of-client").value = src.client_id || ""; $("of-val").value = src.validity;
-    offerItems = JSON.parse(JSON.stringify(src.items || [])).map((it) => { delete it.consumed; return it; });
-    renderOfferItems();
-  }, 240);
+  setTimeout(() => openOfferSheet(null, src.client_id || "", {
+    title: src.title, system: src.system, validity: src.validity,
+    // the cable on the new job is measured afresh
+    items: JSON.parse(JSON.stringify(src.items || [])).map((it) => { delete it.consumed; return it; }),
+  }), 240);
 }
 // The cable used is only known once the work is done. Entered here — from the
 // offer, from Finished on the job, or on the way to the invoice — it goes on
