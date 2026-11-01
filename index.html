@@ -1377,7 +1377,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261102-210000";
+const BUILD = "20261102-230000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -4056,14 +4056,18 @@ async function nextOfferNumber() {
     return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
   }
 }
-async function openOfferSheet(id, forClient) {
+async function openOfferSheet(id, forClient, preset) {
   if (id && !await ensureLoaded("offers", id)) return toast(T("That offer could not be loaded", "Понудата не може да се вчита"));
   if (id) await ensurePaymentsOf(id);
   const o = id ? state.offers.find((x) => x.id === id) : {
-    number: await nextOfferNumber(), title: "", system: "", validity: 7, status: "draft",
+    number: await nextOfferNumber(), title: (preset && preset.title) || "", system: "", validity: 7, status: "draft",
     offer_date: todayStr(), items: [], total_note: "", client_id: forClient || "",
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
+  if (!id && preset) for (const aid of preset.articles || []) {
+    const a = state.stock.find((x) => x.id === aid);
+    if (a) offerItems.push(articleItem(a));
+  }
   openSheet(`
     <h2>${id ? T("Offer ", "Понуда ") + o.number : T("New offer ", "Нова понуда ") + o.number}</h2>
     <label>System title</label><input id="of-title" value="${esc(o.title)}" placeholder="e.g. 2 Камери + Аларм Систем">
@@ -4143,11 +4147,11 @@ function renderPicker() {
       <div class="a-name"><b>${esc(a.name)}</b><span>stock: ${fmt(a.stock)} ${unitLbl(a.unit)} · ${fmt(a.sell_price)} ден.</span></div>
     </div>`).join("");
 }
+const articleItem = (a) => ({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit,
+  qty: a.unit === "m" ? null : 1, price: a.sell_price, cost: a.purchase_price || 0, vat: a.vat_rate ?? 18 });
 function addOfferItem(articleId) {
   const a = state.stock.find((x) => x.id === articleId);
-  offerItems.push({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit,
-    qty: a.unit === "m" ? null : 1, price: a.sell_price, cost: a.purchase_price || 0,
-    vat: a.vat_rate ?? 18 });
+  offerItems.push(articleItem(a));
   $("of-search").value = ""; $("of-picker").innerHTML = ""; renderOfferItems();
 }
 function addFreeItem() {
@@ -10726,15 +10730,34 @@ function renderWork() {
     unpaid: items.filter((w) => w.stage === "unpaid").length,
   };
   const active = (w) => w.stage !== "paid";
+  loadRepeatHist();
+  const due = repeatWork();
+  counts.repeat = due ? due.length : 0;
   $("work-filter").innerHTML = [
     ["active", T("In progress", "Во тек")],
     ["schedule", T("To schedule", "За закажување")],
     ["booked", T("Scheduled", "Закажани")],
     ["invoice", T("To invoice", "За фактура")],
     ["unpaid", T("Not paid", "Неплатени")],
+    ["repeat", T("Service due", "За сервис")],
     ["all", T("All", "Сите")],
   ].map(([v, l]) => `<button class="chip ${state.workFilter === v ? "on" : ""}"
     onclick="state.workFilter='${v}';renderWork()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
+  // the chosen chip in sight, when it was chosen from elsewhere (the nudge below)
+  const onChip = $("work-filter").querySelector(".chip.on");
+  if (onChip && onChip.scrollIntoView) onChip.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+  if (state.workFilter === "repeat") {
+    const list = (due || []).filter((r) => searchHit("work-search", r.c.name, r.s.name, r.s.address, r.s.recorder));
+    $("work-list").innerHTML = !due ? (repeatErr
+        ? `<div class="empty">${T("The visit history needs a signal. Try again when you have one.", "Историјата на посети бара сигнал. Пробај пак кога ќе имаш.")}</div>` : SKEL(2))
+      : list.length
+      ? `<p class="muted" style="font-size:12.5px;margin:0 2px 8px">${T(
+          "Sites a year or more since the last visit, and recorder drives about three years old. Each can become an offer or a job.",
+          "Локации каде последната посета е пред година или повеќе, и дискови во рекордери стари околу три години. Секоја може да стане понуда или работа.")}</p>` + repeatRows(list)
+      : `<div class="empty">${T("No service due and no old drives.", "Нема сервис на ред ни стари дискови.")}</div>`;
+    return;
+  }
 
   let list = items;
   if (state.workFilter === "active") list = items.filter(active);
@@ -10745,7 +10768,13 @@ function renderWork() {
   list = list.slice().sort((a, b) => order[a.stage] - order[b.stage]
     || String(a.job && a.job.scheduled_on || "9999").localeCompare(String(b.job && b.job.scheduled_on || "9999")));
 
-  $("work-list").innerHTML = list.length ? list.map((w) => {
+  const nudge = state.workFilter === "active" && counts.repeat
+    ? `<div class="card row tapp" role="button" tabindex="0" onclick="state.workFilter='repeat';renderWork()" style="gap:10px">
+        <span class="led" style="background:var(--amber)"></span>
+        <div style="flex:1;min-width:0"><b>${T("Service due", "За сервис")} · ${counts.repeat}</b>
+          <div class="o-num">${T("Yearly visits and old recorder drives", "Годишни посети и стари дискови")}</div></div>
+        <span class="muted">›</span></div>` : "";
+  $("work-list").innerHTML = nudge + (list.length ? list.map((w) => {
     const st = WORK_STAGES[w.stage];
     const sub = [invClient(w.o), w.job && w.job.scheduled_on ? dmy(w.job.scheduled_on) : "",
       w.inv ? T("Фактура", "Фактура") + " " + w.inv.number : ""].filter(Boolean);
@@ -10758,7 +10787,7 @@ function renderWork() {
         <div style="font-size:11.5px;color:${st.colour}">${T(st.en, st.mk)}</div></div>
     </div>`;
   }).join("") : (state.loading ? SKEL(3)
-    : `<div class="empty">${T("Nothing here.<br>Start with an offer.", "Ништо тука.<br>Почни со понуда.")}</div>`);
+    : `<div class="empty">${T("Nothing here.<br>Start with an offer.", "Ништо тука.<br>Почни со понуда.")}</div>`));
 }
 
 // One screen for one piece of work: the three steps, where it has got to,
@@ -11243,12 +11272,12 @@ function renderJobs() {
 
 let jobPhotos = [], jobRemoved = [], jobOpenId = null;
 
-async function openJobSheet(id, fromOffer, edit) {
+async function openJobSheet(id, fromOffer, edit, preset) {
   if (id && !edit) return openJobCard(id);
   const o = fromOffer ? state.offers.find((x) => x.id === fromOffer) : null;
   const j = id ? state.jobs.find((x) => x.id === id)
     : { title: o ? o.title : "", offer_id: o ? o.id : null, client_id: o ? o.client_id : null,
-        scheduled_on: todayStr(), status: "scheduled", assigned_to: state.uid };
+        scheduled_on: todayStr(), status: "scheduled", assigned_to: state.uid, ...(preset || {}) };
   if (id && !j) return;
   jobOpenId = id || null; jobPhotos = []; jobRemoved = [];
   if (id) {
@@ -11596,6 +11625,89 @@ const HDD_LIFE_YEARS = 3;      // recorders usually fail at the drive
 function hddAge(s) {
   if (!s.hdd_installed_on) return null;
   return Math.round(((Date.parse(todayStr()) - Date.parse(s.hdd_installed_on)) / 31557600000) * 10) / 10;
+}
+
+/* ---------- repeat work: the yearly service, and drives near the end ----------
+   A site is due a visit a year after the last one: its last finished job, the
+   equipment put in there, or its drive. A recorder's drive is worth replacing
+   at about three years. A site with a visit already booked is left out, so
+   the list is only what nobody has picked up yet. */
+const SERVICE_EVERY_MONTHS = 12;
+// a site's whole visit history, not only the half year of jobs kept in the app
+let repeatHist = null, repeatErr = false;
+async function loadRepeatHist() {
+  if (repeatHist) return;
+  repeatHist = { loading: true, visits: {}, contracts: new Set() };
+  try {
+    const [j, d] = await Promise.all([
+      db.from("jobs").select("site_id, done_at, scheduled_on").eq("status", "done").not("site_id", "is", null),
+      db.from("documents").select("client_id").eq("kind", "договор").not("client_id", "is", null)]);
+    if (j.error || d.error) throw j.error || d.error;
+    for (const r of j.data || []) {
+      const day = String(r.done_at || r.scheduled_on || "").slice(0, 10);
+      if (r.site_id && day && !(repeatHist.visits[r.site_id] >= day)) repeatHist.visits[r.site_id] = day;
+    }
+    for (const r of d.data || []) if (r.client_id) repeatHist.contracts.add(r.client_id);
+    repeatHist.loading = false; repeatErr = false;
+  } catch (e) {
+    console.warn("repeat work", e); repeatHist = null;
+    if (!repeatErr) { repeatErr = true; if (state.tab === "elaks" && state.elaksView === "work") renderWork(); }
+    return;
+  }
+  if (state.tab === "elaks" && state.elaksView === "work") renderWork();
+}
+const monthsSince = (day) => Math.floor((Date.parse(todayStr()) - Date.parse(day)) / 2629800000);
+function repeatWork() {
+  if (!repeatHist || repeatHist.loading) return null;
+  const contracts = new Set([...repeatHist.contracts,
+    ...state.docs.filter((d) => d.kind === "договор" && d.client_id).map((d) => d.client_id)]);
+  const out = [];
+  for (const s of state.sites) {
+    const c = state.clients.find((x) => x.id === s.client_id);
+    if (s.active === false || !c || c.active === false) continue;
+    const jobs = state.jobs.filter((j) => j.site_id === s.id && j.status !== "cancelled");
+    if (jobs.some((j) => j.status !== "done")) continue;          // a visit is already booked
+    const last = [repeatHist.visits[s.id], s.hdd_installed_on,
+      ...jobs.map((j) => String(j.done_at || j.scheduled_on || "").slice(0, 10)),
+      ...state.installs.filter((i) => i.site_id === s.id).map((i) => i.installed_on)]
+      .filter(Boolean).sort().pop() || null;
+    const age = hddAge(s);
+    const drive = age !== null && age >= HDD_LIFE_YEARS;
+    const months = last ? monthsSince(last) : null;
+    const service = months !== null && months >= SERVICE_EVERY_MONTHS;
+    if (drive || service) out.push({ s, c, last, months, age, drive, service, contract: contracts.has(c.id) });
+  }
+  // on contract first, then the drives, then the longest since a visit
+  return out.sort((a, b) => b.contract - a.contract || b.drive - a.drive || (b.months || 0) - (a.months || 0));
+}
+function repeatRows(list) {
+  return list.map((r) => {
+    const why = [r.service ? [T(`Last visit ${dmy(r.last)} · ${r.months} months ago`, `Последна посета ${dmy(r.last)} · пред ${r.months} месеци`), "var(--amber)"] : null,
+      r.drive ? [T(`Drive ${r.s.hdd_tb ? r.s.hdd_tb + "TB, " : ""}${r.age} years old`, `Диск ${r.s.hdd_tb ? r.s.hdd_tb + "TB, " : ""}${r.age} години`), "var(--danger)"] : null].filter(Boolean);
+    return `<div class="card">
+      <div class="row tapp" role="button" tabindex="0" style="gap:10px" onclick="openSiteSheet('${r.s.id}')">
+        <span class="led" style="background:${r.drive ? "var(--danger)" : "var(--amber)"}"></span>
+        <div style="flex:1;min-width:0"><b>${esc(r.c.name)}</b>
+          <div class="o-num">${esc(r.s.name)}${r.contract ? ` · <span style="color:var(--work)">${T("on contract", "под договор")}</span>` : ""}</div>
+          ${why.map(([w, colour]) => `<div style="font-size:12.5px;color:${colour}">${esc(w)}</div>`).join("")}</div>
+        <span class="muted">›</span></div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="btn sm ghost" style="width:100%" onclick="repeatTo('${r.s.id}','offer')">+ ${T("Offer", "Понуда")}</button>
+        <button class="btn sm ghost" style="width:100%" onclick="repeatTo('${r.s.id}','job')">+ ${T("Job", "Работа")}</button>
+      </div></div>`;
+  }).join("");
+}
+// one tap from the list to an offer or a job, already about this site
+function repeatTo(siteId, to) {
+  const s = state.sites.find((x) => x.id === siteId);
+  if (!s) return;
+  const age = hddAge(s), drive = age !== null && age >= HDD_LIFE_YEARS;
+  const title = (drive ? "Сервис и замена на диск" : "Годишен сервис") + " — " + s.name;
+  if (to === "job") return openJobSheet(null, null, false, { title, client_id: s.client_id, site_id: s.id, address: s.address || "" });
+  // a drive the same size as the old one, if there is one on the shelf
+  const disk = drive && s.hdd_tb ? state.stock.find((a) => /hdd|purple|skyhawk|диск/i.test(a.name + " " + (a.category || ""))
+    && new RegExp("\\b" + String(s.hdd_tb).replace(".", "\\.") + "\\s?TB", "i").test(a.name)) : null;
+  openOfferSheet(null, s.client_id, { title, articles: disk ? [disk.id] : [] });
 }
 
 function sitesBlock(clientId) {
