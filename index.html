@@ -377,7 +377,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .tk-strip button.today .ds-n{color:var(--amber)}
 .tk-strip button.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .tk-strip button.on .ds-wd,.tk-strip button.on .ds-c{color:#dbe3ee}
-/* overdue, folded to a line when there is a pile of it */
+/* overdue, folded to one line that opens */
 .late-line{display:flex;align-items:center;gap:10px;cursor:pointer;border-color:var(--danger)}
 .late-line .late-n{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--danger)}
 .late-line .late-what{flex:1;min-width:0;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1377,7 +1377,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261103-090000";
+const BUILD = "20261103-110000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2122,19 +2122,18 @@ function renderToday() {
   // what else is happening today, and only then what has no day yet — which
   // used to sit above today and push it off the screen.
   let html = "";
-  // A pile of late things used to push today off the screen. Two or fewer are
-  // shown as they are; more fold into one line that opens.
+  // Late things used to push today off the screen. However many there are,
+  // they fold into one line that opens; tapping Overdue folds them again.
   const lateN = overdue.length + missed.length;
-  const fold = lateN > 2 && !state.showLate;
+  const fold = lateN > 0 && !state.showLate;
   if (fold) {
     const names = [...overdue.map((t) => t.title), ...missed.map((m) => m.t.title)];
     html += `<div class="card late-line" role="button" tabindex="0" onclick="state.showLate=true;renderToday()">
       <span class="late-n">${lateN}</span><b style="color:var(--danger)">${T("overdue", "задоцнети")}</b>
       <span class="late-what">${esc(names.slice(0, 3).join(" · "))}</span><span class="chev">›</span></div>`;
   } else if (lateN) {
-    html += `<div class="sec-row"><div class="sec ${lateN > 2 ? "tapp" : ""}" style="color:var(--danger)" ${lateN > 2
-      ? `role="button" tabindex="0" onclick="state.showLate=false;renderToday()"` : ""}>${T("Overdue", "Задоцнети")} · ${lateN}${
-      lateN > 2 ? ` <span class="muted" style="font-weight:400">▾</span>` : ""}</div>
+    html += `<div class="sec-row"><div class="sec tapp" style="color:var(--danger)" role="button" tabindex="0"
+      onclick="state.showLate=false;renderToday()">${T("Overdue", "Задоцнети")} · ${lateN} <span class="muted" style="font-weight:400">▾</span></div>
       ${overdue.length ? `<button class="chip sm" onclick="moveAllOverdue()">${T("Move all to today", "Помести ги на денес")}</button>` : ""}
     </div>` + overdue.map(row).join("") + missed.map(missedRow).join("");
   }
