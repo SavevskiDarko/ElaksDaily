@@ -818,7 +818,9 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all"
   jobFilter: "upcoming", stayPays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
-  cashTotal: 0, aptCash: null, leases: [], rentPays: [], hideApts: new Set() };
+  cashTotal: 0, aptCash: null, leases: [], rentPays: [], hideApts: new Set(),
+  more: {}, olderIds: {}, olderPage: {} };
+const PAYMENTS = { limit: 400 };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
 async function dbq(q, failMsg) {
@@ -1078,6 +1080,7 @@ async function startApp(signedIn) {
   render();
   netStatus();
   sendOutbox();                   // changes made with no signal last time the app was open
+  if (state.perm.elaks) markOldInvoicesPaid();
   updatePushState();
   keepPushAlive();
   handleNotificationIntent();
@@ -1106,7 +1109,84 @@ async function startApp(signedIn) {
 const backDays = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString("sv-SE"); };
 const backMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n, 1); return d.toLocaleDateString("sv-SE"); };
 
-// Bounded queries: recent + open records only, so the app stays fast as data grows.
+// Recent records, so the app stays quick as the years add up — and every
+// older one still open on top, so it never drops out of Work, To invoice or
+// Outstanding: an accepted offer not paid in full, an invoice not paid, a
+// supplier bill not paid. The rest of the past is a "Show older" away.
+const KEEP = {
+  offers:    { table: "offers", select: "*, clients(name)", order: "created_at", limit: 150,
+               cols: "id, status, grand_total, paid_amount",
+               open: (o) => o.status === "accepted" && (parseFloat(o.paid_amount) || 0) < (parseFloat(o.grand_total) || 0) - 0.005 },
+  invoices:  { table: "invoices", select: "*", order: "invoice_date", limit: 300,
+               cols: "id, paid_on, cancelled", open: (i) => !i.paid_on && !i.cancelled },
+  purchases: { table: "purchases", select: "*", order: "doc_date", limit: 150,
+               cols: "id, total, paid_amount", open: (p) => (parseFloat(p.paid_amount) || 0) < (parseFloat(p.total) || 0) - 0.005 },
+  // an archive: nothing in it is ever open, the older ones come on request
+  docs:      { table: "documents", select: "*", order: "doc_date", limit: 400 },
+};
+const OLDER_PAGE = 100;
+async function byIds(K, ids) {
+  const rows = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const r = await db.from(K.table).select(K.select).in("id", ids.slice(i, i + 100));
+    if (r.error) return r;
+    rows.push(...(r.data || []));
+  }
+  return { data: rows, error: null };
+}
+async function recentAndOpen(key) {
+  const K = KEEP[key];
+  const r = await db.from(K.table).select(K.select).order(K.order, { ascending: false }).limit(K.limit);
+  if (r.error) return r;
+  const rows = r.data || [], have = new Set(rows.map((x) => x.id));
+  const add = (list) => { for (const x of list || []) if (!have.has(x.id)) { have.add(x.id); rows.push(x); } };
+  state.more[key] = rows.length >= K.limit;
+  if (state.more[key] && K.open) {
+    // a light pass over the few columns that say whether an older one is still open, then those in full
+    const oldest = rows[rows.length - 1][K.order], ids = [];
+    for (let at = 0; at < 50000; at += 1000) {
+      const l = await db.from(K.table).select(K.cols).lte(K.order, oldest).order(K.order, { ascending: false }).range(at, at + 999);
+      if (l.error) break;
+      ids.push(...(l.data || []).filter((x) => K.open(x) && !have.has(x.id)).map((x) => x.id));
+      if ((l.data || []).length < 1000) break;
+    }
+    const full = await byIds(K, ids);
+    if (!full.error) add(full.data);
+  }
+  // and whatever was opened from further back stays, fresh
+  const kept = (state.olderIds[key] || []).filter((id) => !have.has(id));
+  if (kept.length) { const back = await byIds(K, kept); if (!back.error) add(back.data); }
+  return { data: rows, error: null };
+}
+// the next page of the past, at the end of a list
+let loadingOlder = false;
+async function loadOlder(key) {
+  const K = KEEP[key];
+  if (loadingOlder || !K) return;
+  loadingOlder = true;
+  const page = state.olderPage[key] || 0, from = K.limit + page * OLDER_PAGE;
+  const r = await db.from(K.table).select(K.select).order(K.order, { ascending: false }).range(from, from + OLDER_PAGE - 1);
+  loadingOlder = false;
+  if (r.error) return toast(T("Could not load older ones", "Постарите не може да се вчитаат") + " — " + r.error.message);
+  const have = new Set(state[key].map((x) => x.id)), fresh = (r.data || []).filter((x) => !have.has(x.id));
+  state[key] = state[key].concat(fresh);
+  state.olderIds[key] = (state.olderIds[key] || []).concat(fresh.map((x) => x.id));
+  state.olderPage[key] = page + 1;
+  if ((r.data || []).length < OLDER_PAGE) state.more[key] = false;
+  render();
+}
+const olderButton = (key, label) => state.more[key]
+  ? `<button class="btn ghost" style="margin-top:6px" onclick="loadOlder('${key}')">${label}</button>` : "";
+// one record from further back, opened from somewhere that knows its id
+async function ensureLoaded(key, id) {
+  if (!id || state[key].some((x) => x.id === id)) return true;
+  const r = await byIds(KEEP[key], [id]);
+  if (r.error || !(r.data || []).length) return false;
+  state[key].push(r.data[0]);
+  state.olderIds[key] = (state.olderIds[key] || []).concat(id);
+  return true;
+}
+
 const LOADERS = {
   people:     { need: () => true,               q: () => db.from("team_members").select("*") },
   settings:   { need: () => true,               q: () => db.from("app_settings").select("key, value") },
@@ -1128,16 +1208,23 @@ const LOADERS = {
   tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
   stock:      { need: () => state.perm.elaks,   q: () => db.from("article_stock").select("*").eq("active", true).order("name") },
   clients:    { need: () => state.perm.elaks,   q: () => db.from("clients").select("*").order("name") },
-  offers:     { need: () => state.perm.elaks,   q: () => db.from("offers").select("*, clients(name)").order("created_at", { ascending: false }).limit(150) },
+  offers:     { need: () => state.perm.elaks,   q: () => recentAndOpen("offers") },
   cash:       { need: () => state.perm.elaks,   q: () => db.from("elaks_cash").select("*").order("created_at", { ascending: false }).limit(30) },
-  payments:   { need: () => state.perm.elaks,   q: () => db.from("offer_payments").select("*").order("paid_on", { ascending: false }).limit(400) },
-  purchases:  { need: () => state.perm.elaks,   q: () => db.from("purchases").select("*").order("doc_date", { ascending: false }).limit(150) },
+  // the latest payments, for the lists; an offer's balance comes from the total kept on it (offerPaid)
+  payments:   { need: () => state.perm.elaks,   q: async () => {
+    const r = await db.from("offer_payments").select("*").order("paid_on", { ascending: false }).limit(PAYMENTS.limit);
+    if (!r.error) state.paymentsCut = (r.data || []).length >= PAYMENTS.limit;
+    return r;
+  } },
+  purchases:  { need: () => state.perm.elaks,   q: () => recentAndOpen("purchases") },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   sites:      { need: () => state.perm.elaks,   q: () => db.from("sites").select("*").eq("active", true).order("name") },
-  jobs:       { need: () => state.perm.elaks,   q: () => db.from("jobs").select("*").gte("scheduled_on", backDays(180)).order("scheduled_on") },
-  invoices:   { need: () => state.perm.elaks,   q: () => db.from("invoices").select("*").order("invoice_date", { ascending: false }).limit(300) },
+  // the last half year, and any job still to do however old — or with no date at all
+  jobs:       { need: () => state.perm.elaks,   q: () => db.from("jobs").select("*")
+    .or(`scheduled_on.gte.${backDays(180)},scheduled_on.is.null,status.in.(scheduled,started)`).order("scheduled_on") },
+  invoices:   { need: () => state.perm.elaks,   q: () => recentAndOpen("invoices") },
   suppliers:  { need: () => state.perm.elaks,   q: () => db.from("suppliers").select("*").eq("active", true).order("name") },
-  docs:       { need: () => state.perm.elaks,   q: () => db.from("documents").select("*").order("doc_date", { ascending: false }).limit(400) },
+  docs:       { need: () => state.perm.elaks,   q: () => recentAndOpen("docs") },
   policies:   { need: () => state.perm.ins,     q: () => db.from("policies").select("*").eq("active", true).order("end_date", { nullsFirst: false }) },
   polPays:    { need: () => state.perm.ins,     q: () => db.from("policy_payments").select("*").order("paid_on", { ascending: false }).limit(500) },
   statements: { need: () => state.perm.ins,     q: () => db.from("statements").select("*").order("period", { ascending: false }).limit(120) },
@@ -1238,7 +1325,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261101-180000";
+const BUILD = "20261101-210000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3774,7 +3861,8 @@ function renderOffers() {
         <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${needsDeduct(o) ? ' · <span style="color:var(--danger)">stock not taken out</span>' : ""}${authorTag(o.created_by)}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)}</span>
-    </div>`).join("") : (state.loading ? SKEL(3) : '<div class="empty">No offers.<br>Create with +</div>');
+    </div>`).join("") + olderButton("offers", T("Show older offers", "Прикажи постари понуди"))
+    : (state.loading ? SKEL(3) : '<div class="empty">No offers.<br>Create with +</div>' + olderButton("offers", T("Show older offers", "Прикажи постари понуди")));
 }
 async function nextOfferNumber() {
   const y = new Date().getFullYear();
@@ -3789,6 +3877,8 @@ async function nextOfferNumber() {
   }
 }
 async function openOfferSheet(id) {
+  if (id && !await ensureLoaded("offers", id)) return toast(T("That offer could not be loaded", "Понудата не може да се вчита"));
+  if (id) await ensurePaymentsOf(id);
   const o = id ? state.offers.find((x) => x.id === id) : {
     number: await nextOfferNumber(), title: "", system: "", validity: 7, status: "draft",
     offer_date: todayStr(), items: [], total_note: "", client_id: "",
@@ -6082,7 +6172,8 @@ function renderDocs() {
       : (state.loading ? SKEL(3) : `<div class="empty">${q || state.docKind !== "all" || state.docClient !== "all"
           ? T("Nothing matches those filters.", "Ништо не одговара на филтрите.")
           : T("No documents yet.<br>Photograph an испратница or фактура to keep it here.",
-              "Сè уште нема документи.<br>Сликај испратница или фактура за да ја чуваш тука.")}</div>`)}`;
+              "Сè уште нема документи.<br>Сликај испратница или фактура за да ја чуваш тука.")}</div>`)}
+    ${olderButton("docs", T("Show older documents", "Прикажи постари документи"))}`;
 }
 
 // what is being attached to the document currently open
@@ -6442,9 +6533,19 @@ function openClientSheet(id) {
     ${id ? installsBlock(id) : ""}
     ${id ? docsBlock(id) : ""}
     ${id ? relatedTasks("client_id", id) : ""}
-    ${id ? '<div class="sec">Offers</div>' + (state.offers.filter((o) => o.client_id === id).map((o) =>
-      `<div class="mov"><span>${o.number} · ${esc(o.title)} · ${STATUS[o.status]}</span><span class="mono">${fmt(o.grand_total)} ден.</span></div>`).join("") || '<p class="muted">No offers yet.</p>') : ""}
+    ${id ? `<div class="sec">${T("Offers", "Понуди")}</div><div id="cl-offers">${clientOffersHtml(state.offers.filter((o) => o.client_id === id))}</div>` : ""}
   `);
+  // the loaded offers are the recent ones: the client's whole history comes from the server
+  if (id) db.from("offers").select("id, number, title, status, grand_total, offer_date").eq("client_id", id)
+    .order("offer_date", { ascending: false }).then((r) => {
+      const el = $("cl-offers");
+      if (!r.error && el) el.innerHTML = clientOffersHtml(r.data || []);
+    });
+}
+function clientOffersHtml(list) {
+  return list.length ? list.map((o) => `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openOfferSheet('${o.id}'),240)">
+      <span>${esc(o.number)} · ${esc(o.title)} · ${STATUS[o.status] || o.status}</span><span class="mono">${fmt(o.grand_total)} ден. ›</span></div>`).join("")
+    : `<p class="muted">${T("No offers yet.", "Сè уште нема понуди.")}</p>`;
 }
 // A client with history is hidden rather than deleted — deleting would take
 // their offers with it, and those are the record of work you actually did.
@@ -9443,10 +9544,23 @@ function renderHome() {
 }
 
 const paymentsOf = (offerId) => state.payments.filter((p) => p.offer_id === offerId);
+// The payments loaded are the latest few hundred, so an older offer may have
+// only some of its own among them. Its kept total (paid_amount, written by
+// syncOfferPaid on every change) is whole, and is what counts once the list is cut.
 const offerPaid = (o) => {
   const rows = paymentsOf(o.id);
-  return rows.length ? sumBy(rows, (p) => p.amount) : (parseFloat(o.paid_amount) || 0);
+  const kept = o.paid_amount === null || o.paid_amount === undefined ? null : parseFloat(o.paid_amount) || 0;
+  if (state.paymentsCut && kept !== null) return kept;
+  return rows.length ? sumBy(rows, (p) => p.amount) : (kept || 0);
 };
+// all of one offer's payments, for its sheet, when the list is cut
+async function ensurePaymentsOf(offerId) {
+  if (!state.paymentsCut || !offerId) return;
+  const r = await db.from("offer_payments").select("*").eq("offer_id", offerId);
+  if (r.error) return;
+  const have = new Set(state.payments.map((p) => p.id));
+  state.payments = state.payments.concat((r.data || []).filter((p) => !have.has(p.id)));
+}
 const offerBalance = (o) => (parseFloat(o.grand_total) || 0) - offerPaid(o);
 const offerSettled = (o) => offerPaid(o) > 0 && offerBalance(o) <= 0.005;
 
@@ -10013,7 +10127,8 @@ function renderPurchases() {
       </div>
       <span class="mono">${fmt(p.total)}</span>
     </div>`;
-  }).join("") : (state.loading ? SKEL(3) : '<div class="empty">No purchases yet.<br>Add with +</div>');
+  }).join("") + olderButton("purchases", T("Show older purchases", "Прикажи постари набавки"))
+    : (state.loading ? SKEL(3) : '<div class="empty">No purchases yet.<br>Add with +</div>');
 }
 
 /* ============================================================
@@ -10495,6 +10610,34 @@ function invPaidOn(i) {
   return o.paid_at || paymentsOf(o.id).map((p) => p.paid_on).sort().pop() || i.invoice_date;
 }
 const invPaid = (i) => !!invPaidOn(i);
+// Before payments and invoices were joined, an invoice paid on its offer was
+// never marked. It shows paid (invPaidOn) but stays in the database as unpaid,
+// and so among the open ones loaded every time. Marked once, here, it is not.
+async function markOldInvoicesPaid() {
+  try {
+    if (localStorage.getItem("centrala_inv_marked") === "1" || offlineNow()) return;
+    const r = await db.from("invoices").select("id, offer_id, total, invoice_date").is("paid_on", null).eq("cancelled", false);
+    if (r.error) return;
+    const todo = (r.data || []).filter((i) => i.offer_id && (parseFloat(i.total) || 0) > 0.005);
+    const offers = [];
+    const ids = [...new Set(todo.map((i) => i.offer_id))];
+    for (let k = 0; k < ids.length; k += 100) {
+      const o = await db.from("offers").select("id, paid_amount, paid_at").in("id", ids.slice(k, k + 100));
+      if (o.error) return;
+      offers.push(...(o.data || []));
+    }
+    let marked = 0;
+    for (const i of todo) {
+      const o = offers.find((x) => x.id === i.offer_id);
+      if (!o || (parseFloat(o.paid_amount) || 0) < (parseFloat(i.total) || 0) - 0.005) continue;
+      const u = await db.from("invoices").update({ paid_on: o.paid_at || i.invoice_date }).eq("id", i.id);
+      if (u.error) return;
+      marked++;
+    }
+    localStorage.setItem("centrala_inv_marked", "1");
+    if (marked) { await refreshAll(["invoices"]); render(); }
+  } catch (e) { console.warn("old invoices", e); }
+}
 // what the client has paid towards it so far, on its offer
 const invReceived = (i) => { const o = invOffer(i); return o ? offerPaid(o) : 0; };
 const invClient = (i) => (state.clients.find((c) => c.id === i.client_id) || {}).name || "";
@@ -10567,6 +10710,8 @@ function renderInvoices() {
       <span class="o-total mono">${fmt(i.total)}</span>
     </div>`;
   }).join("") : `<div class="empty">${T("No invoices yet.", "Нема фактури.")}</div>`;
+  // every unpaid one is always here; older paid ones come on request
+  if (state.invFilter === "all") $("invoice-list").innerHTML += olderButton("invoices", T("Show older invoices", "Прикажи постари фактури"));
 }
 
 // An invoice takes the next number for good — a stray tap used to issue one.
