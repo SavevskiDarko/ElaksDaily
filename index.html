@@ -1238,7 +1238,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261101-120000";
+const BUILD = "20261101-180000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3851,13 +3851,13 @@ async function openOfferSheet(id) {
       const inv = state.invoices.find((x) => x.offer_id === id && !x.cancelled);
       return inv
         ? `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openInvoiceSheet('${inv.id}'),240)">
-             <span>${T("Фактура", "Фактура")} ${esc(inv.number)}${inv.paid_on ? " · " + T("paid", "платена") : ""}</span>
+             <span>${T("Фактура", "Фактура")} ${esc(inv.number)}${invPaid(inv) ? " · " + T("paid", "платена") : ""}</span>
              <span class="muted">›</span></div>`
         : `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>newInvoiceFromOffer('${id}'),240)">${T("Make the invoice", "Направи фактура")}</button>`;
     })() : ""}
     ${id ? paymentsBlock(o) : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
-    ${id && o.status === "accepted" && (o.items || []).some((x) => x.unit === "m" && !x.consumed) ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">Close job — enter meters</button>` : ""}
+    ${id && o.status === "accepted" && metersOpenOf(o.items).length ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">${T("Close job — enter meters", "Затвори работа — внеси метри")}</button>` : ""}
     ${id && needsDeduct(o) ? `<button class="btn amber" onclick="deductStock('${id}')">Take items out of stock</button>` : ""}
     ${id && o.stock_deducted ? '<p class="muted">Items have been taken out of stock.</p>' : ""}
     ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Delete</button>` : ""}
@@ -3905,7 +3905,7 @@ function itemProfit(it) {
   const t = itemTotal(it);
   if (t === null) return null;                       // meters not measured yet
   const r = itemVat(it);
-  const q = it.free ? 0 : (it.unit === "m" ? (it.consumed || 0) : (it.qty || 0));
+  const q = it.free ? 0 : (it.unit === "m" ? (metred(it) ? it.consumed : 0) : (it.qty || 0));
   return netOf(t, r) - netOf(itemCost(it) * q, r);
 }
 // { gross, net, vat, byRate: { 18: amount, 5: amount } } — per-meter rows are skipped
@@ -3929,8 +3929,12 @@ function profitOf(items) {
   }
   return { value, pending };
 }
+// A line sold by the metre is measured after the work, so until then it has
+// no length. 0 is a length too — none was needed — and settles it as 20 does.
+const metred = (it) => typeof it.consumed === "number" && isFinite(it.consumed);
+const metersOpenOf = (items) => (items || []).filter((it) => it.unit === "m" && !metred(it));
 function itemTotal(it) {
-  if (it.unit === "m") return it.consumed ? it.consumed * (it.price || 0) : null; // measured after install
+  if (it.unit === "m") return metred(it) ? it.consumed * (it.price || 0) : null; // measured after install
   if (it.free) return it.price || 0;
   return (it.qty || 0) * (it.price || 0);
 }
@@ -3963,7 +3967,7 @@ function renderOfferItems() {
         <input class="lname" value="${esc(it.name)}" oninput="offerItems[${i}].name=this.value">
         <div class="lnums">
           ${it.unit === "m"
-            ? `<input value="${it.consumed ? fmt(it.consumed) + " m" : "m"}" disabled>`
+            ? `<input value="${metred(it) ? fmt(it.consumed) + " m" : "m"}" disabled>`
             : it.free
               ? `<input value="—" disabled>`
               : `<input type="number" inputmode="decimal" value="${it.qty ?? ""}" oninput="offerItems[${i}].qty=parseFloat(this.value)||0;updateTotal()">`}
@@ -4058,7 +4062,7 @@ function updateTotal() {
   const mkRow = $("of-mk-row"), mkNow = $("of-mk-now");
   if (mkRow) mkRow.style.display = offerItems.some((it) => !it.free && itemCost(it) > 0) ? "" : "none";
   if (mkNow) mkNow.textContent = cost > 0 ? `· ${T("now", "сега")} +${Math.round(((sale - cost) / cost) * 1000) / 10}%` : "";
-  const metersOpen = offerItems.filter((it) => it.unit === "m" && !it.consumed);
+  const metersOpen = metersOpenOf(offerItems);
   const noteEl = $("of-note");
   if (noteEl && !noteEl.dataset.manual) {
     noteEl.value = metersOpen.length ? "(не се вклучени " + metersOpen.map((m) => m.name.split(" ")[0].toLowerCase()).join(" и ") + ")" : "";
@@ -4130,7 +4134,7 @@ async function offerSheetHtml(o) {
       const { data } = await db.from("article_images").select("article_id, data").in("article_id", ids);
       for (const r of data || []) imgOf[r.article_id] = r.data;
     }
-    const meters = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !x.it.consumed);
+    const meters = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !metred(x.it));
     const foot = meters.length
       ? `* Ставките ${meters.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
       : "";
@@ -4138,7 +4142,7 @@ async function offerSheetHtml(o) {
       <td class="c">${i + 1}</td>
       <td class="c">${imgOf[it.article_id] ? `<img src="${imgOf[it.article_id]}" alt="">` : ""}</td>
       <td><b>${esc(it.name)}</b>${it.specs ? `<div class="sp">${esc(it.specs).replace(/\n/g, "<br>")}</div>` : ""}</td>
-      <td class="c">${it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0))}</td>
+      <td class="c">${it.unit === "m" ? (metred(it) ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0))}</td>
       <td class="c">${it.free ? "" : fmt(it.price || 0)}</td>
       <td class="c b">${itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0)}</td>
     </tr>`).join("");
@@ -4565,7 +4569,7 @@ function imgDims(src) {
   });
 }
 async function generateDocx(o) {
-  const metersOpen = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !x.it.consumed);
+  const metersOpen = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !metred(x.it));
   try {
     if (!window.PizZip || !window.docxtemplater) throw new Error("Document libraries did not load — check connection and reload the app");
     const res = await fetch("Ponuda_TEMPLATE.docx", { cache: "no-store" });
@@ -4599,7 +4603,7 @@ async function generateDocx(o) {
       client_email: client ? (client.email || "") : "",
       items: o.items.map((it, i) => ({
         num: i + 1, name: it.name, specs: it.specs || "",
-        qty: it.unit === "m" ? (it.consumed ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0)),
+        qty: it.unit === "m" ? (metred(it) ? fmt(it.consumed) + " m" : "m") : (it.free ? "" : fmt(it.qty || 0)),
         price: it.free ? "" : fmt(it.price || 0),
         total: itemTotal(it) === null ? "???" : fmt(itemTotal(it) || 0),
         img_mark: photo[it.article_id] ? `«IMG:${i}»` : "",
@@ -4822,7 +4826,7 @@ async function savePayment(id) {
     }
     await syncOfferPaid(id);
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render();
+  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal", "invoices"]); render();
   toast(payMethod === "cash" ? "Payment added to the register" : "Payment recorded");
   const pending = needsDeduct(state.offers.find((x) => x.id === id) || {});
   setTimeout(() => (pending ? promptDeduct(id) : openOfferSheet(id)), 300);
@@ -4836,7 +4840,7 @@ async function delPayment(pid) {
     await dbq(db.from("offer_payments").delete().eq("id", pid), "Not removed");
     await syncOfferPaid(p.offer_id);
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render();
+  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal", "invoices"]); render();
   setTimeout(() => openOfferSheet(p.offer_id), 240);
   toast("Payment removed");
 }
@@ -4869,7 +4873,7 @@ async function settleDiff(id, diff, cash) {
     }), "Cash entry not saved");
     await syncOfferPaid(id);
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal"]); render(); toast("Balance recorded");
+  closeSheet(); await refreshAll(["offers", "payments", "cash", "cashTotal", "invoices"]); render(); toast("Balance recorded");
 }
 function duplicateOffer(id) {
   const src = state.offers.find((x) => x.id === id);
@@ -4882,28 +4886,35 @@ function duplicateOffer(id) {
     renderOfferItems();
   }, 240);
 }
-function closeJobSheet(id) {
+// The cable used is only known once the work is done. Entered here — from the
+// offer, from Finished on the job, or on the way to the invoice — it goes on
+// the offer's total, comes out of stock, and the job is finished with it.
+function closeJobSheet(id, then) {
   const o = state.offers.find((x) => x.id === id);
-  const ms = o.items.map((it, i) => ({ it, i })).filter((x) => x.it.unit === "m" && !x.it.consumed);
+  if (!o) return;
+  const ms = (o.items || []).map((it, i) => ({ it, i })).filter((x) => x.it.unit === "m" && !metred(x.it));
   openSheet(`
-    <h2>Close job — ${o.number}</h2>
-    <p class="muted">Enter consumed length per item. The offer total and stock will be updated.</p>
-    ${ms.map((x) => `<label>${esc(x.it.name)} (@ ${fmt(x.it.price || 0)} /m)</label>
-      <input type="number" inputmode="decimal" min="0" step="any" id="cj-${x.i}">`).join("")}
-    <button class="btn" onclick="closeJob('${id}')">Confirm — update offer & stock</button>
+    <h2>${T("Cable used", "Потрошен кабел")} — ${esc(o.number)}</h2>
+    <p class="muted">${T("Sold by the metre, so only known now. Enter what went in, 0 if none was needed. It goes on the invoice and comes out of stock.",
+      "Се продава на метар, па се знае дури сега. Внеси колку е потрошено, 0 ако не требало. Оди на фактурата и се симнува од магацин.")}</p>
+    ${ms.map((x) => `<label>${esc(x.it.name)} (${fmt(x.it.price || 0)} ден./m)</label>
+      <input type="number" inputmode="decimal" min="0" step="any" id="cj-${x.i}" placeholder="m">`).join("")}
+    <button class="btn" onclick="closeJob('${id}','${then || ""}')">${then === "invoice"
+      ? T("Save, then the invoice", "Зачувај, па фактурата") : T("Save — the work is finished", "Зачувај — работата е завршена")}</button>
   `);
 }
-async function closeJob(id) {
+async function closeJob(id, then) {
   const o = state.offers.find((x) => x.id === id);
   const items = JSON.parse(JSON.stringify(o.items));
   const movRows = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    if (it.unit === "m" && !it.consumed) {
-      const v = parseFloat(($("cj-" + i) || {}).value);
-      if (!v || v <= 0) return toast("Enter meters for every item");
+    if (it.unit === "m" && !metred(it)) {
+      const raw = (($("cj-" + i) || {}).value || "").trim();
+      const v = parseFloat(raw);
+      if (raw === "" || !isFinite(v) || v < 0) return toast(T("Enter the metres for every line — 0 if none was used", "Внеси метри за секоја ставка — 0 ако не е потрошено"));
       it.consumed = v;
-      if (it.article_id) movRows.push({ article_id: it.article_id, type: "out", qty: v, ref: o.number, note: "Offer " + o.number });
+      if (it.article_id && v > 0) movRows.push({ article_id: it.article_id, type: "out", qty: v, ref: o.number, note: "Offer " + o.number });
     }
   }
   if (!o.stock_deducted) items.forEach((it) => {
@@ -4913,17 +4924,22 @@ async function closeJob(id) {
     const t = it.unit === "m" ? it.consumed * (it.price || 0) : (it.free ? (it.price || 0) : (it.qty || 0) * (it.price || 0));
     return s + (t || 0);
   }, 0);
+  // the metres are in once the work is over: its job is finished with them
+  const job = state.jobs.find((j) => j.offer_id === id && j.status !== "done" && j.status !== "cancelled");
   try {
     if (movRows.length) await dbq(db.from("movements").insert(movRows), "Stock not updated");
     await dbq(db.from("offers").update({ items, grand_total: total, total_note: null, stock_deducted: true }).eq("id", id), "Offer not updated");
+    if (job) await dbq(db.from("jobs").update({ status: "done", done_at: new Date().toISOString() }).eq("id", job.id), T("Job not updated", "Работата не е ажурирана"));
   } catch { return; }
-  closeSheet(); await refreshAll(["offers", "stock"]); renderOffers();
+  closeSheet(); await refreshAll(["offers", "stock", "jobs"]); render();
   const wasPaid = parseFloat(o.paid_amount) || 0;
   if (o.paid_at && Math.abs(total - wasPaid) > 0.005) {   // the invoice moved after it was paid
     setTimeout(() => reconcileSheet(id, wasPaid, total), 260);
     return;
   }
-  toast("Job closed — total and stock updated");
+  if (then === "invoice") return void setTimeout(() => newInvoiceFromOffer(id), 260);
+  toast(job ? T("Finished — the cable is on the total and out of stock", "Завршена — кабелот е во вкупното и симнат од магацин")
+    : T("Job closed — total and stock updated", "Работата е затворена — вкупното и магацинот се ажурирани"));
 }
 
 /* ============================================================
@@ -9448,6 +9464,15 @@ async function syncOfferPaid(offerId) {
     paid_at: rows.length ? last : null,
     paid_method: rows.length ? (methods.length > 1 ? "mixed" : methods[0]) : null,
   }).eq("id", offerId);
+  // its invoice is paid exactly when these payments cover it
+  const { data: invs } = await db.from("invoices").select("id, total, paid_on, cancelled").eq("offer_id", offerId);
+  for (const i of (invs || []).filter((x) => !x.cancelled)) {
+    const total = parseFloat(i.total) || 0;
+    if (total <= 0.005) continue;                   // nothing to pay: left as marked
+    const covered = rows.length > 0 && sum >= total - 0.005;
+    if (covered && !i.paid_on) await db.from("invoices").update({ paid_on: last }).eq("id", i.id);
+    else if (!covered && i.paid_on) await db.from("invoices").update({ paid_on: null }).eq("id", i.id);
+  }
 }
 /* ---------- purchases: what you buy from suppliers ---------- */
 // line: { article_id, name, qty, price (GROSS per unit), vat }
@@ -9794,6 +9819,8 @@ async function confirmArrival(id) {
     + (matched ? `\n\n${matched} line(s) matched to articles you already have.` : "")
     + (fresh.length ? `\n\n${fresh.length} new article(s) will be created:\n· ` + fresh.map((f) => f.it.name).join("\n· ") : "");
   if (!await ask(msg)) return;
+  // buy prices that moved, for the sell prices to follow once it is booked
+  const moved = [];
   try {
     const lines = JSON.parse(JSON.stringify(items));
     for (const x of arriving) {
@@ -9811,6 +9838,10 @@ async function confirmArrival(id) {
         it.article_id = made.id;
       } else {
         // the article carries the LATEST price paid; earlier ones live in the history
+        const a = state.stock.find((x) => x.id === it.article_id);
+        const was = a ? parseFloat(a.purchase_price) || 0 : 0, sell = a ? parseFloat(a.sell_price) || 0 : 0;
+        if (a && was > 0 && sell > 0 && paid > 0 && Math.abs(paid - was) >= 1 && !moved.some((m) => m.id === a.id))
+          moved.push({ id: a.id, name: a.name, unit: a.unit, was, now: paid, sell, pct: (sell / was - 1) * 100 });
         await dbq(db.from("articles").update({ purchase_price: paid }).eq("id", it.article_id), "Cost not updated");
       }
       await db.from("article_prices").insert({
@@ -9837,6 +9868,63 @@ async function confirmArrival(id) {
   if (fresh.length) bits.push(`${fresh.length} new`);
   if (left) bits.push(`${left} still to come`);
   toast("Booked in" + (bits.length ? " · " + bits.join(" · ") : ""));
+  if (moved.length) setTimeout(() => openSellPrices(moved), 300);
+}
+
+// A supplier's new price changes the cost, not the price you ask: left alone,
+// the margin quietly shrinks. Each article's new sell price keeps the markup
+// it had; one that went up is ticked to change, one that went down is not.
+let sellMoves = [];
+function openSellPrices(moved) {
+  sellMoves = moved.map((m) => ({ ...m, to: markupPrice(m.now, m.pct), on: m.now > m.was }));
+  openSheet(`
+    <h2>${T("Buy prices changed", "Набавните цени се сменија")}</h2>
+    <p class="muted">${T("The sell prices are as they were. Ticked ones change to the price that keeps their markup; you can type your own.",
+      "Продажните цени се исти како порано. Штиклираните се менуваат на цена што ја задржува маржата; може да внесеш своја.")}</p>
+    ${sellMoves.map((m, i) => {
+      const up = m.now > m.was, ch = Math.round(((m.now - m.was) / m.was) * 1000) / 10;
+      const keep = Math.round((m.sell / m.now - 1) * 1000) / 10;
+      return `<div class="card">
+        <div class="row" style="align-items:flex-start;gap:10px">
+          <button class="clbox ${m.on ? "on" : ""}" id="sp-on-${i}" onclick="sellMoveToggle(${i})" aria-label="${T("Change this one", "Смени ја оваа")}"></button>
+          <div style="flex:1;min-width:0">
+            <b>${esc(m.name)}</b>
+            <div class="muted" style="font-size:12.5px">${T("Buy", "Набавна")} ${fmt(m.was)} → <b style="color:${up ? "var(--danger)" : "var(--personal)"}">${fmt(m.now)}</b> (${up ? "+" : ""}${ch}%)
+              · ${T(`at ${fmt(m.sell)} the markup is +${keep}%, was +${Math.round(m.pct * 10) / 10}%`, `на ${fmt(m.sell)} маржата е +${keep}%, беше +${Math.round(m.pct * 10) / 10}%`)}</div>
+            <div class="row" style="gap:8px;margin-top:6px"><span class="muted nw">${T("Sell", "Продажна")} ${fmt(m.sell)} →</span>
+              <input type="number" inputmode="decimal" id="sp-to-${i}" value="${m.to}" style="max-width:120px" oninput="sellMoveTyped(${i})"></div>
+          </div>
+        </div>
+      </div>`;
+    }).join("")}
+    <button class="btn amber" id="sp-go" onclick="applySellPrices()"></button>
+    <button class="btn ghost" onclick="closeSheet()">${T("Keep the sell prices", "Задржи ги продажните цени")}</button>
+  `);
+  sellMoveCount();
+}
+function sellMoveToggle(i) {
+  sellMoves[i].on = !sellMoves[i].on;
+  $("sp-on-" + i).classList.toggle("on", sellMoves[i].on);
+  sellMoveCount();
+}
+// typing a price means you want it
+function sellMoveTyped(i) {
+  if (!sellMoves[i].on) sellMoveToggle(i);
+}
+function sellMoveCount() {
+  const n = sellMoves.filter((m) => m.on).length, b = $("sp-go");
+  if (!b) return;
+  b.disabled = !n;
+  b.textContent = n ? T(`Change ${n} sell price${n > 1 ? "s" : ""}`, `Смени ${n} продажни цени`) : T("Nothing ticked", "Ништо не е штиклирано");
+}
+async function applySellPrices() {
+  const go = sellMoves.map((m, i) => ({ ...m, to: parseFloat($("sp-to-" + i).value) })).filter((m) => m.on && m.to > 0);
+  if (!go.length) return;
+  try {
+    for (const m of go) await dbq(db.from("articles").update({ sell_price: m.to }).eq("id", m.id), T("Price not saved", "Цената не е зачувана"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["stock"]); render();
+  toast(T(`${go.length} sell price${go.length > 1 ? "s" : ""} changed`, `Сменети продажни цени: ${go.length}`));
 }
 
 let purPayMethod = "cash";
@@ -10210,7 +10298,7 @@ function workItem(o) {
   const job = state.jobs.find((j) => j.offer_id === o.id && j.status !== "cancelled");
   const inv = state.invoices.find((i) => i.offer_id === o.id && !i.cancelled);
   let stage = "quote";
-  if (inv && inv.paid_on) stage = "paid";
+  if (inv && invPaid(inv)) stage = "paid";
   else if (inv) stage = "unpaid";
   else if (o.status === "accepted" && job && job.status === "done") stage = "invoice";
   else if (o.status === "accepted" && job) stage = "booked";
@@ -10312,10 +10400,10 @@ function openWorkSheet(offerId) {
           : "")}
 
     ${step(3, T("The invoice", "Фактурата"),
-      w.inv && w.inv.paid_on ? "done" : w.inv ? "now" : (o.status === "accepted" ? "now" : "wait"),
+      w.inv && invPaid(w.inv) ? "done" : w.inv ? "now" : (o.status === "accepted" ? "now" : "wait"),
       w.inv
-        ? `${T("Фактура", "Фактура")} ${esc(w.inv.number)} · ${w.inv.paid_on
-            ? T("paid", "платена") + " " + dmy(w.inv.paid_on)
+        ? `${T("Фактура", "Фактура")} ${esc(w.inv.number)} · ${invPaid(w.inv)
+            ? T("paid", "платена") + " " + dmy(invPaidOn(w.inv))
             : (w.inv.due_date ? T("due", "рок") + " " + dmy(w.inv.due_date) : T("not paid", "неплатена"))}`
         : o.status === "accepted" ? T("Not issued yet", "Сè уште не е издадена") : T("After the offer is accepted", "По прифаќање на понудата"),
       w.inv
@@ -10393,7 +10481,22 @@ function invoiceDocHtml(i) {
     ${i.note ? `<div class="rp-sub">${esc(i.note)}</div>` : ""}`;
 }
 
-const invPaid = (i) => !!i.paid_on;
+// An invoice is paid when it is marked so — which now also records the money
+// on its offer — or when the payments on its offer cover it. The second is
+// for invoices from before the two were joined: paid on the offer, never marked.
+const invOffer = (i) => (i && i.offer_id ? state.offers.find((o) => o.id === i.offer_id) : null);
+function invPaidOn(i) {
+  if (!i) return null;
+  if (i.paid_on) return i.paid_on;
+  const o = invOffer(i);
+  if (!o || i.cancelled) return null;
+  const got = offerPaid(o);
+  if (got <= 0 || (parseFloat(i.total) || 0) <= 0.005 || got < (parseFloat(i.total) || 0) - 0.005) return null;
+  return o.paid_at || paymentsOf(o.id).map((p) => p.paid_on).sort().pop() || i.invoice_date;
+}
+const invPaid = (i) => !!invPaidOn(i);
+// what the client has paid towards it so far, on its offer
+const invReceived = (i) => { const o = invOffer(i); return o ? offerPaid(o) : 0; };
 const invClient = (i) => (state.clients.find((c) => c.id === i.client_id) || {}).name || "";
 
 async function nextInvoiceNumber() {
@@ -10418,29 +10521,36 @@ function awaitingInvoice() {
 }
 
 function renderInvoices() {
+  // what is finished is what is ready to bill — the same rule as Work's "to invoice";
+  // accepted work still to be done is listed apart, under its own heading
   const todo = awaitingInvoice();
+  const ready = todo.filter((o) => workItem(o).stage === "invoice"), ahead = todo.filter((o) => workItem(o).stage !== "invoice");
   const unpaid = state.invoices.filter((i) => !i.cancelled && !invPaid(i));
-  const counts = { todo: todo.length, unpaid: unpaid.length, all: state.invoices.length };
+  const counts = { todo: ready.length, unpaid: unpaid.length, all: state.invoices.length };
   $("invoice-filter").innerHTML = [["todo", T("To invoice", "За фактурирање")],
     ["unpaid", T("Unpaid", "Неплатени")], ["all", T("All", "Сите")]]
     .map(([v, l]) => `<button class="chip ${state.invFilter === v ? "on" : ""}"
       onclick="state.invFilter='${v}';renderInvoices()">${l}${counts[v] ? ` ${counts[v]}` : ""}</button>`).join("");
 
   if (state.invFilter === "todo") {
-    $("invoice-list").innerHTML = `
-      <div class="card">
-        <div class="row" style="justify-content:space-between"><span class="muted">${T("Delivered, not yet billed", "Испорачано, нефактурирано")}</span>
-          <b class="mono">${fmt(sumBy(todo, (o) => o.grand_total))} ден.</b></div>
-      </div>
-      ${todo.length ? todo.map((o) => {
-        const j = state.jobs.find((x) => x.offer_id === o.id);
-        return `<div class="card offer row" role="button" tabindex="0" onclick="newInvoiceFromOffer('${o.id}')">
+    const row = (o) => {
+      const j = state.jobs.find((x) => x.offer_id === o.id && x.status !== "cancelled");
+      return `<div class="card offer row" role="button" tabindex="0" onclick="newInvoiceFromOffer('${o.id}')">
           <div style="flex:1;min-width:0"><b>${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}</b>
-            <div class="o-num">${[invClient(o), j ? (j.status === "done" ? T("work finished", "работата е завршена") : jobLabel(j.status)) : ""]
-              .filter(Boolean).map(esc).join(" · ")}</div></div>
+            <div class="o-num">${[invClient(o), j ? (j.status === "done" ? T("work finished", "работата е завршена") + (j.done_at ? " " + dmy(String(j.done_at).slice(0, 10)) : "") : jobLabel(j.status))
+              : T("not scheduled", "не е закажана")].filter(Boolean).map(esc).join(" · ")}${
+              metersOpenOf(o.items).length ? ` · <span style="color:var(--amber)">${T("metres to enter", "метри за внесување")}</span>` : ""}</div></div>
           <span class="o-total mono">${fmt(o.grand_total)}</span>
         </div>`;
-      }).join("") : `<div class="empty">${T("Everything accepted has been invoiced.", "Сè прифатено е фактурирано.")}</div>`}`;
+    };
+    $("invoice-list").innerHTML = `
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><span class="muted">${T("Finished, not yet invoiced", "Завршено, нефактурирано")}</span>
+          <b class="mono">${fmt(sumBy(ready, (o) => o.grand_total))} ден.</b></div>
+      </div>
+      ${ready.length ? ready.map(row).join("") : `<div class="empty">${T("No finished work is waiting for an invoice.", "Нема завршена работа што чека фактура.")}</div>`}
+      ${ahead.length ? `<div class="sec">${T("Accepted, work not finished", "Прифатено, работата не е завршена")} · ${fmt(sumBy(ahead, (o) => o.grand_total))} ден.</div>
+        ${ahead.map(row).join("")}` : ""}`;
     return;
   }
 
@@ -10451,7 +10561,7 @@ function renderInvoices() {
       <div style="flex:1;min-width:0"><b>${T("Фактура", "Фактура")} ${esc(i.number)}</b>
         <div class="o-num">${dmy(i.invoice_date)}${invClient(i) ? " · " + esc(invClient(i)) : ""}${
           i.cancelled ? ` · <span class="muted">${T("cancelled", "сторнирана")}</span>`
-          : invPaid(i) ? ` · <span style="color:var(--personal)">${T("paid", "платена")} ${dmy(i.paid_on)}</span>`
+          : invPaid(i) ? ` · <span style="color:var(--personal)">${T("paid", "платена")} ${dmy(invPaidOn(i))}</span>`
           : late ? ` · <span style="color:var(--danger)">${T("overdue", "задоцнета")} ${dmy(i.due_date)}</span>`
           : i.due_date ? ` · ${T("due", "рок")} ${dmy(i.due_date)}` : ""}</div></div>
       <span class="o-total mono">${fmt(i.total)}</span>
@@ -10459,6 +10569,8 @@ function renderInvoices() {
   }).join("") : `<div class="empty">${T("No invoices yet.", "Нема фактури.")}</div>`;
 }
 
+// An invoice takes the next number for good — a stray tap used to issue one.
+// This shows what it will say first, and the number it will get.
 async function newInvoiceFromOffer(offerId) {
   const o = state.offers.find((x) => x.id === offerId);
   if (!o) return;
@@ -10466,21 +10578,71 @@ async function newInvoiceFromOffer(offerId) {
     return say(T("Fill in your company details first — Settings → Elaks → Company details. They have to appear on the invoice.",
       "Прво пополни ги податоците за фирмата — Поставки → Елакс → Податоци за фирма. Мора да се на фактурата."));
   }
+  const billed = state.invoices.find((i) => i.offer_id === offerId && !i.cancelled);
+  if (billed) return openInvoiceSheet(billed.id);
+  const c = state.clients.find((x) => x.id === o.client_id);
+  const j = state.jobs.find((x) => x.offer_id === offerId && x.status !== "cancelled");
+  const open = metersOpenOf(o.items);
+  const vb = vatBreakdown(o.items || []);
+  openSheet(`
+    <h2>${T("New invoice", "Нова фактура")}</h2>
+    <p class="muted">${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}${c ? " · " + esc(c.name) : ""}</p>
+    ${open.length ? `<div class="card" style="border-color:var(--amber)">
+        <b>${T("The cable used is not in yet", "Потрошениот кабел сè уште не е внесен")}</b>
+        <p class="muted" style="margin:4px 0 10px">${T(`${open.length} line${open.length > 1 ? "s are" : " is"} sold by the metre and ${open.length > 1 ? "have" : "has"} no length yet: ${open.map((it) => it.name).join(", ")}. Without the metres it would be missing from the invoice.`,
+          `Ставки на метар без должина: ${open.map((it) => it.name).join(", ")}. Без метрите ќе недостасуваат на фактурата.`)}</p>
+        <button class="btn amber" onclick="closeSheet();setTimeout(()=>closeJobSheet('${o.id}','invoice'),240)">${T("Enter the metres", "Внеси ги метрите")}</button>
+      </div>`
+      : j && j.status !== "done" ? `<p class="muted">${T("The work is not marked finished yet — this bills it ahead.", "Работата сè уште не е означена како завршена — ова ја фактурира однапред.")}</p>` : ""}
+    <div class="sec">${T("Lines", "Ставки")}</div>
+    ${(o.items || []).map((it, n) => {
+      const t = itemTotal(it);
+      return `<div class="mov"><span>${n + 1}. ${esc(it.name)}${it.unit === "m" ? (metred(it) ? ` × ${fmt(it.consumed)} m` : " × ? m")
+        : it.free ? "" : it.qty ? ` × ${fmt(it.qty)}` : ""}</span><span class="mono">${t === null ? "?" : fmt(t)}</span></div>`;
+    }).join("")}
+    <div class="card" style="margin-top:10px">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("Net", "Основа")}</span><span class="mono">${fmt(vb.net)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">ДДВ</span><span class="mono">${fmt((o.grand_total || 0) - vb.net)} ден.</span></div>
+      <div class="row bankrow" style="border-top:1px solid var(--line);padding-top:8px"><span class="muted nw">${T("Total", "Вкупно")}</span>
+        <span class="mono"><b>${fmt(o.grand_total)}</b> ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Payment due", "Рок за плаќање")}</span><span class="mono">${dmy(invoiceDue())}</span></div>
+    </div>
+    ${open.length ? "" : `<button class="btn amber" id="iv-issue" onclick="issueInvoice('${o.id}')">${T("Issue the invoice", "Издај фактура")}</button>
+      <p class="muted" style="text-align:center;font-size:12.5px">${T("Once issued it keeps its number: it can be cancelled, not deleted.", "Издадена, го задржува бројот: може да се сторнира, не да се избрише.")}</p>`}
+  `);
+  // the number it will take, as the server has it now
+  if (open.length) return;
+  const n = await nextInvoiceNumber();
+  const b = $("iv-issue");
+  if (b && !b.disabled) b.textContent = T("Issue фактура ", "Издај фактура ") + n;
+}
+function invoiceDue() {
   const days = parseInt(setting("invoice_due_days", "15")) || 15;
   const due = new Date(todayStr() + "T12:00"); due.setDate(due.getDate() + days);
+  return due.toLocaleDateString("sv-SE");
+}
+let issuing = false;
+async function issueInvoice(offerId) {
+  const o = state.offers.find((x) => x.id === offerId);
+  if (!o || issuing) return;
+  if (metersOpenOf(o.items).length) return newInvoiceFromOffer(offerId);
+  if (state.invoices.some((i) => i.offer_id === offerId && !i.cancelled)) return toast(T("This offer already has an invoice", "Оваа понуда веќе има фактура"));
+  issuing = true;
+  const b = $("iv-issue"); if (b) b.disabled = true;
   const vb = vatBreakdown(o.items || []);
-  const j = state.jobs.find((x) => x.offer_id === offerId);
+  const j = state.jobs.find((x) => x.offer_id === offerId && x.status !== "cancelled");
   let made;
   try {
     made = await dbq(db.from("invoices").insert({
       number: await nextInvoiceNumber(), invoice_date: todayStr(),
-      due_date: due.toLocaleDateString("sv-SE"),
+      due_date: invoiceDue(),
       client_id: o.client_id || null, offer_id: o.id, job_id: j ? j.id : null,
       items: o.items || [], total: o.grand_total || 0, net: vb.net, vat: (o.grand_total || 0) - vb.net,
     }).select().single(), T("Not created", "Не е создадена"));
-  } catch { return; }
-  await refreshAll(["invoices"]); render();
-  setTimeout(() => openInvoiceSheet(made.id), 200);
+  } catch { issuing = false; if (b) b.disabled = false; return; }
+  issuing = false;
+  closeSheet(); await refreshAll(["invoices"]); render();
+  setTimeout(() => openInvoiceSheet(made.id), 260);
   toast(T("Invoice ", "Фактура ") + made.number);
 }
 
@@ -10501,7 +10663,9 @@ function openInvoiceSheet(id) {
         <span class="mono"><b>${fmt(i.total)}</b> ден.</span></div>
       <div class="row bankrow"><span class="muted nw">${T("Payment", "Плаќање")}</span>
         <span class="mono" style="color:${invPaid(i) ? "var(--personal)" : "var(--amber)"}">${
-          invPaid(i) ? T("paid", "платена") + " " + dmy(i.paid_on) : (i.due_date ? T("due", "рок") + " " + dmy(i.due_date) : T("not paid", "неплатена"))}</span></div>
+          invPaid(i) ? T("paid", "платена") + " " + dmy(invPaidOn(i)) : (i.due_date ? T("due", "рок") + " " + dmy(i.due_date) : T("not paid", "неплатена"))}</span></div>
+      ${!invPaid(i) && !i.cancelled && invReceived(i) > 0 ? `<div class="row bankrow"><span class="muted nw">${T("Received so far", "Примено досега")}</span>
+        <span class="mono">${fmt(invReceived(i))} ден.</span></div>` : ""}
     </div>
 
     <div class="sec">${T("Lines", "Ставки")}</div>
@@ -10511,18 +10675,60 @@ function openInvoiceSheet(id) {
     <button class="btn" onclick="printInvoice('${i.id}')">${T("Print / Save as PDF", "Печати / Зачувај PDF")}</button>
     ${!i.cancelled ? `<button class="btn ghost" onclick="messageInvoice('${i.id}')">${ICON.share}${
       !invPaid(i) && i.due_date && i.due_date < todayStr() ? T("Remind the client", "Потсети го клиентот") : T("Send to the client", "Испрати до клиентот")}</button>` : ""}
-    ${!invPaid(i) && !i.cancelled ? `<label>${T("Paid on", "Платена на")}</label>
-      <input id="iv-paid" type="date" value="${todayStr()}">
-      <button class="btn amber" onclick="markInvoicePaid('${i.id}')">${T("Mark as paid", "Означи како платена")}</button>` : ""}
+    ${!invPaid(i) && !i.cancelled ? (() => {
+      invPayMethod = "bank";
+      const left = Math.max(0, (parseFloat(i.total) || 0) - invReceived(i));
+      return `<div class="sec">${T("Paid", "Платена")}</div>
+      <div class="grid2">
+        <div><label>${T("On", "На")}</label><input id="iv-paid" type="date" value="${todayStr()}"></div>
+        <div><label>${T("By", "Со")}</label><div class="chips" id="iv-pm" style="margin:0">
+          <button class="chip on" data-m="bank" onclick="setInvPayMethod('bank')">${T("Bank", "Банка")}</button>
+          <button class="chip" data-m="cash" onclick="setInvPayMethod('cash')">${T("Cash", "Готово")}</button></div></div>
+      </div>
+      <p class="muted" id="iv-pay-hint" style="font-size:12.5px">${invOffer(i)
+        ? T(`${fmt(left)} ден. is recorded as received on offer ${invOffer(i).number}, so the offer shows it paid too.`,
+            `${fmt(left)} ден. се запишува како примено на понудата ${invOffer(i).number}, па и таа е платена.`) : ""}</p>
+      <button class="btn amber" onclick="markInvoicePaid('${i.id}')">${T("Mark as paid", "Означи како платена")}</button>`;
+    })() : ""}
     ${i.offer_id ? `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openOfferSheet('${i.offer_id}'),240)">${T("Open the offer", "Отвори ја понудата")}</button>` : ""}
     ${!i.cancelled ? `<button class="btn danger" onclick="cancelInvoice('${i.id}')">${T("Cancel this invoice", "Сторнирај")}</button>` : ""}
   `);
 }
 
+let invPayMethod = "bank";
+function setInvPayMethod(m) {
+  invPayMethod = m;
+  document.querySelectorAll("#iv-pm .chip").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
+}
+// Paid is one thing, wherever it is said: marking the invoice paid records
+// what was still owed as a payment on its offer — in the cash register too
+// when it came in cash — and a payment on the offer marks its invoice (syncOfferPaid).
+let markingPaid = false;
 async function markInvoicePaid(id) {
-  try { await dbq(db.from("invoices").update({ paid_on: $("iv-paid").value || todayStr() }).eq("id", id), T("Not saved", "Не е зачувано")); }
-  catch { return; }
-  closeSheet(); await refreshAll(["invoices"]); render(); toast(T("Marked as paid", "Означена како платена"));
+  const i = state.invoices.find((x) => x.id === id);
+  if (!i || markingPaid) return;
+  const o = invOffer(i);
+  const date = $("iv-paid").value || todayStr();
+  const method = invPayMethod;
+  const owed = Math.round(((parseFloat(i.total) || 0) - (o ? offerPaid(o) : 0)) * 100) / 100;
+  const who = invClient(i);
+  markingPaid = true;
+  try {
+    if (owed > 0.005) {
+      const pay = o ? await dbq(db.from("offer_payments")
+        .insert({ offer_id: o.id, amount: owed, method, paid_on: date, note: "Фактура " + i.number })
+        .select().single(), T("Payment not saved", "Плаќањето не е зачувано")) : null;
+      if (method === "cash") await dbq(db.from("elaks_cash").insert({
+        amount: owed, offer_id: o ? o.id : null, payment_id: pay ? pay.id : null,
+        note: `Фактура ${i.number}${who ? " · " + who : ""}`,
+      }), T("Cash entry not saved", "Ставката во каса не е зачувана"));
+    }
+    await dbq(db.from("invoices").update({ paid_on: date }).eq("id", id), T("Not saved", "Не е зачувано"));
+    if (o) await syncOfferPaid(o.id);
+  } catch { markingPaid = false; return; }
+  markingPaid = false;
+  closeSheet(); await refreshAll(["invoices", "offers", "payments", "cash", "cashTotal"]); render();
+  toast(method === "cash" && owed > 0.005 ? T("Paid — into the cash register", "Платена — во касата") : T("Marked as paid", "Означена како платена"));
 }
 
 // an issued invoice is never deleted — it is cancelled, so the numbering
@@ -10614,7 +10820,7 @@ async function openJobSheet(id, fromOffer) {
   openSheet(`
     <h2>${id ? T("Job", "Работа") : T("New job", "Нова работа")}</h2>
     <label>${T("What is the work", "Што е работата")}</label>
-    <input id="jb-title" value="${esc(j.title || "")}" placeholder="${T("e.g. fit 4 cameras", "на пр. монтажа на 4 камери")}">
+    <input id="jb-title" data-job="${id || ""}" value="${esc(j.title || "")}" placeholder="${T("e.g. fit 4 cameras", "на пр. монтажа на 4 камери")}">
     <label>${T("Client", "Клиент")}</label>
     <select id="jb-client" onchange="jbSiteOptions('')"><option value="">${T("No client", "Без клиент")}</option>
       ${state.clients.filter((c) => c.active !== false || cid === c.id)
@@ -10762,7 +10968,23 @@ async function saveJob(id, forceStatus) {
 }
 
 async function finishJob(id) {
-  await saveJob(id, "done");
+  const j = state.jobs.find((x) => x.id === id);
+  if (!j) return;
+  const fromForm = $("jb-title") && $("jb-title").dataset.job === id;
+  const o = j.offer_id ? state.offers.find((x) => x.id === j.offer_id) : null;
+  // cable by the metre: only known now, and the invoice needs it; the job is finished with it
+  if (o && metersOpenOf(o.items).length) {
+    if (fromForm) await saveJob(id);                  // whatever was changed on the job is kept first
+    else closeSheet();
+    return void setTimeout(() => closeJobSheet(o.id), 260);
+  }
+  if (fromForm) await saveJob(id, "done");
+  else {
+    // from the Work screen there is no form to read: the job is just marked finished
+    try { await dbq(db.from("jobs").update({ status: "done", done_at: new Date().toISOString() }).eq("id", id), T("Not saved", "Не е зачувано")); }
+    catch { return; }
+    closeSheet(); await refreshAll(["jobs"]); render();
+  }
   toast(T("Finished — time to invoice", "Завршена — време за фактура"));
 }
 
