@@ -1377,7 +1377,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261102-180000";
+const BUILD = "20261102-210000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -4056,12 +4056,12 @@ async function nextOfferNumber() {
     return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
   }
 }
-async function openOfferSheet(id) {
+async function openOfferSheet(id, forClient) {
   if (id && !await ensureLoaded("offers", id)) return toast(T("That offer could not be loaded", "Понудата не може да се вчита"));
   if (id) await ensurePaymentsOf(id);
   const o = id ? state.offers.find((x) => x.id === id) : {
     number: await nextOfferNumber(), title: "", system: "", validity: 7, status: "draft",
-    offer_date: todayStr(), items: [], total_note: "", client_id: "",
+    offer_date: todayStr(), items: [], total_note: "", client_id: forClient || "",
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
   openSheet(`
@@ -4101,11 +4101,9 @@ async function openOfferSheet(id) {
         aria-label="${T("Markup %", "Надценка %")}">%</span>
         <button class="btn sm ghost" onclick="offerMarkupAll()">${T("Apply", "Примени")}</button></span></div>
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
-    <button class="btn" onclick="saveOffer('${id || ""}')">Save offer</button>
-    <button class="btn amber" onclick="saveOffer('${id || ""}', true)">Save + Generate .docx</button>
     <div class="grid2">
-      <button class="btn ghost" onclick="saveOffer('${id || ""}', false, true)">Save + PDF</button>
-      <button class="btn ghost" onclick="saveOffer('${id || ""}', false, false, true)">${ICON.share}${T("Save + Share", "Зачувај + Сподели")}</button>
+      <button class="btn ghost" style="width:100%" onclick="saveOffer('${id || ""}')">${T("Save", "Зачувај")}</button>
+      <button class="btn amber" style="width:100%" onclick="saveOffer('${id || ""}', false, false, false, true)">${ICON.share}${T("Send…", "Испрати…")}</button>
     </div>
     ${id && o.status === "accepted" ? `<button class="btn ghost" onclick="createJobTask('${id}')">Create installation task</button>` : ""}
     ${id && o.status === "accepted" ? (() => {
@@ -4339,7 +4337,7 @@ function updateTotal() {
   }
   return sum;
 }
-async function saveOffer(id, generate, pdf, share) {
+async function saveOffer(id, generate, pdf, share, send) {
   const meters = offerItems.map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m");
   const row = {
     number: id ? state.offers.find((x) => x.id === id).number : await nextOfferNumber(),
@@ -4370,6 +4368,7 @@ async function saveOffer(id, generate, pdf, share) {
   closeSheet(); renderOffers();
   if (pdf) { await printOffer(saved); setTimeout(() => promptDeduct(saved.id), 500); return; }
   if (share) { await shareOffer(saved); return; }   // the stock question waits until it has gone
+  if (send) { setTimeout(() => sendOfferMenu(saved.id), 260); return; }   // ...and so it does here
   toast(genOk === false ? "Offer saved — document failed" : genOk ? "Offer saved · downloading .docx" : "Offer saved");
   setTimeout(() => promptDeduct(saved.id), 400);
 }
@@ -4457,6 +4456,31 @@ async function printOffer(o) {
     console.error(e);
     say("Could not build the PDF view: " + e.message);
   }
+}
+
+// One Send, then how: to a chat as a PDF, printed (or saved) as a PDF, or as
+// the Word file. Each way asks about the stock once it has gone, as before.
+function sendOfferMenu(id) {
+  const o = state.offers.find((x) => x.id === id);
+  if (!o) return;
+  const cname = (state.clients.find((c) => c.id === o.client_id) || {}).name || "";
+  openSheet(`
+    <h2>${T("Send the offer", "Испрати ја понудата")}</h2>
+    <p class="muted">${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}${cname ? " · " + esc(cname) : ""} · ${fmt(o.grand_total)} ден.</p>
+    <button class="btn amber" onclick="offerSendVia('${id}','share')">${ICON.share}${T("Share — Viber, WhatsApp…", "Сподели — Viber, WhatsApp…")}</button>
+    <button class="btn ghost" onclick="offerSendVia('${id}','pdf')">${ICON.doc}${T("PDF — print or save", "PDF — печати или зачувај")}</button>
+    <button class="btn ghost" onclick="offerSendVia('${id}','docx')">${ICON.doc}${T("Word (.docx)", "Word (.docx)")}</button>
+    <button class="btn ghost" onclick="closeSheet();setTimeout(()=>promptDeduct('${id}'),400)">${T("Not now", "Не сега")}</button>`);
+}
+async function offerSendVia(id, how) {
+  const o = state.offers.find((x) => x.id === id);
+  if (!o) return;
+  if (how === "share") return shareOffer(o);   // its own sheet takes the place of this one
+  closeSheet();
+  if (how === "pdf") { await printOffer(o); setTimeout(() => promptDeduct(id), 500); return; }
+  const ok = await generateDocx(o);
+  toast(ok === false ? T("Document failed", "Документот не успеа") : T("Downloading .docx", "Се презема .docx"));
+  setTimeout(() => promptDeduct(id), 400);
 }
 
 // Sharing is two taps on purpose. A phone opens its share sheet — Viber,
@@ -6696,7 +6720,88 @@ function relatedTasks(field, id) {
     <span><span class="led ${t.context}"></span> ${esc(t.title)}</span>
     <span class="muted">${t.due_date ? dmy(t.due_date) : ""} ›</span></div>`).join("");
 }
-function openClientSheet(id) {
+/* ---------- the client, as a card ----------
+   Opened from a list, a client is what you want to know before calling them:
+   how to reach them, what they owe, what is under way and what was done.
+   Changing their details is behind Edit. */
+function openClientCard(id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const phone = c.phone || "";
+  const offers = state.offers.filter((o) => o.client_id === id);
+  // what is under way for them, as the Work list has it: a quote out, to schedule, booked, to invoice, not paid
+  const work = offers.filter((o) => o.status !== "rejected").map(workItem)
+    .filter((w) => w.stage !== "paid" && (w.stage !== "quote" || w.o.status === "sent" || w.o.status === "draft"));
+  const owedOffers = offers.filter((o) => o.status === "accepted" && offerBalance(o) > 0.005);
+  const owed = sumBy(owedOffers, offerBalance);
+  const invs = state.invoices.filter((i) => i.client_id === id && !i.cancelled)
+    .sort((a, b) => String(b.invoice_date).localeCompare(String(a.invoice_date)));
+  const lateInv = invs.filter((i) => !invPaid(i) && i.due_date && i.due_date < todayStr());
+  const t = todayStr();
+  const jobs = state.jobs.filter((j) => j.client_id === id && j.status !== "cancelled")
+    .sort((a, b) => (a.status === "done") - (b.status === "done") || String(a.scheduled_on || "9999").localeCompare(String(b.scheduled_on || "9999")));
+  const acts = [phone ? `<a class="btn sm" style="width:100%" href="tel:${esc(phone.replace(/[^\d+]/g, ""))}">${ICON.phone}${T("Call", "Јави се")}</a>` : "",
+    phone ? `<button class="btn sm ghost" style="width:100%" onclick="messageClient('${id}')">${ICON.share}${T("Message", "Порака")}</button>` : "",
+    c.address ? `<a class="btn sm ghost" style="width:100%" href="${mapsLink(c.address)}" target="_blank" rel="noopener">${ICON.pin}${T("Directions", "Насоки")}</a>` : ""].filter(Boolean);
+  openSheet(`
+    <h2>${esc(c.name)}${c.active === false ? ` <span class="muted" style="font-size:14px">· ${T("hidden", "скриен")}</span>` : ""}</h2>
+    <p class="muted">${[c.contact, phone, c.email].filter(Boolean).map(esc).join(" · ") || T("No contact details yet.", "Сè уште нема контакт.")}</p>
+    ${c.address ? `<p class="muted" style="margin-top:-6px">${esc(c.address)}</p>` : ""}
+    ${acts.length ? `<div class="jc-acts" style="grid-template-columns:repeat(${acts.length},1fr)">${acts.join("")}</div>` : ""}
+    ${c.note ? `<p style="margin:10px 0 0">${esc(c.note)}</p>` : ""}
+
+    <div class="card" style="margin-top:12px"><div class="stat-row top">
+      <div class="stat"><span>${T("Owes", "Должи")}</span><b style="color:${owed > 0.005 ? "var(--amber)" : "inherit"}">${fmt(owed)}</b></div>
+      <div class="stat"><span>${T("Under way", "Во тек")}</span><b>${work.length}</b></div>
+      <div class="stat"><span>${T("Invoices late", "Задоцнети фактури")}</span><b style="color:${lateInv.length ? "var(--danger)" : "inherit"}">${lateInv.length}</b></div>
+    </div></div>
+
+    ${work.length ? `<div class="sec">${T("Under way", "Во тек")}</div>
+      ${work.map((w) => `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openWorkSheet('${w.o.id}'),240)">
+          <span>${esc(w.o.number)} · ${esc(w.o.title || "")}</span>
+          <span style="color:${WORK_STAGES[w.stage].colour};white-space:nowrap">${T(WORK_STAGES[w.stage].en, WORK_STAGES[w.stage].mk)} ›</span></div>`).join("")}` : ""}
+
+    ${jobs.length ? `<div class="sec">${T("Jobs", "Работи")}</div>
+      ${jobs.slice(0, 8).map((j) => `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openJobCard('${j.id}'),240)">
+        <span>${esc(j.title)}</span><span class="muted" style="white-space:nowrap">${j.status === "done" ? T("done", "завршена")
+          : j.scheduled_on ? dm(j.scheduled_on) + (j.scheduled_on < t ? " · " + T("late", "доцни") : "") : T("no date", "без датум")} ›</span></div>`).join("")}` : ""}
+
+    ${invs.length ? `<div class="sec">${T("Invoices", "Фактури")}</div>
+      ${invs.slice(0, 8).map((i) => `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openInvoiceSheet('${i.id}'),240)">
+        <span>${T("Фактура", "Фактура")} ${esc(i.number)} · ${dmy(i.invoice_date)}</span>
+        <span class="mono" style="white-space:nowrap;color:${invPaid(i) ? "var(--personal)" : lateInv.includes(i) ? "var(--danger)" : "var(--amber)"}">${fmt(i.total)} ›</span></div>`).join("")}` : ""}
+
+    ${sitesBlock(id)}
+    ${installsBlock(id)}
+    ${docsBlock(id)}
+    ${relatedTasks("client_id", id)}
+    <div class="sec">${T("Offers", "Понуди")}</div><div id="cl-offers">${clientOffersHtml(offers)}</div>
+
+    <div class="grid2" style="margin-top:12px">
+      <button class="btn ghost" style="width:100%" onclick="openClientSheet('${id}', true)">${T("Edit", "Уреди")}</button>
+      ${state.perm.elaks ? `<button class="btn ghost" style="width:100%" onclick="closeSheet();setTimeout(()=>openOfferSheet(null,'${id}'),240)">+ ${T("Offer", "Понуда")}</button>` : ""}
+    </div>
+  `);
+  // the loaded offers are the recent ones: the client's whole history comes from the server
+  db.from("offers").select("id, number, title, status, grand_total, offer_date").eq("client_id", id)
+    .order("offer_date", { ascending: false }).then((r) => {
+      const el = $("cl-offers");
+      if (!r.error && el) el.innerHTML = clientOffersHtml(r.data || []);
+    });
+}
+// a client, on WhatsApp or Viber
+function messageClient(id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  const co = setting("co_name", "");
+  openMessage({
+    title: c.name, to: c.name, phone: c.phone || "", phone0: c.phone || "",
+    text: (lang) => msgLines(lang === "mk" ? ["Почитувани,", "", "", co] : ["Hello,", "", "", co]),
+    savePhone: async (v) => { await dbq(db.from("clients").update({ phone: v }).eq("id", c.id), T("Number not kept", "Бројот не е зачуван")); c.phone = v; },
+  });
+}
+function openClientSheet(id, edit) {
+  if (id && !edit) return openClientCard(id);
   const c = id ? state.clients.find((x) => x.id === id) : {};
   openSheet(`
     <h2>${id ? T("Edit client", "Уреди клиент") : T("New client", "Нов клиент")}</h2>
@@ -6712,18 +6817,7 @@ function openClientSheet(id) {
     ${id && c.active === false
       ? `<button class="btn ghost" onclick="unhideClient('${id}')">${T("Bring back into the list", "Врати во листата")}</button>`
       : id ? `<button class="btn danger" onclick="delClient('${id}')">${T("Remove client", "Отстрани клиент")}</button>` : ""}
-    ${id ? sitesBlock(id) : ""}
-    ${id ? installsBlock(id) : ""}
-    ${id ? docsBlock(id) : ""}
-    ${id ? relatedTasks("client_id", id) : ""}
-    ${id ? `<div class="sec">${T("Offers", "Понуди")}</div><div id="cl-offers">${clientOffersHtml(state.offers.filter((o) => o.client_id === id))}</div>` : ""}
   `);
-  // the loaded offers are the recent ones: the client's whole history comes from the server
-  if (id) db.from("offers").select("id, number, title, status, grand_total, offer_date").eq("client_id", id)
-    .order("offer_date", { ascending: false }).then((r) => {
-      const el = $("cl-offers");
-      if (!r.error && el) el.innerHTML = clientOffersHtml(r.data || []);
-    });
 }
 function clientOffersHtml(list) {
   return list.length ? list.map((o) => `<div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openOfferSheet('${o.id}'),240)">
@@ -6768,8 +6862,11 @@ async function saveClient(id) {
     phone: $("cl-phone").value.trim() || null, email: $("cl-email").value.trim() || null,
     address: $("cl-address").value.trim() || null, note: $("cl-note").value.trim() || null };
   if (!row.name) return toast("Enter a name");
-  try { await dbq(id ? db.from("clients").update(row).eq("id", id) : db.from("clients").insert(row), "Client not saved"); } catch { return; }
-  closeSheet(); await refreshAll(["clients"]); renderClients(); toast("Saved");
+  let made;
+  try { made = await dbq(id ? db.from("clients").update(row).eq("id", id) : db.from("clients").insert(row).select().single(), "Client not saved"); } catch { return; }
+  closeSheet(); await refreshAll(["clients"]); renderClients(); toast(T("Saved", "Зачувано"));
+  const cid = id || (made && made.id);
+  if (cid) setTimeout(() => openClientCard(cid), 260);
 }
 
 async function loadTeam() {
@@ -10474,7 +10571,6 @@ const MK = {
   "Specs for offers (each line starts with --)": "Спецификации за понуди (секој ред почнува со --)",
   "System title": "Наслов на систем", "Description (Систем:)": "Опис (Систем:)",
   "Validity (days)": "Важност (дена)", "Note next to total": "Белешка до вкупно",
-  "Save offer": "Зачувај понуда", "Save + PDF": "Зачувај + PDF", "Save + Generate .docx": "Зачувај + .docx",
   "Take items out of stock": "Разнижи од магацин",
   "Items have been taken out of stock.": "Ставките се разнижени од магацин.",
   "Close job — enter meters": "Затвори работа — внеси метри",
