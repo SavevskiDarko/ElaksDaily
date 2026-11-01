@@ -1316,6 +1316,8 @@ async function refreshAll(only) {
     if (k === "apartments" && (r.data || []).length) state.rentCol = "rent_mode" in r.data[0];
     // stays.guest_phone arrives with migration 0005; until then the field stays hidden
     if (k === "stays" && (r.data || []).length) state.stayPhoneCol = "guest_phone" in r.data[0];
+    // offers.show_total arrives with migration 0007; until then "no total" holds for the send at hand only
+    if (k === "offers" && (r.data || []).length) state.offerTotalCol = "show_total" in r.data[0];
     if (k === "completions") {
       state.doneSet = new Set((r.data ?? []).filter((c) => !c.skipped).map((c) => c.task_id + ":" + c.done_on));
       state.skipSet = new Set((r.data ?? []).filter((c) => c.skipped).map((c) => c.task_id + ":" + c.done_on));
@@ -1377,7 +1379,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261103-110000";
+const BUILD = "20261103-140000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -4062,6 +4064,7 @@ async function openOfferSheet(id, forClient, preset) {
     number: await nextOfferNumber(), title: (preset && preset.title) || "", system: (preset && preset.system) || "",
     validity: (preset && preset.validity) || 7, status: "draft",
     offer_date: todayStr(), items: (preset && preset.items) || [], total_note: "", client_id: forClient || "",
+    show_total: preset && preset.show_total === false ? false : true,
   };
   offerItems = JSON.parse(JSON.stringify(o.items || []));
   if (!id && preset) for (const aid of preset.articles || []) {
@@ -4104,7 +4107,14 @@ async function openOfferSheet(id, forClient, preset) {
       <span class="row" style="gap:6px"><span class="lpct">+<input id="of-mk-all" type="number" inputmode="decimal" step="any"
         aria-label="${T("Markup %", "Надценка %")}">%</span>
         <button class="btn sm ghost" onclick="offerMarkupAll()">${T("Apply", "Примени")}</button></span></div>
+    <div class="row tapp" role="button" tabindex="0" style="gap:10px;align-items:center;margin-top:14px" onclick="offerTotalToggle()">
+      <span class="clbox ${o.show_total === false ? "" : "on"}" id="of-showtotal">${o.show_total === false ? "" : "\u2713"}</span>
+      <div style="flex:1;min-width:0"><b style="font-weight:600">${T("Total on the offer", "Вкупно на понудата")}</b>
+        <div class="muted" style="font-size:12.5px" id="of-showtotal-hint">${offerTotalHint(o.show_total !== false)}</div></div>
+    </div>
+    <div id="of-note-wrap" style="${o.show_total === false ? "display:none" : ""}">
     <label>Note next to total</label><input id="of-note" value="${esc(o.total_note || "")}" ${o.total_note ? 'data-manual="1"' : ""} oninput="this.dataset.manual='1'" placeholder="automatic">
+    </div>
     <div class="grid2">
       <button class="btn ghost" style="width:100%" onclick="saveOffer('${id || ""}')">${T("Save", "Зачувај")}</button>
       <button class="btn amber" style="width:100%" onclick="saveOffer('${id || ""}', false, false, false, true)">${ICON.share}${T("Send…", "Испрати…")}</button>
@@ -4341,6 +4351,24 @@ function updateTotal() {
   }
   return sum;
 }
+// Some offers go out as a list of prices with no sum under them. The switch
+// takes the total line, and the note that sits beside it, off the PDF, the
+// print and the Word file; the app itself still shows the total.
+const offerShowsTotal = () => { const b = $("of-showtotal"); return !b || b.classList.contains("on"); };
+function offerTotalHint(on) {
+  return on ? T("The client sees the sum under the items.", "Клиентот го гледа збирот под ставките.")
+    : T("Left off: the client sees each item's price, not the sum.", "Изоставено: клиентот ги гледа цените по ставка, без збир.")
+      + (state.offerTotalCol === false ? " " + T("Kept for this send only until the database update (0007) is run.",
+        "Важи само за ова испраќање додека не се пушти ажурирањето на базата (0007).") : "");
+}
+function offerTotalToggle() {
+  const b = $("of-showtotal");
+  if (!b) return;
+  const on = !b.classList.contains("on");
+  b.classList.toggle("on", on); b.textContent = on ? "\u2713" : "";
+  $("of-showtotal-hint").textContent = offerTotalHint(on);
+  $("of-note-wrap").style.display = on ? "" : "none";
+}
 async function saveOffer(id, generate, pdf, share, send) {
   const meters = offerItems.map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m");
   const row = {
@@ -4351,6 +4379,8 @@ async function saveOffer(id, generate, pdf, share, send) {
     items: offerItems, total_note: $("of-note").value.trim() || null,
     grand_total: updateTotal(),
   };
+  const showTotal = offerShowsTotal();
+  if (state.offerTotalCol) row.show_total = showTotal;
   if (!row.title) return toast("Enter a title");
   if (!offerItems.length) return toast("Add items");
   let saved;
@@ -4367,6 +4397,10 @@ async function saveOffer(id, generate, pdf, share, send) {
     }
   } catch { return; }
   await refreshAll(["offers", "stock"]);
+  // before 0007 the database cannot keep it, so it is carried for this send
+  saved.show_total = showTotal;
+  const kept = state.offers.find((x) => x.id === saved.id);
+  if (kept && !state.offerTotalCol) kept.show_total = showTotal;
   let genOk = null;
   if (generate) genOk = await generateDocx(saved);
   closeSheet(); renderOffers();
@@ -4439,7 +4473,7 @@ async function offerSheetHtml(o) {
           <col style="width:4.9%"><col style="width:8.9%"><col style="width:9.6%"></colgroup>
         <thead><tr><th>Бр</th><th>Слика</th><th>Спецификација</th><th>Ком</th><th>Цена</th><th>Вк. Цена</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td class="pv-total" colspan="6">Вкупно : ${fmt(o.grand_total)} ден.&nbsp;&nbsp; ${esc(o.total_note || "")}</td></tr></tfoot>
+        ${o.show_total === false ? "" : `<tfoot><tr><td class="pv-total" colspan="6">Вкупно : ${fmt(o.grand_total)} ден.&nbsp;&nbsp; ${esc(o.total_note || "")}</td></tr></tfoot>`}
       </table>
       ${foot ? `<div class="pv-note">${esc(foot)}</div>` : ""}
       <div class="pv-valid">Понудата важи ${o.validity} дена.</div>
@@ -4470,7 +4504,8 @@ function sendOfferMenu(id) {
   const cname = (state.clients.find((c) => c.id === o.client_id) || {}).name || "";
   openSheet(`
     <h2>${T("Send the offer", "Испрати ја понудата")}</h2>
-    <p class="muted">${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}${cname ? " · " + esc(cname) : ""} · ${fmt(o.grand_total)} ден.</p>
+    <p class="muted">${esc(o.number)}${o.title ? " · " + esc(o.title) : ""}${cname ? " · " + esc(cname) : ""} · ${fmt(o.grand_total)} ден.${
+      o.show_total === false ? " · " + T("the total is left off", "без вкупно на понудата") : ""}</p>
     <button class="btn amber" onclick="offerSendVia('${id}','share')">${ICON.share}${T("Share — Viber, WhatsApp…", "Сподели — Viber, WhatsApp…")}</button>
     <button class="btn ghost" onclick="offerSendVia('${id}','pdf')">${ICON.doc}${T("PDF — print or save", "PDF — печати или зачувај")}</button>
     <button class="btn ghost" onclick="offerSendVia('${id}','docx')">${ICON.doc}${T("Word (.docx)", "Word (.docx)")}</button>
@@ -4891,7 +4926,14 @@ async function generateDocx(o) {
         photo[r.article_id] = { dataUrl: r.data, w, h };
       }
     }
-    const doc = new window.docxtemplater(new PizZip(buf), { linebreaks: true, paragraphLoop: true });
+    const zip = new PizZip(buf);
+    if (o.show_total === false) {
+      // the template keeps "Вкупно : {grand_total} ден. {total_note}" in a table row of its own
+      const xml = zip.file("word/document.xml").asText(), at = xml.indexOf("grand_total");
+      const from = Math.max(xml.lastIndexOf("<w:tr>", at), xml.lastIndexOf("<w:tr ", at)), to = xml.indexOf("</w:tr>", at);
+      if (at > 0 && from > 0 && to > at) zip.file("word/document.xml", xml.slice(0, from) + xml.slice(to + 7));
+    }
+    const doc = new window.docxtemplater(zip, { linebreaks: true, paragraphLoop: true });
     const client = state.clients.find((c) => c.id === o.client_id);
     doc.render({
       title: o.title, system: o.system || "",
@@ -5183,7 +5225,7 @@ function duplicateOffer(id) {
   if (!src) return;
   closeSheet();
   setTimeout(() => openOfferSheet(null, src.client_id || "", {
-    title: src.title, system: src.system, validity: src.validity,
+    title: src.title, system: src.system, validity: src.validity, show_total: src.show_total,
     // the cable on the new job is measured afresh
     items: JSON.parse(JSON.stringify(src.items || [])).map((it) => { delete it.consumed; return it; }),
   }), 240);
