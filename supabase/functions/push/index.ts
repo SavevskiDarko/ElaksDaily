@@ -3,6 +3,8 @@
 //  1. task reminders (tasks with remind=true, due today at/past due_time)
 //  2. daily digest at the configured hour (today's tasks + low stock)
 //  3. low-stock alerts (once per day per article)
+//  …and further down: jobs — told to whoever is given one (?job=, from the
+//  app), and the evening before to everyone going somewhere tomorrow
 //
 // Secrets needed (supabase secrets set):
 //  VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (mailto:you@example.com)
@@ -45,7 +47,7 @@ const ownerSees = (r: any, t: any) => r.role === "owner" && !(t.apartment_id && 
 // How many phones it went to, how many had been retired by the push service
 // (dropped here; the app signs the phone up again when it is next opened),
 // and how many failed otherwise — those are logged, as they used to vanish.
-async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null) {
+async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null, jobId: string | null = null) {
   const { data: subs } = await db.from("push_subscriptions").select("*");
   const { data: rr } = await db.from("user_roles").select("*");
   const rowOf = new Map((rr ?? []).map((r) => [r.user_id, r]));
@@ -57,7 +59,7 @@ async function sendToAll(title: string, body: string, tag: string, allow: ((r: a
     }
     try {
       // 12h so a phone that is off or out of signal still receives it
-      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId }), { urgency: "high", TTL: 43200 });
+      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId, jobId }), { urgency: "high", TTL: 43200 });
       out.sent++;
     } catch (e: any) {
       if (e.statusCode === 404 || e.statusCode === 410) {
@@ -92,8 +94,52 @@ async function testPush(req: Request) {
   return json(out);
 }
 
+// When and where a job is, said the way you would say it: "утре 09:00", "пет 13.11. 09:00".
+const WD_MK = ["нед", "пон", "вто", "сре", "чет", "пет", "саб"];
+function dayAfter(ds: string, n = 1) {
+  const [y, m, d] = ds.split("-").map(Number);
+  const x = new Date(Date.UTC(y, m - 1, d + n));
+  return `${x.getUTCFullYear()}-${pad(x.getUTCMonth() + 1)}-${pad(x.getUTCDate())}`;
+}
+function jobWhen(j: any, today: string) {
+  const t = j.scheduled_time ? " " + String(j.scheduled_time).slice(0, 5) : "";
+  if (!j.scheduled_on) return "без датум" + t;
+  if (j.scheduled_on === today) return "денес" + t;
+  if (j.scheduled_on === dayAfter(today)) return "утре" + t;
+  const [y, m, d] = String(j.scheduled_on).split("-").map(Number);
+  return `${WD_MK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${pad(d)}.${pad(m)}.${t}`;
+}
+
+// The app tells the person given a job, the moment it is given or moved. It
+// answers to the sender's own sign-in, and reaches the one the job is for and
+// no one else — never the sender, never for a job finished or called off.
+async function jobNotice(req: Request) {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...CORS, "content-type": "application/json" } });
+  const url = new URL(req.url);
+  const jobId = url.searchParams.get("job") ?? "", why = url.searchParams.get("why") === "moved" ? "moved" : "new";
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  const { data } = token ? await db.auth.getUser(token) : { data: null };
+  const uid = data?.user?.id;
+  if (!uid) return json({ error: "sign in" }, 401);
+  const { data: me } = await db.from("user_roles").select("role, see_elaks").eq("user_id", uid).maybeSingle();
+  if (!me || !(me.role === "owner" || me.see_elaks)) return json({ error: "not allowed" }, 403);
+  const { data: j } = await db.from("jobs").select("id, title, scheduled_on, scheduled_time, assigned_to, status, client_id")
+    .eq("id", jobId).maybeSingle();
+  if (!j) return json({ error: "no such job" }, 404);
+  if (!j.assigned_to || j.assigned_to === uid || j.status === "done" || j.status === "cancelled") return json({ sent: 0 });
+  const { data: c } = j.client_id ? await db.from("clients").select("name").eq("id", j.client_id).maybeSingle() : { data: null };
+  const { data: who } = await db.from("user_roles").select("display_name").eq("user_id", j.assigned_to).maybeSingle();
+  const n = nowLocal(), today = `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`;
+  const out = await sendToAll(why === "moved" ? "Работата е поместена" : "Нова работа за тебе",
+    [jobWhen(j, today), j.title, c?.name].filter(Boolean).join(" · "), `job-${j.id}`,
+    (r: any) => r.user_id === j.assigned_to, null, j.id);
+  return json({ ...out, to: who?.display_name ?? null });
+}
+
 Deno.serve(async (req) => {
   if (new URL(req.url).searchParams.get("test")) return testPush(req);
+  if (new URL(req.url).searchParams.get("job")) return jobNotice(req);
   // The function is deployed with --no-verify-jwt, so this header is the only
   // thing standing between the schedule and the open internet. Refuse when the
   // secret is missing: without it anyone could fire notifications at every
@@ -549,6 +595,39 @@ Deno.serve(async (req) => {
     }
     if (mark !== since) await db.from("app_settings").upsert({ key: "done_told_at", value: mark }, { onConflict: "key" });
   } catch (e) { console.error("done notices", e); }
+
+  // ---- 11. tomorrow's jobs, the evening before ----
+  // Once a day from 19:00, with the digest's three-hour window, everyone going
+  // somewhere tomorrow hears where and when: one job by name, several as a list.
+  try {
+    const { data: mk } = await db.from("app_settings").select("value").eq("key", "jobs_eve_told_on").maybeSingle();
+    const told = String(mk?.value ?? "").replace(/"/g, "").slice(0, 10);
+    const [nh, nm] = hhmm.split(":").map(Number);
+    const past = nh * 60 + nm - 19 * 60;
+    if (past >= 0 && past <= 180 && told !== today) {
+      const tomorrow = dayAfter(today);
+      const { data: jobs } = await db.from("jobs").select("id, title, scheduled_on, scheduled_time, assigned_to, client_id")
+        .eq("scheduled_on", tomorrow).eq("status", "scheduled").not("assigned_to", "is", null);
+      const ids = [...new Set((jobs ?? []).map((j: any) => j.client_id).filter(Boolean))];
+      const { data: cl } = ids.length ? await db.from("clients").select("id, name").in("id", ids) : { data: [] };
+      const nameOf = (id: string) => (cl ?? []).find((c: any) => c.id === id)?.name ?? "";
+      const byWho = new Map<string, any[]>();
+      for (const j of jobs ?? []) byWho.set(j.assigned_to, [...(byWho.get(j.assigned_to) ?? []), j]);
+      for (const [who, list] of byWho) {
+        list.sort((a, b) => String(a.scheduled_time ?? "99").localeCompare(String(b.scheduled_time ?? "99")));
+        const at = (j: any) => j.scheduled_time ? String(j.scheduled_time).slice(0, 5) + " " : "";
+        if (list.length === 1) {
+          const j = list[0];
+          await sendToAll(`Утре: ${j.title}`, [j.scheduled_time ? String(j.scheduled_time).slice(0, 5) : "", nameOf(j.client_id)].filter(Boolean).join(" · ") || "утре",
+            `eve-${j.id}`, (r: any) => r.user_id === who, null, j.id);
+        } else {
+          await sendToAll(`Утре: ${list.length} работи`, list.map((j) => at(j) + j.title).join(" · "),
+            `eve-${tomorrow}`, (r: any) => r.user_id === who, null, "list");
+        }
+      }
+      await db.from("app_settings").upsert({ key: "jobs_eve_told_on", value: today }, { onConflict: "key" });
+    }
+  } catch (e) { console.error("tomorrow's jobs", e); }
 
   return new Response("ok");
 });

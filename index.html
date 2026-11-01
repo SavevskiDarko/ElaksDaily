@@ -385,6 +385,10 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 #loadbar{background:var(--danger-bg);color:var(--danger);padding:9px 14px;font-size:13px;display:flex;
   align-items:center;gap:10px;border-bottom:1px solid var(--line)}
 #loadbar button{font-weight:700;text-decoration:underline;flex:none}
+/* a link that is a button — Call, Directions — reads as one */
+a.btn{text-decoration:none;display:block;text-align:center}
+.jc-acts{display:grid;gap:8px;margin-top:10px}
+.jc-acts .btn{padding-left:6px;padding-right:6px;margin-top:0}
 /* no signal is a state to know about, not an error */
 #loadbar[data-net]{background:var(--net-bg);color:var(--net-ink)}
 .hcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
@@ -801,6 +805,8 @@ const ICON = (() => {
     check: svg('<path d="M20 6 9 17l-5-5"/>'),
     flame: svg('<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4.1 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'),
     job: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>'),
+    phone: svg('<path d="M5 3h3.5l1.8 4.5-2.3 1.4a11 11 0 0 0 7.1 7.1l1.4-2.3L21 15.5V19a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/>'),
+    pin: svg('<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>'),
     arrive: svg('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/>'),
     leave: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
   };
@@ -1086,7 +1092,8 @@ async function startApp(signedIn) {
   handleNotificationIntent();
   handleShortcut();
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
-    if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
+    if (e.data && e.data.centrala && e.data.jobId) openJobFromNotice(e.data.jobId);
+    else if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
   });
   if (state.role === "owner") {
     try {
@@ -1325,7 +1332,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261101-210000";
+const BUILD = "20261102-090000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1382,10 +1389,20 @@ function handleShortcut() {
 // app is already open); act on it, then clean the address bar.
 function handleNotificationIntent() {
   const p = new URLSearchParams(location.search);
+  if (p.get("job")) { openJobFromNotice(p.get("job")); history.replaceState({}, "", location.pathname); return; }
   const id = p.get("task");
   if (!id) return;
   runTaskIntent(id, p.get("do") || "open");
   history.replaceState({}, "", location.pathname);
+}
+// "list" for tomorrow's jobs, otherwise the job itself, on its card
+async function openJobFromNotice(id) {
+  if (!state.perm.elaks) return tab("today");
+  await refreshAll(["jobs", "offers", "sites", "clients"]);
+  state.elaksView = "job"; state.jobFilter = "upcoming"; tab("elaks");
+  if (id === "list") return;
+  if (!state.jobs.some((j) => j.id === id)) return toast(T("That job is no longer there", "Таа работа повеќе ја нема"));
+  openJobCard(id);
 }
 async function runTaskIntent(id, action) {
   if (!id) return;
@@ -4790,12 +4807,13 @@ async function finishAccept(id) {
     // if the client has exactly one site, it is the obvious place
     const sites = state.sites.filter((s) => s.client_id === o.client_id);
     try {
-      await dbq(db.from("jobs").insert({
+      const made = await dbq(db.from("jobs").insert({
         title: o.title || o.number, offer_id: id, client_id: o.client_id || null,
         site_id: sites.length === 1 ? sites[0].id : null,
         scheduled_on: date, scheduled_time: time, assigned_to: who, status: "scheduled",
-      }), T("The job was not created", "Работата не е создадена"));
+      }).select().single(), T("The job was not created", "Работата не е создадена"));
       jobMade = true;
+      tellJobChange(made, null);
     } catch { /* the message is already shown */ }
     await refreshAll(["jobs"]); render();
   }
@@ -10948,7 +10966,8 @@ function renderJobs() {
 
 let jobPhotos = [], jobRemoved = [], jobOpenId = null;
 
-async function openJobSheet(id, fromOffer) {
+async function openJobSheet(id, fromOffer, edit) {
+  if (id && !edit) return openJobCard(id);
   const o = fromOffer ? state.offers.find((x) => x.id === fromOffer) : null;
   const j = id ? state.jobs.find((x) => x.id === id)
     : { title: o ? o.title : "", offer_id: o ? o.id : null, client_id: o ? o.client_id : null,
@@ -11017,6 +11036,141 @@ async function openJobSheet(id, fromOffer) {
   renderJobImg();
 }
 
+/* ---------- the job, on site ----------
+   Opened from a list, a job is what the person going needs in their hand:
+   who to call and where to drive, how to get into the system, what to fit,
+   photos as they go, and the one button that moves it on. Changing it is a
+   tap further, behind Edit. */
+// a value put in an inline handler's quoted argument: safe for the JavaScript string and for the attribute around it
+const jsArg = (v) => String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const mapsLink = (a) => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(a);
+async function openJobCard(id) {
+  const j = state.jobs.find((x) => x.id === id);
+  if (!j) return;
+  jobOpenId = id; jobPhotos = []; jobRemoved = [];
+  try {
+    const { data } = await db.from("job_photos").select("id, thumb, sort").eq("job_id", id).order("sort");
+    jobPhotos = (data || []).map((r) => ({ id: r.id, thumb: r.thumb }));
+  } catch (e) { console.warn("job photos", e); }
+  if (j.offer_id) await ensureLoaded("offers", j.offer_id);
+  const c = state.clients.find((x) => x.id === j.client_id);
+  const site = state.sites.find((x) => x.id === j.site_id);
+  const o = j.offer_id ? state.offers.find((x) => x.id === j.offer_id) : null;
+  const where = j.address || (site && site.address) || (c && c.address) || "";
+  const phone = (c && c.phone) || "";
+  const late = j.status === "scheduled" && j.scheduled_on && j.scheduled_on < todayStr();
+  const when = j.scheduled_on ? `${wd(j.scheduled_on)} ${dmy(j.scheduled_on)}${j.scheduled_time ? " · " + String(j.scheduled_time).slice(0, 5) : ""}` : T("no date", "без датум");
+  const copyRow = (label, val) => val
+    ? `<div class="mov tapp" role="button" tabindex="0" onclick="copyText('${jsArg(val)}')">
+         <span class="muted">${label}</span><span><b class="mono">${esc(val)}</b> <span class="muted">${T("copy", "копирај")}</span></span></div>` : "";
+  // what goes in: the offer's lines, without their prices
+  const fit = o ? (o.items || []).filter((it) => (it.name || "").trim()) : [];
+  const inv = o ? state.invoices.find((x) => x.offer_id === o.id && !x.cancelled) : null;
+  openSheet(`
+    <h2>${esc(j.title)}</h2>
+    <p class="muted"><span style="color:${jobColour(j)};font-weight:600">${late ? T("overdue", "задоцнета") : jobLabel(j.status)}</span>
+      · ${esc(when)}${j.assigned_to ? " · " + esc(j.assigned_to === state.uid ? T("you", "ти") : personName(j.assigned_to)) : ""}</p>
+
+    ${c || where ? `<div class="card">
+      ${c ? `<b>${esc(c.name)}</b>${c.contact ? `<div class="muted" style="font-size:13px">${esc(c.contact)}${phone ? " · " + esc(phone) : ""}</div>`
+        : phone ? `<div class="muted" style="font-size:13px">${esc(phone)}</div>` : ""}` : ""}
+      ${where ? `<div class="muted" style="font-size:13px;margin-top:2px">${esc(where)}</div>` : ""}
+      <div class="jc-acts" style="grid-template-columns:repeat(${(phone ? 2 : 0) + (where ? 1 : 0)},1fr)">
+        ${phone ? `<a class="btn sm" style="width:100%" href="tel:${esc(phone.replace(/[^\d+]/g, ""))}">${ICON.phone}${T("Call", "Јави се")}</a>` : ""}
+        ${where ? `<a class="btn sm ghost" style="width:100%" href="${mapsLink(where)}" target="_blank" rel="noopener">${ICON.pin}${T("Directions", "Насоки")}</a>` : ""}
+        ${phone ? `<button class="btn sm ghost" style="width:100%" onclick="messageJobClient('${id}')">${ICON.share}${T("Message", "Порака")}</button>` : ""}
+      </div>
+    </div>` : ""}
+
+    ${site ? `<div class="sec">${T("The system", "Системот")}</div>
+      <div class="card">
+        <div class="mov tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openSiteSheet('${site.id}'),240)">
+          <span><b>${esc(site.name)}</b>${[site.recorder, site.channels ? site.channels + " ch" : "", site.camera_count ? site.camera_count + " " + T("cameras", "камери") : ""]
+            .filter(Boolean).length ? `<span class="muted"> · ${esc([site.recorder, site.channels ? site.channels + " ch" : "", site.camera_count ? site.camera_count + " " + T("cameras", "камери") : ""].filter(Boolean).join(" · "))}</span>` : ""}</span>
+          <span class="muted">›</span></div>
+        ${copyRow(T("User", "Корисник"), site.access_user)}
+        ${copyRow(T("Password", "Лозинка"), site.access_pass)}
+        ${copyRow(T("App", "Апликација"), site.remote_app)}
+        ${copyRow(T("Device / account", "Уред / сметка"), site.remote_id)}
+        ${site.network_note ? `<p class="muted" style="font-size:12.5px;margin:6px 0 0">${esc(site.network_note)}</p>` : ""}
+        ${site.note ? `<p class="muted" style="font-size:12.5px;margin:6px 0 0">${esc(site.note)}</p>` : ""}
+      </div>` : ""}
+
+    ${fit.length ? `<div class="sec">${T("What goes in", "Што се монтира")}</div>
+      <div class="card">${fit.map((it) => `<div class="mov"><span>${esc(it.name)}</span><span class="mono">${
+        it.unit === "m" ? (metred(it) ? fmt(it.consumed) + " m" : T("by the metre", "на метар")) : it.free ? "" : it.qty ? "× " + fmt(it.qty) : ""}</span></div>`).join("")}</div>` : ""}
+
+    ${j.note ? `<div class="sec">${T("Note", "Белешка")}</div><p style="margin:0 0 6px">${esc(j.note)}</p>` : ""}
+
+    <div class="sec">${T("Photos of the work", "Слики од работата")}</div>
+    <div id="jb-img" data-view="card"></div>
+    <input type="file" accept="image/*" capture="environment" id="jb-cam" style="display:none" onchange="addJobPhotosNow(this,'${id}')">
+    <input type="file" accept="image/*" multiple id="jb-file" style="display:none" onchange="addJobPhotosNow(this,'${id}')">
+    <div class="grid2" style="margin-top:6px">
+      <button class="btn sm ghost" style="width:100%" onclick="$('jb-cam').click()">${ICON.camera}${T("Photograph", "Сликај")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="$('jb-file').click()">${ICON.image}${T("From gallery", "Од галерија")}</button>
+    </div>
+
+    ${j.status === "scheduled" ? `<button class="btn" style="margin-top:14px" onclick="startJob('${id}')">${T("On site now", "Сега сум таму")}</button>` : ""}
+    ${j.status !== "done" && j.status !== "cancelled" ? `<button class="btn amber" ${j.status === "scheduled" ? "" : 'style="margin-top:14px"'} onclick="finishJob('${id}')">${T("Finished", "Завршена")}</button>`
+      : j.status === "done" ? `<p class="muted" style="margin-top:14px">${T("Finished", "Завршена")} ${j.done_at ? dmyTime(j.done_at) : ""}</p>` : ""}
+    ${o && o.status === "accepted" && j.status === "done" ? (inv
+      ? `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>openInvoiceSheet('${inv.id}'),240)">${T("Фактура", "Фактура")} ${esc(inv.number)} ›</button>`
+      : `<button class="btn amber" onclick="closeSheet();setTimeout(()=>newInvoiceFromOffer('${o.id}'),240)">${T("Make the invoice", "Направи фактура")}</button>`) : ""}
+    <div class="grid2">
+      <button class="btn ghost" style="width:100%" onclick="openJobSheet('${id}', null, true)">${T("Edit", "Уреди")}</button>
+      ${o ? `<button class="btn ghost" style="width:100%" onclick="closeSheet();setTimeout(()=>openOfferSheet('${o.id}'),240)">${T("The offer", "Понудата")}</button>` : ""}
+    </div>
+  `);
+  renderJobImg();
+}
+async function startJob(id) {
+  try { await dbq(db.from("jobs").update({ status: "started", started_at: new Date().toISOString() }).eq("id", id), T("Not saved", "Не е зачувано")); }
+  catch { return; }
+  await refreshAll(["jobs"]); render();
+  openJobCard(id);
+}
+// a photo taken on the card is kept at once: nothing to forget to save
+async function addJobPhotosNow(input, id) {
+  const files = [...(input.files || [])];
+  input.value = "";
+  for (const f of files) {
+    if (f.size > 12 * 1024 * 1024) { toast(T("One photo was too large", "Една слика беше преголема")); continue; }
+    const url = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(null); fr.readAsDataURL(f); });
+    const im = url ? await loadImg(url) : null;
+    if (!im) { toast(T("Could not read that image", "Не можев да ја прочитам сликата")); continue; }
+    const thumb = imgResize(im, 110, 0.6), full = imgResize(im, 1400, 0.8);
+    try {
+      const row = await dbq(db.from("job_photos").insert({ job_id: id, data: full, thumb, sort: jobPhotos.length }).select("id").single(),
+        T("A photo was not saved", "Слика не е зачувана"));
+      jobPhotos.push({ id: row && row.id, thumb, full });
+    } catch { break; }
+    renderJobImg();
+  }
+  if (files.length) toast(T("Photo kept", "Сликата е зачувана"));
+}
+// the client of a job, on WhatsApp or Viber, the words already there
+function messageJobClient(id) {
+  const j = state.jobs.find((x) => x.id === id);
+  const c = j && state.clients.find((x) => x.id === j.client_id);
+  if (!c) return;
+  const co = setting("co_name", "");
+  const text = (lang, key) => {
+    const mk = lang === "mk";
+    const lines = key === "late"
+      ? (mk ? ["Почитувани,", "доцниме неколку минути — наскоро сме кај вас.", "", co] : ["Hello,", "we are running a few minutes late — we will be with you shortly.", "", co])
+      : (mk ? ["Почитувани,", `тргнуваме кон вас за ${j.title}.`, "", co] : ["Hello,", `we are on our way to you for ${j.title}.`, "", co]);
+    return msgLines(lines);
+  };
+  openMessage({
+    title: j.title, to: c.name, phone: c.phone || "", phone0: c.phone || "",
+    templates: [["way", T("On our way", "Тргнуваме")], ["late", T("Running late", "Доцниме")]],
+    key: "way", text,
+    savePhone: async (v) => { await dbq(db.from("clients").update({ phone: v }).eq("id", c.id), T("Number not kept", "Бројот не е зачуван")); c.phone = v; },
+  });
+}
+
 function jbSiteOptions(selected) {
   const sel = $("jb-site");
   if (!sel) return;
@@ -11033,7 +11187,7 @@ function renderJobImg() {
   el.innerHTML = jobPhotos.length
     ? `<div class="pgrid">${jobPhotos.map((p, i) => `<div class="pcell">
         <img src="${p.thumb || p.full}" alt="" role="button" tabindex="0" onclick="viewJobPhoto(${i})">
-        <button class="pdel" onclick="event.stopPropagation();removeJobImage(${i})" aria-label="${T("Remove", "Отстрани")}">✕</button>
+        ${el.dataset.view === "card" ? "" : `<button class="pdel" onclick="event.stopPropagation();removeJobImage(${i})" aria-label="${T("Remove", "Отстрани")}">✕</button>`}
         <span class="pnum">${i + 1}</span></div>`).join("")}</div>`
     : `<p class="muted" style="font-size:12.5px">${T("None yet.", "Сè уште нема.")}</p>`;
 }
@@ -11078,7 +11232,7 @@ async function viewJobPhoto(i) {
     ${back ? `<button class="btn ghost" onclick="openJobSheet('${back}')">${T("Back to the job", "Назад кон работата")}</button>` : ""}`);
 }
 
-async function saveJob(id, forceStatus) {
+async function saveJob(id, forceStatus, noCard) {
   const row = {
     title: $("jb-title").value.trim(),
     client_id: $("jb-client").value || null,
@@ -11096,6 +11250,7 @@ async function saveJob(id, forceStatus) {
   if (status === "done") row.done_at = new Date().toISOString();
   if (status === "started" && !row.started_at) row.started_at = new Date().toISOString();
 
+  const before = id ? { ...(state.jobs.find((x) => x.id === id) || {}) } : null;
   let saved;
   try {
     saved = await dbq(id ? db.from("jobs").update(row).eq("id", id).select().single()
@@ -11109,7 +11264,28 @@ async function saveJob(id, forceStatus) {
     }
   } catch { return; }
   closeSheet(); await refreshAll(["jobs"]); render(); toast(T("Saved", "Зачувано"));
-  if (!id) setTimeout(() => openJobSheet(saved.id), 240);
+  tellJobChange(saved, before);
+  if (!noCard) setTimeout(() => openJobCard(saved.id), 240);
+}
+// Whoever is given a job hears of it at once, and again when it moves —
+// not when it is your own, nor once it is done. The server sends it, to
+// their phones only (push ?job=).
+function tellJobChange(j, before) {
+  if (!j || !j.assigned_to || j.assigned_to === state.uid || j.status === "done" || j.status === "cancelled") return;
+  const why = !before || before.assigned_to !== j.assigned_to ? "new"
+    : (before.scheduled_on || "") !== (j.scheduled_on || "") || String(before.scheduled_time || "").slice(0, 5) !== String(j.scheduled_time || "").slice(0, 5) ? "moved" : null;
+  if (why) tellJob(j.id, why);
+}
+async function tellJob(id, why) {
+  try {
+    if (offlineNow()) return;
+    const { data: { session } } = await db.auth.getSession();
+    if (!session) return;
+    const r = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/push?job=${encodeURIComponent(id)}&why=${why}`, { method: "POST",
+      headers: { Authorization: "Bearer " + session.access_token, apikey: CONFIG.SUPABASE_ANON_KEY } });
+    const out = await r.json().catch(() => ({}));
+    if (r.ok && out.sent) toast(T(`${out.to || "They"} will get a notification`, `${out.to || "Тој"} ќе добие известување`));
+  } catch (e) { console.warn("job notice", e); }
 }
 
 async function finishJob(id) {
@@ -11119,16 +11295,18 @@ async function finishJob(id) {
   const o = j.offer_id ? state.offers.find((x) => x.id === j.offer_id) : null;
   // cable by the metre: only known now, and the invoice needs it; the job is finished with it
   if (o && metersOpenOf(o.items).length) {
-    if (fromForm) await saveJob(id);                  // whatever was changed on the job is kept first
+    if (fromForm) await saveJob(id, undefined, true);  // whatever was changed on the job is kept first
     else closeSheet();
     return void setTimeout(() => closeJobSheet(o.id), 260);
   }
+  const fromCard = $("jb-img") && $("jb-img").dataset.view === "card";
   if (fromForm) await saveJob(id, "done");
   else {
-    // from the Work screen there is no form to read: the job is just marked finished
+    // from the card or the Work screen there is no form to read: the job is just marked finished
     try { await dbq(db.from("jobs").update({ status: "done", done_at: new Date().toISOString() }).eq("id", id), T("Not saved", "Не е зачувано")); }
     catch { return; }
     closeSheet(); await refreshAll(["jobs"]); render();
+    if (fromCard) setTimeout(() => openJobCard(id), 240);     // the card again, with the invoice on it
   }
   toast(T("Finished — time to invoice", "Завршена — време за фактура"));
 }
