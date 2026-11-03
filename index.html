@@ -1412,7 +1412,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261104-110000";
+const BUILD = "20261104-130000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -8637,20 +8637,54 @@ const EXP_CATS = [["repair", "поправка"], ["furniture", "опрема"],
                   ["cleaning", "чистење"], ["platform", "платформа"], ["other", "друго"]];
 const expLabel = (c) => { const f = EXP_CATS.find((x) => x[0] === c); return f ? T(f[0], f[1]) : c; };
 
+const expAptName = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+const expenseRow = (e, then) => `<div class="mov tapp" role="button" tabindex="0" onclick="${then ? "closeSheet();setTimeout(()=>openExpenseSheet('" + e.id + "'),240)" : "openExpenseSheet('" + e.id + "')"}">
+      <span><b>${esc(e.description)}</b>
+        <div class="muted" style="font-size:12px">${expLabel(e.category)} · ${e.apartment_id ? esc(expAptName(e.apartment_id)) : T("no flat", "без стан")} · ${dmy(e.spent_on)}</div></span>
+      <span class="mono">${fmt(e.amount)} ›</span></div>`;
 function expensesBlock(month) {
-  const list = (state.expenses || []).filter((e) => (e.spent_on || "").slice(0, 7) === month && inAptFilter(e));
-  const apt = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+  const inM = (e) => (e.spent_on || "").slice(0, 7) === month;
+  const list = (state.expenses || []).filter((e) => inM(e) && inAptFilter(e));
+  // With one flat chosen, spending tied to no flat — a holiday, the accountant —
+  // used to vanish from here as if it had been deleted. It is shown, apart,
+  // and left out of this flat's figures as before.
+  const loose = state.aptFilter === "all" ? [] : (state.expenses || []).filter((e) => inM(e) && !e.apartment_id);
   return `<div class="sec" style="display:flex;justify-content:space-between;align-items:center">
       <span>${T("One-off spending", "Еднократни трошоци")}</span>
       <button class="chip" onclick="openExpenseSheet()">+ ${T("Add", "Додај")}</button></div>
-    ${list.length ? list.map((e) => `<div class="mov tapp" role="button" tabindex="0" onclick="openExpenseSheet('${e.id}')">
-      <span><b>${esc(e.description)}</b>
-        <div class="muted" style="font-size:12px">${expLabel(e.category)}${e.apartment_id ? " · " + esc(apt(e.apartment_id)) : ""} · ${dmy(e.spent_on)}</div></span>
-      <span class="mono">${fmt(e.amount)} ›</span></div>`).join("")
+    ${list.length ? list.map((e) => expenseRow(e)).join("")
       + `<div class="row bankrow"><span class="muted nw">${T("Total", "Вкупно")}</span>
           <span class="mono"><b>${fmt(sumBy(list, (e) => e.amount))}</b> ден.</span></div>`
-      : `<p class="muted" style="font-size:12.5px">${T("Nothing this month — the plumber, a new mattress, restocking all belong here.",
-          "Ништо овој месец — водоводџија, нов душек, потрошни работи одат тука.")}</p>`}`;
+      : loose.length ? "" : `<p class="muted" style="font-size:12.5px">${T("Nothing this month — the plumber, a new mattress, restocking all belong here.",
+          "Ништо овој месец — водоводџија, нов душек, потрошни работи одат тука.")}</p>`}
+    ${loose.length ? `<div class="muted" style="font-size:12px;margin-top:10px">${T("Not tied to a flat — not counted in this one's figures",
+        "Не е врзано за стан — не се брои во бројките на овој")}</div>` + loose.map((e) => expenseRow(e)).join("") : ""}
+    <div class="row tapp" role="button" tabindex="0" style="margin-top:8px;font-size:12.5px;color:var(--muted)" onclick="openAllExpenses()">
+      ${T("All one-off spending, every month", "Сите еднократни трошоци, секој месец")} ›</div>`;
+}
+// every one-off expense there is, by month, every flat and none, to find one again
+function openAllExpenses() {
+  openSheet(`
+    <h2>${T("One-off spending", "Еднократни трошоци")}</h2>
+    <input class="search" id="ex-all-q" placeholder="${T("Search what, flat or amount…", "Барај што, стан или износ…")}" oninput="renderAllExpenses()">
+    <div id="ex-all"></div>
+    <p class="muted" style="font-size:12px;margin-top:10px">${T("The last two years.", "Последните две години.")}</p>`);
+  renderAllExpenses();
+}
+function renderAllExpenses() {
+  const el = $("ex-all");
+  if (!el) return;
+  const words = (($("ex-all-q") || {}).value || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = (state.expenses || []).filter((e) => {
+    const hay = [e.description, expLabel(e.category), e.apartment_id ? expAptName(e.apartment_id) : T("no flat", "без стан"), String(e.amount), dmy(e.spent_on)].join(" ").toLowerCase();
+    return words.every((w) => hay.includes(w));
+  }).sort((a, b) => String(b.spent_on).localeCompare(String(a.spent_on)));
+  const months = [...new Set(list.map((e) => (e.spent_on || "").slice(0, 7)))];
+  el.innerHTML = list.length ? months.map((m) => {
+    const inM = list.filter((e) => (e.spent_on || "").slice(0, 7) === m);
+    const [y, mo] = m.split("-");
+    return `<div class="sec">${mo}-${y} · ${fmt(sumBy(inM, (e) => e.amount))} ден.</div>` + inM.map((e) => expenseRow(e, true)).join("");
+  }).join("") : `<p class="muted">${words.length ? T("Nothing matches.", "Ништо не одговара.") : T("No one-off spending yet.", "Сè уште нема еднократни трошоци.")}</p>`;
 }
 
 function openExpenseSheet(id) {
