@@ -377,6 +377,8 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .tk-strip button.today .ds-n{color:var(--amber)}
 .tk-strip button.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .tk-strip button.on .ds-wd,.tk-strip button.on .ds-c{color:#dbe3ee}
+/* IP / Turbo HD and MP on a stock row */
+.a-name .cam-tag,.art .a-name b.cam-tag{display:inline;font-weight:600;color:var(--work)}
 /* overdue, folded to one line that opens */
 .late-line{display:flex;align-items:center;gap:10px;cursor:pointer;border-color:var(--danger)}
 .late-line .late-n{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--danger)}
@@ -601,6 +603,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
     <div id="el-body-inv">
       <input class="search" id="inv-search" placeholder="Search name, code, supplier or specs…" oninput="renderInv()">
       <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
+      <div id="cam-filter"></div>
       <div id="inv-list"></div>
     </div>
     <div id="el-body-off" style="display:none">
@@ -819,7 +822,7 @@ const ICON = (() => {
   };
 })();
 
-let state = { tab: "today", ctxFilter: "all", catFilter: "all", offStatus: "all", role: "owner", uid: null, team: [],
+let state = { tab: "today", ctxFilter: "all", catFilter: "all", camType: "all", camMp: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true },
   elaksView: "work", workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: keptAptFilter(), showHiddenClients: false,
@@ -1257,7 +1260,20 @@ const LOADERS = {
   } },
   templates:  { need: () => true,               q: () => db.from("task_templates").select("*").order("name") },
   tasks:      { need: () => true,               q: () => db.from("tasks").select("*").or(`done.eq.false,last_done.gte.${backDays(90)}`).order("due_time", { ascending: true, nullsFirst: false }) },
-  stock:      { need: () => state.perm.elaks,   q: () => db.from("article_stock").select("*").eq("active", true).order("name") },
+  stock:      { need: () => state.perm.elaks,   q: async () => {
+    const r = await db.from("article_stock").select("*").eq("active", true).order("name");
+    if (r.error) return r;
+    // articles.cam_type and articles.mp arrive with migration 0008. The view
+    // lists its columns one by one, so they come from the table, and until
+    // they exist a camera's type and MP are only read from its name.
+    const x = await db.from("articles").select("id, cam_type, mp").eq("active", true);
+    state.camCol = !x.error;
+    if (!x.error) {
+      const by = new Map((x.data || []).map((v) => [v.id, v]));
+      for (const a of r.data || []) { const v = by.get(a.id); if (v) { a.cam_type = v.cam_type; a.mp = v.mp; } }
+    }
+    return r;
+  } },
   clients:    { need: () => state.perm.elaks,   q: () => db.from("clients").select("*").order("name") },
   offers:     { need: () => state.perm.elaks,   q: () => recentAndOpen("offers") },
   cash:       { need: () => state.perm.elaks && seesCosts(), q: () => db.from("elaks_cash").select("*").order("created_at", { ascending: false }).limit(30) },
@@ -1379,7 +1395,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261103-140000";
+const BUILD = "20261103-180000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3061,16 +3077,97 @@ async function histDelTask(id) {
    STOCK
 ============================================================ */
 function stockLed(a) { return a.stock <= 0 ? "out" : (a.min_stock > 0 && a.stock <= a.min_stock ? "low" : "ok"); }
+/* ---------- cameras and recorders: IP or Turbo HD, and how many MP ----------
+   Read from what is already written on the article. The model code says it
+   (Hikvision DS-2CD is IP and DS-2CE Turbo HD, Dahua IPC- is IP and HAC- HDCVI,
+   DS-76..NI is an NVR and DS-72..H a DVR), and so do words like Turbo, PoE,
+   Wi-Fi or 5MP. Whatever is read wrong is set by hand on the article
+   (articles.cam_type and articles.mp, migration 0008). */
+const CAM_RULES = [
+  [/\b(ds-2cd|ds-2de|ds-2dc|ds-2xm|ds-2cv|dh-ipc|ipc-|ds-7\d{3}ni|nvr)/i, "ip"],
+  [/\b(ds-2ce|ds-2ae|dh-hac|hac-|ids-7[12]\d{2}|ds-7[12]\d{2}h|xvr|dvr)/i, "turbo"],
+  [/turbo|hd-?tvi|\btvi\b|hd-?cvi|\bcvi\b|\bahd\b|analog|аналог/i, "turbo"],
+  [/\bip\b|\bpoe\b|onvif|wi-?fi|wireless|безжич|ezviz|imou|reolink|tapo|vigi|uniview/i, "ip"],
+];
+const REC_RX = /\b(nvr|dvr|xvr)|рекордер|recorder|снимач|\bi?ds-7\d{3}/i;
+const CAM_RX = /камер|camera|\bcam\b|турел|turret|bullet|булет|куполн|\bdome\b|\bptz\b|fisheye|ds-2c|ds-2d|ds-2a|ds-2x|ipc-|hac-|ezviz|imou|reolink|tapo|colorvu|acusense/i;
+function mpRead(hay) {
+  const m = hay.match(/(\d{1,2}(?:[.,]\d)?)\s*(?:mp\b|мп\b|megapix|мегапикс)/i);
+  if (m) return parseFloat(m[1].replace(",", "."));
+  if (/\b4k\b/i.test(hay)) return 8;
+  if (/\b3k\b/i.test(hay)) return 5;
+  if (/\b2k\b/i.test(hay)) return 4;
+  if (/\b(1080p|full\s?hd|fhd)\b/i.test(hay)) return 2;
+  if (/\b720p\b/i.test(hay)) return 1;
+  return null;
+}
+// { kind: "camera" | "recorder" | "other", type: "ip" | "turbo" | null, mp, auto: { type, mp } }
+function camOf(a) {
+  const hay = [a.name, a.code, a.supplier_code, a.specs].filter(Boolean).join(" ");
+  const autoType = (CAM_RULES.find(([rx]) => rx.test(hay)) || [])[1] || null, autoMp = mpRead(hay);
+  if (a.cam_type === "none") return { kind: "other", type: null, mp: null, auto: { type: autoType, mp: autoMp } };
+  const type = a.cam_type || autoType, mp = a.mp != null && a.mp !== "" ? parseFloat(a.mp) : autoMp;
+  const kind = REC_RX.test(hay) ? "recorder" : CAM_RX.test(hay) || mp != null || a.cam_type ? "camera" : "other";
+  return { kind, type: kind === "other" ? null : type, mp: kind === "other" ? null : mp, auto: { type: autoType, mp: autoMp } };
+}
+const camTypeLbl = (t) => t === "ip" ? "IP" : t === "turbo" ? "Turbo HD" : "";
+const mpLbl = (mp) => mp == null ? "" : String(mp).replace(".", ",") + "MP";
+// the short tag a row carries: "IP 4MP", "Turbo HD 2MP", "NVR"
+function camTag(a) {
+  const c = camOf(a);
+  if (c.kind === "other") return "";
+  if (c.kind === "recorder") return [camTypeLbl(c.type), c.type === "ip" ? "NVR" : c.type === "turbo" ? "DVR" : T("recorder", "рекордер")].filter(Boolean).join(" ");
+  return [camTypeLbl(c.type), mpLbl(c.mp)].filter(Boolean).join(" ") || T("camera", "камера");
+}
+// the Stock list for CCTV and DVR, in groups: IP cameras by MP, Turbo HD cameras by MP, the recorders, the rest
+function camGroups(list) {
+  const groups = new Map();
+  const put = (key, order, label, a) => { if (!groups.has(key)) groups.set(key, { order, label, items: [] }); groups.get(key).items.push(a); };
+  for (const a of list) {
+    const c = camOf(a);
+    if (c.kind === "camera") {
+      const tl = c.type === "ip" ? T("IP cameras", "IP камери") : c.type === "turbo" ? T("Turbo HD cameras", "Turbo HD камери") : T("Cameras, type not known", "Камери, непознат тип");
+      put(`c:${c.type}:${c.mp}`, (c.type === "ip" ? 0 : c.type === "turbo" ? 1000 : 2000) + (c.mp == null ? 999 : c.mp * 10),
+        tl + " · " + (c.mp == null ? T("MP not known", "MP непознато") : mpLbl(c.mp)), a);
+    } else if (c.kind === "recorder") {
+      put(`r:${c.type}`, 3000 + (c.type === "ip" ? 0 : c.type === "turbo" ? 1 : 2),
+        c.type === "ip" ? T("NVR — IP recorders", "NVR — IP рекордери") : c.type === "turbo" ? T("DVR / XVR — Turbo HD recorders", "DVR / XVR — Turbo HD рекордери")
+          : T("Recorders, type not known", "Рекордери, непознат тип"), a);
+    } else put("o", 4000, T("Other", "Друго"), a);
+  }
+  return [...groups.values()].sort((x, y) => x.order - y.order)
+    .map((g) => ({ ...g, items: g.items.sort((x, y) => x.name.localeCompare(y.name)) }));
+}
+
 function renderInv() {
   $("cat-filter").innerHTML = ["all", ...CATS].map((c) =>
     `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "All" : c}</button>`).join("");
   const q = ($("inv-search").value || "").trim().toLowerCase();
   // you may remember the supplier's code, or a line from the specs, rather
-  // than the name — so match against all of it
-  const list = state.stock.filter((a) =>
+  // than the name — so match against all of it, the IP / Turbo HD / MP tag
+  // too ("turbo 2mp"); every word typed has to be somewhere
+  const words = q.split(/\s+/).filter(Boolean);
+  let list = state.stock.filter((a) =>
     (state.catFilter === "all" || a.category === state.catFilter) &&
-    (!q || [a.name, a.code, a.supplier_code, a.supplier, a.specs, a.category]
-      .some((v) => String(v || "").toLowerCase().includes(q))));
+    (!words.length || ((hay) => words.every((w) => hay.includes(w)))(
+      [a.name, a.code, a.supplier_code, a.supplier, a.specs, a.category, camTag(a)].filter(Boolean).join(" ").toLowerCase())));
+  // cameras and recorders: IP or Turbo HD, and the megapixels
+  const camView = state.catFilter === "CCTV" || state.catFilter === "DVR";
+  const camEl = $("cam-filter");
+  if (camEl) {
+    if (camView) {
+      const inCat = list.map(camOf).filter((c) => c.kind !== "other");
+      const mps = [...new Set(inCat.filter((c) => c.kind === "camera").map((c) => c.mp == null ? "none" : String(c.mp)))]
+        .sort((x, y) => (x === "none") - (y === "none") || parseFloat(x) - parseFloat(y));
+      if (state.camMp !== "all" && !mps.includes(state.camMp)) state.camMp = "all";
+      camEl.innerHTML = `<div class="chips" style="margin:-4px 0 6px">${[["all", T("IP and Turbo HD", "IP и Turbo HD")], ["ip", "IP"], ["turbo", "Turbo HD"]]
+        .map(([v, l]) => `<button class="chip sm ${state.camType === v ? "on" : ""}" onclick="state.camType='${v}';renderInv()">${l}</button>`).join("")}</div>
+        ${mps.length ? `<div class="chips" style="margin-bottom:12px">${[["all", T("Any MP", "Сите MP")], ...mps.map((m) => [m, m === "none" ? T("MP ?", "MP ?") : mpLbl(parseFloat(m))])]
+          .map(([v, l]) => `<button class="chip sm ${state.camMp === v ? "on" : ""}" onclick="state.camMp='${v}';renderInv()">${l}</button>`).join("")}</div>` : ""}`;
+      if (state.camType !== "all") list = list.filter((a) => camOf(a).type === state.camType);
+      if (state.camMp !== "all") list = list.filter((a) => { const c = camOf(a); return c.kind === "camera" && String(c.mp ?? "none") === state.camMp; });
+    } else camEl.innerHTML = "";
+  }
   const pv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.purchase_price || 0), 0);
   const sv = state.stock.reduce((s, a) => s + Math.max(a.stock, 0) * (a.sell_price || 0), 0);
   const lowN = state.stock.filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
@@ -3103,13 +3200,16 @@ function renderInv() {
     </div>
     <div class="tools">${tools.join("")}</div>
   </div>`;
-  $("inv-list").innerHTML = sum + (list.length ? list.map((a) => `
+  const artRow = (a) => { const tag = camTag(a); return `
     <div class="card art" role="button" tabindex="0" onclick="openArticleDetail('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
       ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
-      <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}</span></div>
+      <div class="a-name"><b>${esc(a.name)}</b><span>${esc(a.code || a.category)}${tag ? ` · <b class="cam-tag">${esc(tag)}</b>` : ""}</span></div>
       <div class="a-qty">${fmt(a.stock)}<small>${unitLbl(a.unit)}</small></div>
-    </div>`).join("") : (state.loading ? SKEL(4) : `<div class="empty">${
+    </div>`; };
+  $("inv-list").innerHTML = sum + (list.length ? (camView
+      ? camGroups(list).map((g) => `<div class="sec">${esc(g.label)} · ${g.items.length}</div>` + g.items.map(artRow).join("")).join("")
+      : list.map(artRow).join("")) : (state.loading ? SKEL(4) : `<div class="empty">${
       q ? `${T("Nothing matches", "Ништо не одговара")} “${esc(q)}”`
         : state.catFilter !== "all" ? `${T("Nothing in", "Ништо во")} ${esc(state.catFilter)}`
         : T("No articles.<br>Add with +", "Нема артикли.<br>Додај со +")}</div>`));
@@ -3142,7 +3242,8 @@ async function openArticleDetail(id) {
         style="width:64px;height:64px;border-radius:11px;object-fit:contain;background:#ECECEC;flex:none">` : ""}
       <div style="flex:1;min-width:0">
         <h2 style="margin:0">${esc(a.name)}</h2>
-        <div class="muted" style="font-size:12.5px">${esc(a.category)}${a.code ? " · " + esc(a.code) : ""}${a.supplier ? " · " + esc(a.supplier) : ""}</div>
+        <div class="muted" style="font-size:12.5px">${esc(a.category)}${camTag(a) ? ` · <b class="cam-tag" style="color:var(--work)">${esc(camTag(a))}</b>` : ""}${
+          a.code ? " · " + esc(a.code) : ""}${a.supplier ? " · " + esc(a.supplier) : ""}</div>
       </div>
     </div>
 
@@ -3510,6 +3611,7 @@ function openArticleSheet(id) {
       ${[30, 50, 80, 100].map((pct) => `<button class="chip" onclick="setMarkup(${pct})">+${pct}%</button>`).join("")}
       <span class="muted nw" id="ar-margin" style="align-self:center;font-size:12.5px"></span>
     </div>` : ""}
+    ${articleCamBlock(a)}
     <label>ДДВ rate</label>
     <div class="chips" id="ar-vat">
       ${VAT_RATES.map((r) => `<button class="chip ${(a.vat_rate ?? 18) == r ? "on" : ""}" onclick="setArVat(${r})">${r}%</button>`).join("")}
@@ -3945,6 +4047,31 @@ function sellHint() {
     + (auto ? ` · ${T("default", "стандардно")}` : "");
 }
 
+// IP or Turbo HD, and the MP, as the Stock list sorts it. Read from the name
+// unless set here; before migration 0008 it can only be read.
+let arCam = null;
+function articleCamBlock(a) {
+  const c = camOf(a), auto = c.auto;
+  arCam = a.cam_type || "";
+  const autoTxt = [camTypeLbl(auto.type), mpLbl(auto.mp)].filter(Boolean).join(" ") || (a.name ? T("nothing", "ништо") : "");
+  if (!state.camCol) {
+    const tag = camTag(a);
+    return a.name ? `<p class="muted" style="font-size:12.5px;margin-top:10px">${T("Sorted in Stock as", "Во магацин се води како")}: <b>${esc(tag || T("not a camera or recorder", "не е камера ни рекордер"))}</b> — ${
+      T("read from the name and code. Setting it by hand needs the database update (0008).", "прочитано од името и шифрата. За рачно поставување треба ажурирање на базата (0008).")}</p>` : "";
+  }
+  return `<label>${T("Camera / recorder", "Камера / рекордер")}</label>
+    <div class="chips" id="ar-cam" style="flex-wrap:wrap">
+      ${[["", T("From the name", "Од името") + (autoTxt ? ` (${autoTxt})` : "")], ["ip", "IP"], ["turbo", "Turbo HD"], ["none", T("Neither", "Ниту едно")]]
+        .map(([v, l]) => `<button class="chip ${arCam === v ? "on" : ""}" data-v="${v}" onclick="setArCam('${v}')">${esc(l)}</button>`).join("")}
+    </div>
+    <div class="grid2"><div><label>${T("Megapixels", "Мегапиксели")}</label>
+      <input id="ar-mp" type="number" inputmode="decimal" step="any" min="0" max="99" value="${a.mp ?? ""}"
+        placeholder="${auto.mp != null ? auto.mp + " " + T("(from the name)", "(од името)") : "—"}"></div></div>`;
+}
+function setArCam(v) {
+  arCam = v;
+  document.querySelectorAll("#ar-cam .chip").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+}
 async function saveArticle(id) {
   const row = {
     name: $("ar-name").value.trim(), code: $("ar-code").value.trim() || null,
@@ -3957,6 +4084,11 @@ async function saveArticle(id) {
     supplier: $("ar-sup").value.trim() || null,
     specs: $("ar-specs").value.trim() || null,
   };
+  if (state.camCol && $("ar-cam")) {
+    row.cam_type = arCam || null;
+    const mp = parseFloat(String($("ar-mp").value).replace(",", "."));
+    row.mp = mp > 0 ? mp : null;
+  }
   if (!row.name) return toast("Enter a name");
   if (arImg.mode === "new") row.image_thumb = arImg.thumb;
   if (arImg.mode === "remove") row.image_thumb = null;
@@ -4149,13 +4281,15 @@ async function openOfferSheet(id, forClient, preset) {
 function renderPicker() {
   const q = ($("of-search").value || "").toLowerCase();
   if (!q) { $("of-picker").innerHTML = ""; return; }
-  const list = state.stock.filter((a) => a.name.toLowerCase().includes(q) || (a.code || "").toLowerCase().includes(q)).slice(0, 5);
-  $("of-picker").innerHTML = list.map((a) => `
+  const words = q.trim().split(/\s+/).filter(Boolean);
+  const list = state.stock.filter((a) => ((hay) => words.every((w) => hay.includes(w)))(
+    [a.name, a.code, camTag(a)].filter(Boolean).join(" ").toLowerCase())).slice(0, 5);
+  $("of-picker").innerHTML = list.map((a) => { const tag = camTag(a); return `
     <div class="card art" role="button" tabindex="0" onclick="addOfferItem('${a.id}')">
       <span class="led ${stockLed(a)}"></span>
       ${a.image_thumb ? `<img class="thumb" src="${a.image_thumb}" alt="">` : ""}
-      <div class="a-name"><b>${esc(a.name)}</b><span>stock: ${fmt(a.stock)} ${unitLbl(a.unit)} · ${fmt(a.sell_price)} ден.</span></div>
-    </div>`).join("");
+      <div class="a-name"><b>${esc(a.name)}</b><span>${tag ? `<b class="cam-tag">${esc(tag)}</b> · ` : ""}stock: ${fmt(a.stock)} ${unitLbl(a.unit)} · ${fmt(a.sell_price)} ден.</span></div>
+    </div>`; }).join("");
 }
 const articleItem = (a) => ({ article_id: a.id, name: a.name, specs: a.specs || "", unit: a.unit,
   qty: a.unit === "m" ? null : 1, price: a.sell_price, cost: a.purchase_price || 0, vat: a.vat_rate ?? 18 });
@@ -10469,6 +10603,7 @@ function renderPurchases() {
 ============================================================ */
 const MK = {
   "Search work…": "Барај работа…", "Search jobs…": "Барај работи…", "Search invoices…": "Барај фактури…",
+  "Search name, code, supplier or specs…": "Барај име, шифра, добавувач или опис…", "Search offers…": "Барај понуди…",
   // Elaks, whole labels
   "Total received": "Вкупно примено", "of that in cash": "од тоа во готово", "Jobs fully settled": "Целосно наплатени работи", "In": "Влез", "Out": "Излез", "Base (основа)": "Основа", "ДДВ payable": "ДДВ за плаќање", "ДДВ collected (output)": "Пресметан ДДВ (излезен)", "ДДВ on purchases (input)": "ДДВ на набавки (влезен)", "ДДВ on settled jobs": "ДДВ на наплатени работи", "Entries · tap to edit": "Ставки · допри за уредување", "Stock in": "Влез во магацин", "Stock out": "Излез од магацин",
   // tabs and screens
