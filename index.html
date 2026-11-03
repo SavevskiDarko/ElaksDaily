@@ -1414,7 +1414,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261104-160000";
+const BUILD = "20261104-190000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7990,7 +7990,8 @@ function accountBalances(aptId) {
 
 // The chips at the top choose the flat the whole screen is about, the card
 // with the money included, since flats can be looked after by different
-// people. The choice stays on this phone for next time.
+// people. There is always one: no "All", each flat is looked at on its own.
+// The choice stays on this phone for next time.
 // (called while state itself is being made, so no constants from further down)
 function keptAptFilter() {
   try { return localStorage.getItem("centrala_apt_filter") || "all"; } catch { return "all"; }
@@ -8002,9 +8003,10 @@ function keepAptFilter(v) {
 function setAptFilter(v) { keepAptFilter(v); renderApt(); }
 
 function renderApt() {
-  // a flat chosen earlier may since have been put away or taken off
+  // always one flat: the one chosen before, else the first — also when the
+  // one chosen before has since been put away or taken off
+  if (!state.apartments.some((a) => a.id === state.aptFilter) && state.apartments.length) keepAptFilter(state.apartments[0].id);
   const one = state.apartments.find((a) => a.id === state.aptFilter) || null;
-  if (!one && state.aptFilter !== "all" && !state.loading) keepAptFilter("all");
   const flat = one ? one.id : null;
   const inF = (r) => !flat || r.apartment_id === flat;
   const stays = state.stays.filter(inF), bills = state.bills.filter(inF), exps = (state.expenses || []).filter(inF);
@@ -8125,7 +8127,7 @@ function renderApt() {
   // unreadable — so choose which you are looking at.
   const filterEl = $("apt-filter");
   if (filterEl) filterEl.innerHTML = state.apartments.length < 2 ? "" :
-    [["all", T("All", "Сите")]].concat(state.apartments.map((a) => [a.id, a.name]))
+    state.apartments.map((a) => [a.id, a.name])
       .map(([v, l]) => `<button class="chip ${state.aptFilter === v ? "on" : ""}"
         onclick="setAptFilter('${v}')">${esc(l)}</button>`).join("");
   syncFab();
