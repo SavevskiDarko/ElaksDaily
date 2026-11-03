@@ -1414,7 +1414,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261104-190000";
+const BUILD = "20261104-210000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -8880,18 +8880,22 @@ function openAptStatement(id, year) {
   const y = year || new Date().getFullYear();
   const mine = state.stays.filter((s) => s.apartment_id === id);
   const mybills = state.bills.filter((b) => b.apartment_id === id);
-  let ti = 0, tb = 0, tn = 0, rows = "";
+  // one-off spending on this flat (the plumber, a new mattress) is a cost of
+  // the month too; it used to be left out here, so a month looked better than it was
+  const myexps = (state.expenses || []).filter((e) => e.apartment_id === id);
+  let ti = 0, tb = 0, te = 0, tn = 0, rows = "";
   for (let m = 1; m <= 12; m++) {
     const key = `${y}-${String(m).padStart(2, "0")}`;
     const inc = sumBy(mine.filter((s) => (s.check_in || "").slice(0, 7) === key), (s) => s.amount) + rentEarned(key, id);
     const bil = sumBy(mybills.filter((b) => (b.month || "").slice(0, 7) === key), (b) => b.amount);
+    const exp = sumBy(myexps.filter((e) => (e.spent_on || "").slice(0, 7) === key), (e) => e.amount);
     const nights = mine.filter((s) => (s.check_in || "").slice(0, 7) === key)
       .reduce((n, s) => n + nightsBetween(s.check_in, s.check_out), 0);
-    ti += inc; tb += bil; tn += nights;
-    if (!inc && !bil) continue;
+    ti += inc; tb += bil; te += exp; tn += nights;
+    if (!inc && !bil && !exp) continue;
     rows += `<div class="mov"><span>${new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
       <span class="muted">${nights ? nights + "n" : ""}</span></span>
-      <span class="mono">${fmt(inc)} − ${fmt(bil)} = <b>${fmt(inc - bil)}</b></span></div>`;
+      <span class="mono">${fmt(inc)} − ${fmt(bil)}${exp ? ` − <span style="color:var(--amber)">${fmt(exp)}</span>` : ""} = <b>${fmt(inc - bil - exp)}</b></span></div>`;
   }
   const bySource = {};
   for (const s of mine.filter((s) => (s.check_in || "").slice(0, 4) === String(y)))
@@ -8904,12 +8908,15 @@ function openAptStatement(id, year) {
       <button class="chip" onclick="openAptStatement('${id}', ${y - 1})">‹</button><b>${y}</b>
       <button class="chip" onclick="openAptStatement('${id}', ${y + 1})">›</button>
     </div>
-    <div class="totalbar"><span>Net ${y}</span><span class="mono">${fmt(ti - tb)} ден.</span></div>
+    <div class="totalbar"><span>Net ${y}</span><span class="mono">${fmt(ti - tb - te)} ден.</span></div>
     <div class="hrow" style="margin-top:8px"><span class="muted">Income</span><b class="mono">${fmt(ti)} ден.</b></div>
     <div class="hrow"><span class="muted">Bills</span><b class="mono">${fmt(tb)} ден.</b></div>
+    ${te ? `<div class="hrow"><span class="muted">${T("One-off spending", "Еднократни трошоци")}</span><b class="mono" style="color:var(--amber)">${fmt(te)} ден.</b></div>` : ""}
     <div class="hrow"><span class="muted">Nights booked</span><b class="mono">${tn}</b></div>
     ${a.opening_balance ? `<div class="hrow"><span class="muted">Starting amount</span><b class="mono">${fmt(a.opening_balance)} ден.</b></div>` : ""}
     <div class="sec">By month</div>
+    ${te ? `<p class="muted" style="font-size:12px;margin:-2px 0 4px">${T("Income − bills − <span style=\"color:var(--amber)\">one-off spending</span> = net",
+      "Приход − сметки − <span style=\"color:var(--amber)\">еднократни трошоци</span> = нето")}</p>` : ""}
     ${rows || '<p class="muted">Nothing recorded this year.</p>'}
     <div class="sec">Income by source</div>
     ${Object.keys(bySource).length
