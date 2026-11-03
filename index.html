@@ -831,7 +831,7 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", camType: "all", 
   stock: [], clients: [], offers: [], payments: [], purchases: [], feeds: [], suppliers: [],
   accounts: [], policies: [], polPays: [], statements: [], docs: [], sites: [], jobs: [], invoices: [], expenses: [],
   invFilter: "todo",
-  jobFilter: "upcoming", stayPays: [],
+  jobFilter: "upcoming", stayPays: [], oldStays: [],
   docKind: "all", docClient: "all",
   polFilter: "open", polSort: "ending", insView: "policies", apartments: [], stays: [], bills: [], cash: [],
   cashTotal: 0, aptCash: null, leases: [], rentPays: [], hideApts: new Set(),
@@ -1299,7 +1299,14 @@ const LOADERS = {
   apartments: { need: () => state.perm.apts,    q: () => db.from("apartments").select("*").eq("active", true).order("name") },
   feeds:      { need: () => state.perm.apts,    q: () => db.from("ical_feeds").select("*").order("source") },
   accounts:   { need: () => true,               q: () => db.from("accounts").select("*").eq("active", true).order("sort") },
-  stayPays:   { need: () => state.perm.apts,    q: () => db.from("stay_payments").select("*").order("paid_on", { ascending: false }).limit(600) },
+  // every payment ever: the money card adds up the whole history, and a
+  // booking whose payment was cut off looked unpaid (the list stopped at 600)
+  stayPays:   { need: () => state.perm.apts,    q: () => allPages((a, b) => db.from("stay_payments").select("*")
+    .order("paid_on", { ascending: false }).order("id").range(a, b)) },
+  // bookings older than the two years kept in full: only what says whose
+  // flat a payment came from and which account it went to
+  oldStays:   { need: () => state.perm.apts,    q: () => allPages((a, b) => db.from("stays").select("id, apartment_id, source, account_id, guest_name")
+    .lt("check_out", backMonths(24)).order("check_out").order("id").range(a, b)) },
   expenses:   { need: () => state.perm.apts,    q: () => db.from("apt_expenses").select("*").gte("spent_on", backMonths(24)).order("spent_on", { ascending: false }) },
   aptCash:    { need: () => state.perm.apts,    q: () => db.from("apt_cash_total").select("balance").maybeSingle(), scalar: true },
   stays:      { need: () => state.perm.apts,    q: () => db.from("stays").select("*, apartments(name)").gte("check_out", backMonths(24)).order("check_in", { ascending: false }) },
@@ -1311,6 +1318,16 @@ const LOADERS = {
 // a table the database does not have yet, as against a load that failed
 const missingTable = (e) => !!e && (e.code === "42P01" || e.code === "PGRST205" || /does not exist|schema cache/i.test(e.message || ""));
 
+// The database hands over at most 1,000 rows at a time; this asks until it has them all.
+async function allPages(page, size = 1000) {
+  const rows = [];
+  for (let at = 0; ; at += size) {
+    const r = await page(at, at + size - 1);
+    if (r.error) return r;
+    rows.push(...(r.data || []));
+    if ((r.data || []).length < size) return { data: rows, error: null };
+  }
+}
 async function refreshAll(only) {
   // no signal: what is on screen stays, and the tasks as last seen if nothing was loaded yet
   if (offlineNow()) { if (!state.tasksLoaded) useKeptCopy(); netStatus(); return; }
@@ -1395,7 +1412,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261103-180000";
+const BUILD = "20261104-110000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7752,6 +7769,100 @@ async function saveAccount(id) {
   closeSheet(); await refreshAll(["accounts"]); render(); toast(T("Saved", "Зачувано"));
 }
 
+/* ---------- where the money goes ----------
+   A booking's payment counts in the account chosen on it. When none was
+   chosen, the booking's platform decides — but there was nowhere to say which
+   account Airbnb or Booking.com pays into, so every one of them fell back to
+   Cash, and "Paid in full" filed the money there. This sheet says where each
+   platform pays, and moves what was filed under Cash by that default. */
+const PLATFORMS = ["Airbnb", "Booking.com"];
+const cashAcct = () => (state.accounts.find((a) => /cash|кеш/i.test(a.name)) || {}).id || null;
+// payments from Airbnb and Booking.com bookings that count as Cash
+function platformCash() {
+  const cash = cashAcct();
+  if (!cash) return [];
+  const byId = stayIndex();
+  return state.stayPays.map((p) => ({ p, s: byId.get(p.stay_id) }))
+    .filter(({ p, s }) => s && PLATFORMS.includes(s.source) && payAccount(p, s) === cash && (parseFloat(p.amount) || 0) > 0);
+}
+let routeSel = null;
+function openMoneyRoutes() {
+  if (!state.perm.owner) return;
+  const map = accountMap(), cash = cashAcct();
+  const others = state.accounts.filter((a) => a.id !== cash);
+  const found = platformCash();
+  routeSel = new Set(found.map(({ p }) => p.id));
+  const opt = (sel) => `<option value="">${T("Not set (Cash)", "Не е поставено (кеш)")}</option>`
+    + state.accounts.map((a) => `<option value="${a.id}" ${sel === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("");
+  openSheet(`
+    <h2>${T("Where the money goes", "Каде одат парите")}</h2>
+    <p class="muted">${T("A booking's payment counts in the account chosen on it. Where none was chosen, the platform decides:",
+      "Плаќањето за резервација се брои во сметката избрана на неа. Каде нема избрано, одлучува платформата:")}</p>
+    ${["Airbnb", "Booking.com", "Direct", "Other"].map((src, i) => `<div class="row" style="gap:10px;align-items:center;margin-top:8px">
+      <span style="flex:1">${src === "Direct" ? T("Direct", "Директно") : src === "Other" ? T("Other", "Друго") : src}</span>
+      <select id="mr-src-${i}" data-src="${src}" style="flex:1;margin:0">${opt(map[src] || "")}</select></div>`).join("")}
+    <button class="btn" onclick="saveMoneyRoutes()">${T("Save", "Зачувај")}</button>
+    <div class="sec" style="margin-top:18px">${T("Filed under Cash by that default", "Заведени во кеш по тоа правило")}</div>
+    ${found.length ? PLATFORMS.map((src) => {
+      const rows = found.filter(({ s }) => s.source === src);
+      if (!rows.length) return "";
+      const to = map[src] && map[src] !== cash ? map[src] : (others[0] || {}).id;
+      const k = src.replace(/\W/g, "");
+      return `<div class="card" id="mr-${k}">
+        <b>${esc(src)}</b> · ${rows.length} ${T(rows.length === 1 ? "payment" : "payments", rows.length === 1 ? "плаќање" : "плаќања")} ·
+          <span class="mono" id="mr-sum-${k}">${fmt(sumBy(rows, ({ p }) => p.amount))}</span> ден. ${T("counted as Cash", "се бројат како кеш")}
+        <p class="muted" style="font-size:12.5px;margin:6px 0">${src === "Booking.com"
+          ? T("Untick any a guest really paid in cash at the flat.", "Одштиклирај ги оние што гостинот навистина ги платил во кеш во станот.")
+          : T("Airbnb pays out by itself, so these are almost certainly not cash.", "Airbnb исплаќа само, па овие речиси сигурно не се кеш.")}</p>
+        <div class="row" style="gap:8px;align-items:center"><span class="muted">${T("Move to", "Премести во")}</span>
+          <select id="mr-to-${k}" style="flex:1;margin:0">${others.map((a) => `<option value="${a.id}" ${to === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>
+        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">${T("See them", "Види ги")}</summary>
+          ${rows.sort((x, y) => String(y.p.paid_on).localeCompare(String(x.p.paid_on))).map(({ p, s }) => `<div class="mov tapp" role="button" tabindex="0" onclick="routeToggle('${p.id}','${k}')">
+            <span><span class="clbox on" id="mr-p-${p.id}" style="display:inline-flex;vertical-align:middle;margin-right:8px">\u2713</span>${dmy(p.paid_on)} · ${esc([s.guest_name, aptName(s.apartment_id)].filter(Boolean).join(" · "))}</span>
+            <span class="mono">${fmt(p.amount)}</span></div>`).join("")}
+        </details>
+        <button class="btn amber" onclick="moveRoutePays('${src}')">${T("Move the ticked ones", "Премести ги штиклираните")}</button>
+      </div>`;
+    }).join("") : `<p class="muted">${T("Nothing from Airbnb or Booking.com is counted as Cash.", "Ништо од Airbnb или Booking.com не се брои како кеш.")}</p>`}
+  `);
+}
+function routeToggle(pid, k) {
+  const on = !routeSel.has(pid);
+  if (on) routeSel.add(pid); else routeSel.delete(pid);
+  const b = $("mr-p-" + pid); b.classList.toggle("on", on); b.textContent = on ? "\u2713" : "";
+  const src = PLATFORMS.find((x) => x.replace(/\W/g, "") === k);
+  $("mr-sum-" + k).textContent = fmt(sumBy(platformCash().filter(({ p, s }) => s.source === src && routeSel.has(p.id)), ({ p }) => p.amount));
+}
+async function saveMoneyRoutes() {
+  const map = {};
+  document.querySelectorAll("[id^='mr-src-']").forEach((el) => { if (el.value) map[el.dataset.src] = el.value; });
+  try { await dbq(db.from("app_settings").upsert({ key: "account_by_source", value: map }, { onConflict: "key" }), T("Not saved", "Не е зачувано")); } catch { return; }
+  await refreshAll(["settings"]); render(); toast(T("Saved", "Зачувано"));
+  openMoneyRoutes();
+}
+async function moveRoutePays(src) {
+  const k = src.replace(/\W/g, ""), to = $("mr-to-" + k).value;
+  const rows = platformCash().filter(({ p, s }) => s.source === src && routeSel.has(p.id));
+  if (!rows.length || !to) return toast(T("Nothing ticked", "Ништо не е штиклирано"));
+  const sum = fmt(sumBy(rows, ({ p }) => p.amount)), one = rows.length === 1;
+  if (!await ask(T(`Move ${rows.length} ${one ? "payment" : "payments"}, ${sum} ден., from Cash to ${accountName(to)}?`,
+    `Да се ${one ? "премести 1 плаќање" : `преместат ${rows.length} плаќања`}, ${sum} ден., од кеш во ${accountName(to)}?`))) return;
+  const ids = rows.map(({ p }) => p.id);
+  // and the bookings themselves, where every payment on them went
+  const moving = new Set(ids);
+  const stayIds = [...new Set(rows.map(({ s }) => s.id))].filter((sid) =>
+    state.stayPays.filter((p) => p.stay_id === sid).every((p) => moving.has(p.id) || p.account_id === to));
+  try {
+    for (let i = 0; i < ids.length; i += 100)
+      await dbq(db.from("stay_payments").update({ account_id: to, method: "platform" }).in("id", ids.slice(i, i + 100)), T("Not moved", "Не е преместено"));
+    for (let i = 0; i < stayIds.length; i += 100)
+      await dbq(db.from("stays").update({ account_id: to }).in("id", stayIds.slice(i, i + 100)), T("Not moved", "Не е преместено"));
+  } catch { return; }
+  await refreshAll(["stayPays", "stays", "oldStays", "aptCash"]); render();
+  toast(T(`Moved to ${accountName(to)}`, `Преместено во ${accountName(to)}`));
+  openMoneyRoutes();
+}
+
 function accountMap() {
   const raw = setting("account_by_source", "");
   if (!raw) return {};
@@ -7784,16 +7895,20 @@ function moneyArrived(s, acct) {
 const aptsOwnOnly = () => !state.perm.owner && !!state.perm.aptsOwnOnly;
 // Given a flat, what that flat alone has put into each account and taken out
 // of it. An account's starting amount belongs to no one flat, so it is left out.
+const stayIndex = () => new Map([...(state.oldStays || []), ...state.stays].map((s) => [s.id, s]));
+// Where a payment counts: the account chosen on it, else the booking's, else its platform's.
+const payAccount = (p, s) => p.account_id || (s ? accountFor(s) : null);
 function accountBalances(aptId) {
   const bal = {};
+  const byId = stayIndex();
   const shared = !aptsOwnOnly() && !aptId;
   const mine = (r) => !aptId || (!!r && r.apartment_id === aptId);
   for (const a of state.accounts) bal[a.id] = shared ? (parseFloat(a.opening_balance) || 0) : 0;
   for (const p of state.stayPays) {
     // where the payment went: what was chosen on it, else where that booking pays
-    const s = state.stays.find((x) => x.id === p.stay_id);
+    const s = byId.get(p.stay_id);
     if (!mine(s)) continue;
-    const id = p.account_id || (s ? accountFor(s) : null);
+    const id = payAccount(p, s);
     if (id) bal[id] = (bal[id] || 0) + (parseFloat(p.amount) || 0);
   }
   // rent lands where it was paid to, else where the lease says it goes
@@ -7854,7 +7969,7 @@ function renderApt() {
   const incY = sumBy(staysY, stayNet)
     + Array.from({ length: Number(curM.slice(5, 7)) }, (_, i) => rentEarned(`${yr}-${p2(i + 1)}`, flat)).reduce((a, b) => a + b, 0);
   // a payment knows its booking, not its flat
-  const stayIds = new Set(stays.map((s) => s.id));
+  const stayIds = new Set([...stays, ...(state.oldStays || []).filter(inF)].map((s) => s.id));
   const pays = flat ? state.stayPays.filter((p) => stayIds.has(p.stay_id)) : state.stayPays;
   const rents = (state.rentPays || []).filter(inF);
   const recAll = sumBy(pays, (p) => p.amount) + sumBy(rents, (p) => p.amount);
@@ -7904,6 +8019,18 @@ function renderApt() {
           onclick="event.stopPropagation();openAccountSheet('${a.id}')">
         <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>`).join("")}
     </div>` : ""}
+
+    ${state.perm.owner && state.accounts.length > 1 ? (() => {
+      const wrong = platformCash().filter(({ s }) => !flat || s.apartment_id === flat);
+      return `<div class="row tapp" role="button" tabindex="0" style="margin-top:8px;font-size:12.5px;color:${wrong.length ? "var(--amber)" : "var(--muted)"}"
+        onclick="event.stopPropagation();openMoneyRoutes()">${wrong.length
+          ? (wrong.length === 1
+            ? T(`1 Airbnb / Booking.com payment (${fmt(wrong[0].p.amount)} ден.) is counted as Cash — check`,
+                `1 плаќање од Airbnb / Booking.com (${fmt(wrong[0].p.amount)} ден.) се брои како кеш — провери`)
+            : T(`${wrong.length} Airbnb / Booking.com payments (${fmt(sumBy(wrong, ({ p }) => p.amount))} ден.) are counted as Cash — check`,
+                `${wrong.length} плаќања од Airbnb / Booking.com (${fmt(sumBy(wrong, ({ p }) => p.amount))} ден.) се бројат како кеш — провери`))
+          : T("Where the money goes", "Каде одат парите")} ›</div>`;
+    })() : ""}
 
     <div class="stat-row">
       <div class="stat" role="button" tabindex="0" title="${T(
@@ -9101,9 +9228,10 @@ function applyAptHiding(keys) {
   if (!hid || !hid.size) return;
   const keep = (r) => !hid.has(r.apartment_id);
   // a payment knows its booking, not its flat — so note the hidden bookings first
-  if (keys.includes("stays")) {
-    state.hiddenStays = new Set(state.stays.filter((s) => !keep(s)).map((s) => s.id));
+  if (keys.includes("stays") || keys.includes("oldStays")) {
+    state.hiddenStays = new Set([...state.stays, ...(state.oldStays || [])].filter((s) => !keep(s)).map((s) => s.id));
     state.stays = state.stays.filter(keep);
+    state.oldStays = (state.oldStays || []).filter(keep);
   }
   if (keys.includes("apartments")) state.apartments = state.apartments.filter((a) => !hid.has(a.id));
   for (const k of ["bills", "expenses", "feeds", "leases", "rentPays"]) if (keys.includes(k)) state[k] = (state[k] || []).filter(keep);
