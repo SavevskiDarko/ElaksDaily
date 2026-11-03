@@ -407,6 +407,11 @@ Deno.serve(async (req) => {
       const { data: feeds } = await db.from("ical_feeds").select("*").eq("active", true);
       const { data: apts } = await db.from("apartments").select("id, name, nightly_rate");
       const remindAt = String((await db.from("app_settings").select("value").eq("key", "stay_remind_time").maybeSingle()).data?.value ?? "09:00").replace(/"/g, "");
+      // which account each platform pays into, as set in the app ("Where the money goes"):
+      // a booking that arrives here carries it, so its payment is filed there on every phone
+      const routeVal = (await db.from("app_settings").select("value").eq("key", "account_by_source").maybeSingle()).data?.value;
+      let accountBy: Record<string, string> = {};
+      try { accountBy = typeof routeVal === "string" ? JSON.parse(routeVal) : (routeVal ?? {}); } catch (_e) { accountBy = {}; }
 
       for (const feed of feeds ?? []) {
         let status = "";
@@ -457,6 +462,7 @@ Deno.serve(async (req) => {
               apartment_id: feed.apartment_id, guest_name: name,
               check_in: ev.start, check_out: ev.end, amount,
               source: feed.source, external_uid: uid, feed_id: feed.id,
+              account_id: accountBy[feed.source] || null,
               notes: blocked ? "Blocked on " + feed.source : null,
             }).select().single();
             if (error) { clashes++; continue; }
