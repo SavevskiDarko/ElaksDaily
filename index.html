@@ -1347,6 +1347,8 @@ async function refreshAll(only) {
     if (k === "tasks" && (r.data || []).length) state.habitCol = "habit" in r.data[0];
     // apartments.rent_mode arrives with migration 0006; until then every flat is let by the night
     if (k === "apartments" && (r.data || []).length) state.rentCol = "rent_mode" in r.data[0];
+    // apartments.account_openings arrives with migration 0009; until then a flat's starting amount is cash only
+    if (k === "apartments" && (r.data || []).length) state.aptAcctCol = "account_openings" in r.data[0];
     // stays.guest_phone arrives with migration 0005; until then the field stays hidden
     if (k === "stays" && (r.data || []).length) state.stayPhoneCol = "guest_phone" in r.data[0];
     // offers.show_total arrives with migration 0007; until then "no total" holds for the send at hand only
@@ -1412,7 +1414,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261104-130000";
+const BUILD = "20261104-160000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7895,6 +7897,56 @@ function moneyArrived(s, acct) {
 const aptsOwnOnly = () => !state.perm.owner && !!state.perm.aptsOwnOnly;
 // Given a flat, what that flat alone has put into each account and taken out
 // of it. An account's starting amount belongs to no one flat, so it is left out.
+// A flat's starting amount in an account. Cash is the flat's own starting
+// amount ("cash earned before Centrala"); the others arrive with migration 0009.
+function flatOpening(f, acctId) {
+  if (acctId === cashAcct()) return parseFloat(f.opening_balance) || 0;
+  return parseFloat((f.account_openings || {})[acctId]) || 0;
+}
+// One flat's real amount in one account. What is typed becomes that flat's
+// starting amount in it; the account's shared starting amount gives up the
+// same, so the account's total under All stays what was set there.
+function openFlatAccountSheet(flatId, acctId) {
+  const f = state.apartments.find((x) => x.id === flatId), a = state.accounts.find((x) => x.id === acctId);
+  if (!f || !a || aptsOwnOnly()) return;
+  const shown = accountBalances(flatId)[acctId] || 0, open = flatOpening(f, acctId), isCash = acctId === cashAcct();
+  const can = isCash || state.aptAcctCol;
+  openSheet(`
+    <h2>${esc(f.name)} · ${esc(a.name)}</h2>
+    <div class="card">
+      <div class="row bankrow" style="margin-top:0"><span class="muted nw">${T("From its bookings, rent, bills and spending", "Од резервации, кирија, сметки и трошоци")}</span>
+        <span class="mono">${fmt(shown - open)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Its starting amount here", "Почетна состојба тука")}</span>
+        <span class="mono">${fmt(open)} ден.</span></div>
+      <div class="row bankrow"><span class="muted nw">${T("Shown now", "Прикажано сега")}</span>
+        <span class="mono"><b>${fmt(shown)}</b> ден.</span></div>
+    </div>
+    ${can ? `<label>${T(`What ${f.name} really has in ${a.name} (ден.)`, `Колку ${f.name} навистина има во ${a.name} (ден.)`)}</label>
+      <input id="fa-real" type="number" inputmode="decimal" step="any" value="${Math.round(shown * 100) / 100}">
+      <p class="muted" style="font-size:12.5px">${T(
+        `This says how much of ${a.name} is this flat's. ${a.name}'s total under All stays as it is.`,
+        `Ова кажува колку од ${a.name} е на овој стан. Вкупното за ${a.name} под Сите останува исто.`)}</p>
+      <button class="btn" onclick="saveFlatAccount('${flatId}','${acctId}')">${T("Save", "Зачувај")}</button>`
+    : `<p class="muted" style="font-size:12.5px">${T(
+        "Setting a flat's amount in an account other than Cash needs the database update (0009).",
+        "За поставување износ на стан во сметка што не е кеш треба ажурирање на базата (0009).")}</p>`}
+  `);
+}
+async function saveFlatAccount(flatId, acctId) {
+  const f = state.apartments.find((x) => x.id === flatId), a = state.accounts.find((x) => x.id === acctId);
+  const real = parseFloat($("fa-real").value);
+  if (!f || !a || !Number.isFinite(real)) return toast(T("Enter the amount", "Внеси износ"));
+  const delta = Math.round((real - (accountBalances(flatId)[acctId] || 0)) * 100) / 100;
+  if (!delta) { closeSheet(); return; }
+  const open = Math.round((flatOpening(f, acctId) + delta) * 100) / 100;
+  const flatRow = acctId === cashAcct() ? { opening_balance: open }
+    : { account_openings: { ...(f.account_openings || {}), [acctId]: open } };
+  try {
+    await dbq(db.from("apartments").update(flatRow).eq("id", flatId), T("Not saved", "Не е зачувано"));
+    await dbq(db.from("accounts").update({ opening_balance: Math.round(((parseFloat(a.opening_balance) || 0) - delta) * 100) / 100 }).eq("id", acctId), T("Not saved", "Не е зачувано"));
+  } catch { return; }
+  closeSheet(); await refreshAll(["apartments", "accounts"]); render(); toast(T("Saved", "Зачувано"));
+}
 const stayIndex = () => new Map([...(state.oldStays || []), ...state.stays].map((s) => [s.id, s]));
 // Where a payment counts: the account chosen on it, else the booking's, else its platform's.
 const payAccount = (p, s) => p.account_id || (s ? accountFor(s) : null);
@@ -7930,9 +7982,9 @@ function accountBalances(aptId) {
     const id = e.account_id || accountFor(e);
     if (id) bal[id] = (bal[id] || 0) - (parseFloat(e.amount) || 0);
   }
-  // apartment starting amounts are cash on hand
-  const cash = state.accounts.find((a) => /cash|кеш/i.test(a.name));
-  if (cash) bal[cash.id] = (bal[cash.id] || 0) + sumBy(state.apartments.filter((a) => !aptId || a.id === aptId), (a) => a.opening_balance);
+  // what each flat had in each account before what is recorded here
+  for (const f of state.apartments.filter((a) => !aptId || a.id === aptId))
+    for (const a of state.accounts) { const v = flatOpening(f, a.id); if (v) bal[a.id] = (bal[a.id] || 0) + v; }
   return bal;
 }
 
@@ -7993,9 +8045,9 @@ function renderApt() {
   const occ = occupiedTonight();
   const bal = accountBalances(flat);
   const total = state.accounts.length ? Object.values(bal).reduce((s, v) => s + v, 0) : cashAll;
-  // one flat shows only the accounts its money went through, and as figures:
-  // setting an account's real balance is for the whole account, under All
-  const accts = flat ? state.accounts.filter((a) => Math.round(bal[a.id] || 0) !== 0) : state.accounts;
+  // one flat: every account, each tapped to say what the flat really has in it;
+  // someone who sees only their own flats sees only the accounts their money went through
+  const accts = flat && aptsOwnOnly() ? state.accounts.filter((a) => Math.round(bal[a.id] || 0) !== 0) : state.accounts;
   const who = one && one.managed_by && one.managed_by !== state.uid ? personName(one.managed_by) : "";
   const arg = flat ? `'${flat}'` : "";
   $("apt-bank").innerHTML = `<div class="card">
@@ -8014,8 +8066,10 @@ function renderApt() {
     </div>
 
     ${accts.length ? `<div class="acct-grid">
-      ${accts.map((a) => flat ? `<div class="acct" style="cursor:default">
+      ${accts.map((a) => flat ? (aptsOwnOnly() ? `<div class="acct" style="cursor:default">
         <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>` : `<div class="acct" role="button" tabindex="0"
+          onclick="event.stopPropagation();openFlatAccountSheet('${flat}','${a.id}')">
+        <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>`) : `<div class="acct" role="button" tabindex="0"
           onclick="event.stopPropagation();openAccountSheet('${a.id}')">
         <span>${esc(a.name)}</span><b>${fmt(bal[a.id] || 0)}</b></div>`).join("")}
     </div>` : ""}

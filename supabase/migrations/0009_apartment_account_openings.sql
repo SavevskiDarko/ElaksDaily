@@ -1,0 +1,23 @@
+-- ============================================================
+--  What each flat has in each account
+--
+--  A flat's figures come from its own bookings, rent, bills and spending,
+--  plus its starting amount, which was always counted as Cash. So a flat
+--  could not say that part of what it earned sits in Payoneer or Wise, and
+--  an account's real balance could only be set for all flats together.
+--  This adds
+--
+--    apartments.account_openings   { "<account id>": amount } — the flat's
+--                                  starting amount in each account other
+--                                  than Cash (Cash stays opening_balance)
+--
+--  In the app, a flat's account tile is tapped to type what the flat
+--  really has in it; the account's shared starting amount gives up the
+--  same, so its total under All does not move. Before this runs, only
+--  Cash can be set per flat.
+--
+--  Safe to run more than once. The apartment policies already cover new
+--  columns.
+-- ============================================================
+
+alter table public.apartments add column if not exists account_openings jsonb not null default '{}'::jsonb;
