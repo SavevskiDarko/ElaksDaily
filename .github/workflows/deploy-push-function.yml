@@ -8,6 +8,8 @@ on:
     branches: [main]
     paths:
       - "supabase/functions/**"
+      # a change to how they are deployed deploys them, so a fix here takes effect
+      - ".github/workflows/deploy-push-function.yml"
   workflow_dispatch:
 
 jobs:
@@ -21,7 +23,9 @@ jobs:
       - name: Deploy edge function
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        # --yes: the CLI now asks before deploying, and with no terminal to
+        # answer it, it stopped and changed nothing ("Re-run with --yes")
         run: |
-          supabase functions deploy push --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
-          supabase functions deploy read-doc --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
-          supabase functions deploy ical --project-ref inbxjztezjfrbnidzofy --no-verify-jwt
+          supabase functions deploy push --project-ref inbxjztezjfrbnidzofy --no-verify-jwt --yes
+          supabase functions deploy read-doc --project-ref inbxjztezjfrbnidzofy --no-verify-jwt --yes
+          supabase functions deploy ical --project-ref inbxjztezjfrbnidzofy --no-verify-jwt --yes
