@@ -1,0 +1,24 @@
+-- ============================================================
+--  Bills the tenant pays back with the next rent
+--
+--  A flat on monthly rent had two ways with its bills: you pay them, or
+--  the tenant pays them directly. A third is common: you pay the bills to
+--  the operators, and the tenant pays you back together with the next
+--  month's rent. This adds
+--
+--    apartments.bills_back_from   the first month whose rent brings the
+--                                 month before's bills; from then on the
+--                                 tenant owes each month's rent plus the
+--                                 month before's bills (and, in the last
+--                                 month of a tenancy, that month's too).
+--                                 Empty: not this way. Months before it
+--                                 stay as they were.
+--
+--  The bills are still entered under Bills as usual. What the tenant owes,
+--  what is late, the reminders and the money card all take them in.
+--
+--  Safe to run more than once. The apartment policies already cover new
+--  columns.
+-- ============================================================
+
+alter table public.apartments add column if not exists bills_back_from date;
