@@ -366,9 +366,8 @@ Deno.serve(async (req) => {
       const { data: apts } = await db.from("apartments").select("*").eq("active", true);
       // a flat whose bills the tenant pays back: last month's bills are due with this rent
       const prevM = (() => { const d = new Date(Date.UTC(y, mo - 2, 1)); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`; })();
-      const { data: prevBills } = await db.from("bills").select("apartment_id, amount").eq("month", prevM + "-01");
+      const { data: prevBills } = await db.from("bills").select("apartment_id, amount, type").eq("month", prevM + "-01");
       const ymOf = (d: unknown) => String(d ?? "").slice(0, 7);
-      const inLease = (l: any, k: string) => ymOf(l.start_date) <= k && (!l.end_date || ymOf(l.end_date) >= k);
       for (const l of leases ?? []) {
         if (String(l.start_date).slice(0, 7) > m || (l.end_date && String(l.end_date).slice(0, 7) < m)) continue;
         if (l.late_sent_month === m) continue;
@@ -377,8 +376,12 @@ Deno.serve(async (req) => {
         const paid = (pays ?? []).filter((p: any) => p.lease_id === l.id).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
         const apt = (apts ?? []).find((a: any) => a.id === l.apartment_id);
         if (!apt) continue;
-        const back = apt.bills_back_from && m >= ymOf(apt.bills_back_from) && inLease(l, prevM)
-          ? (prevBills ?? []).filter((b: any) => b.apartment_id === l.apartment_id).reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0) : 0;
+        // as in the app: from the month it starts with, last month's bills (not a platform's fee),
+        // unless a tenant who left last month already carried them
+        const carried = (leases ?? []).some((x: any) => x.id !== l.id && x.apartment_id === l.apartment_id && x.end_date
+          && ymOf(x.end_date) === prevM && prevM >= ymOf(apt.bills_back_from));
+        const back = apt.bills_back_from && m >= ymOf(apt.bills_back_from) && !carried
+          ? (prevBills ?? []).filter((b: any) => b.apartment_id === l.apartment_id && b.type !== "booking").reduce((s: number, b: any) => s + (Number(b.amount) || 0), 0) : 0;
         const left = (Number(l.rent) || 0) + back - paid;
         if (left <= 0.005) continue;
         await sendToAll("Rent late", `${l.tenant_name} · ${apt.name}: ${Math.round(left).toLocaleString("mk-MK")} ден., due ${due.slice(8)}-${due.slice(5, 7)}`,

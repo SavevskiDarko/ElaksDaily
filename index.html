@@ -1416,7 +1416,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261105-100000";
+const BUILD = "20261105-150000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -8829,7 +8829,9 @@ function renderBills() {
     html += `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
         <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? "✓ PAID" : paidN + "/" + types.length + " paid"}</span></div>
-      ${billsBackOn(a, shiftYm(state.aptMonth, 1)) && isMonthly(a) ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${T(
+      ${billsBackOn(a, shiftYm(state.aptMonth, 1)) && isMonthly(a)
+        && (state.leases || []).some((l) => l.apartment_id === a.id && leaseInMonth(l, shiftYm(state.aptMonth, 1)))
+        ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${T(
         `The tenant pays these back with ${monthName(shiftYm(state.aptMonth, 1))}'s rent.`,
         `Закупецот ги враќа со киријата за ${monthName(shiftYm(state.aptMonth, 1))}.`)}</div>` : ""}
       ${rows.map(({ tp, b }) => `
@@ -9060,17 +9062,21 @@ const strayLease = (aptId) => {
 // a lease owes a month's rent for every month it touches
 const leaseInMonth = (l, m) => ym(l.start_date) <= m && (!l.end_date || ym(l.end_date) >= m);
 // A flat whose bills you pay to the operators and the tenant pays back: with
-// each month's rent comes the month before's bills (from their first month on
-// it), and the last month of a tenancy carries its own bills too, as there is
-// no next rent to bring them. It runs from the month it was set for, so the
-// months already settled before it stay as they were.
-const billsOfMonth = (aptId, m) => sumBy((state.bills || []).filter((b) => b.apartment_id === aptId && ym(b.month) === m), (b) => b.amount);
+// each month's rent comes the month before's bills, and the last month of a
+// tenancy carries its own bills too, as there is no next rent to bring them.
+// It runs from the month it was set to start with — that month's rent brings
+// the month before's bills, whoever lived there then, as was chosen — and the
+// months before stay as they were. Bills a tenant who left already carried
+// are not asked of the next one, and a platform's fee is never the tenant's.
+const billsOfMonth = (aptId, m) => sumBy((state.bills || []).filter((b) => b.apartment_id === aptId && ym(b.month) === m && b.type !== "booking"), (b) => b.amount);
 const billsBackOn = (a, m) => !!a && !!a.bills_back_from && m >= ym(a.bills_back_from);
+const billsCarriedBefore = (l, prev) => (state.leases || []).some((x) => x.id !== l.id && x.apartment_id === l.apartment_id
+  && x.end_date && ym(x.end_date) === prev && billsBackOn(state.apartments.find((a) => a.id === l.apartment_id), prev));
 function billsBack(l, m) {
   const a = state.apartments.find((x) => x.id === l.apartment_id);
   if (!billsBackOn(a, m) || !leaseInMonth(l, m)) return 0;
   const prev = shiftYm(m, -1);
-  return (leaseInMonth(l, prev) ? billsOfMonth(l.apartment_id, prev) : 0)
+  return (billsCarriedBefore(l, prev) ? 0 : billsOfMonth(l.apartment_id, prev))
     + (l.end_date && ym(l.end_date) === m ? billsOfMonth(l.apartment_id, m) : 0);
 }
 const rentDue = (l, m) => (leaseInMonth(l, m) ? (parseFloat(l.rent) || 0) + billsBack(l, m) : 0);
@@ -9079,7 +9085,7 @@ function rentDueLine(l, m) {
   const a = state.apartments.find((x) => x.id === l.apartment_id);
   if (!billsBackOn(a, m) || !leaseInMonth(l, m)) return "";
   const prev = shiftYm(m, -1), bb = billsBack(l, m);
-  if (!leaseInMonth(l, prev) && !bb) return "";
+  if (!bb && billsCarriedBefore(l, prev)) return "";
   return bb
     ? `${fmt(l.rent)} ${T("rent", "кирија")} + ${fmt(bb)} ${T(`bills for ${monthName(prev)}`, `сметки за ${monthName(prev)}`)} = ${fmt(rentDue(l, m))}`
     : T(`${monthName(prev)}'s bills are not entered yet`, `Сметките за ${monthName(prev)} сè уште не се внесени`);
