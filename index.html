@@ -1349,6 +1349,8 @@ async function refreshAll(only) {
     if (k === "apartments" && (r.data || []).length) state.rentCol = "rent_mode" in r.data[0];
     // apartments.account_openings arrives with migration 0009; until then a flat's starting amount is cash only
     if (k === "apartments" && (r.data || []).length) state.aptAcctCol = "account_openings" in r.data[0];
+    // apartments.bills_back_from arrives with migration 0010; until then bills are paid by you or by the tenant
+    if (k === "apartments" && (r.data || []).length) state.billsBackCol = "bills_back_from" in r.data[0];
     // stays.guest_phone arrives with migration 0005; until then the field stays hidden
     if (k === "stays" && (r.data || []).length) state.stayPhoneCol = "guest_phone" in r.data[0];
     // offers.show_total arrives with migration 0007; until then "no total" holds for the send at hand only
@@ -1414,7 +1416,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261104-210000";
+const BUILD = "20261105-100000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -8827,6 +8829,9 @@ function renderBills() {
     html += `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
         <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? "✓ PAID" : paidN + "/" + types.length + " paid"}</span></div>
+      ${billsBackOn(a, shiftYm(state.aptMonth, 1)) && isMonthly(a) ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${T(
+        `The tenant pays these back with ${monthName(shiftYm(state.aptMonth, 1))}'s rent.`,
+        `Закупецот ги враќа со киријата за ${monthName(shiftYm(state.aptMonth, 1))}.`)}</div>` : ""}
       ${rows.map(({ tp, b }) => `
         <div class="row" style="margin-top:7px">
           <button class="clbox ${b && b.paid ? "on" : ""}" onclick="setBill('${a.id}','${tp}','paid',${!(b && b.paid)})">${b && b.paid ? "✓" : ""}</button>
@@ -8901,7 +8906,11 @@ function openAptStatement(id, year) {
   for (const s of mine.filter((s) => (s.check_in || "").slice(0, 4) === String(y)))
     bySource[s.source || "Direct"] = (bySource[s.source || "Direct"] || 0) + (parseFloat(s.amount) || 0);
   const rentY = Array.from({ length: 12 }, (_, i) => rentEarned(`${y}-${p2(i + 1)}`, id)).reduce((s2, v) => s2 + v, 0);
-  if (rentY) bySource[T("Rent", "Кирија")] = rentY;
+  // what the tenant pays back for the bills is not rent: it is shown as what it is
+  const backY = sumBy((state.leases || []).filter((l) => l.apartment_id === id),
+    (l) => Array.from({ length: 12 }, (_, i) => billsBack(l, `${y}-${p2(i + 1)}`)).reduce((s2, v) => s2 + v, 0));
+  if (rentY - backY) bySource[T("Rent", "Кирија")] = rentY - backY;
+  if (backY) bySource[T("Bills paid back", "Вратени сметки")] = backY;
   openSheet(`
     <h2>${esc(a.name)}</h2>
     <div class="row" style="justify-content:center;gap:18px;margin:6px 0 10px">
@@ -8957,11 +8966,21 @@ function openAptSheet(id) {
       .map(([v, l]) => `<button class="chip ${(a.rent_mode || "short") === v ? "on" : ""}" data-v="${v}"
         onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');aptModeChanged()">${l}</button>`).join("")}</div>
     <div id="ap-monthly" style="display:none">
-      <div class="row" style="margin-top:10px">
-        <button class="clbox ${a.tenant_pays_bills ? "on" : ""}" id="ap-tpb"
-          onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'✓':''">${a.tenant_pays_bills ? "✓" : ""}</button>
-        <span>${T("The tenant pays the bills — stop asking me for them", "Закупецот ги плаќа сметките — не барај ги од мене")}</span>
-      </div>
+      <label>${T("The bills", "Сметките")}</label>
+      <div class="chips" id="ap-bills" style="flex-wrap:wrap">${[
+        ["me", T("I pay them", "Јас ги плаќам")],
+        ["tenant", T("The tenant pays them directly", "Закупецот ги плаќа директно")],
+        ["back", T("I pay them, the tenant pays me back with the next rent", "Јас ги плаќам, закупецот ми ги враќа со следната кирија")],
+      ].map(([v, l]) => `<button class="chip ${(a.bills_back_from ? "back" : a.tenant_pays_bills ? "tenant" : "me") === v ? "on" : ""}" data-v="${v}"
+          ${v === "back" && !state.billsBackCol ? "disabled" : ""}
+          onclick="this.parentNode.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));this.classList.add('on');$('ap-bb').style.display=this.dataset.v==='back'?'':'none'">${l}</button>`).join("")}</div>
+      <div id="ap-bb" style="${a.bills_back_from ? "" : "display:none"}">
+        <label>${T("Starting with the rent for", "Почнувајќи од киријата за")}</label>
+        <input id="ap-bbfrom" type="month" value="${a.bills_back_from ? ym(a.bills_back_from) : curYm()}"></div>
+      <p class="muted" style="font-size:12.5px">${state.billsBackCol ? T(
+        "Paid back: you enter the bills under Bills as usual, and from the month below the tenant owes each month's rent plus the month before's bills. Months before it stay as they were.",
+        "Враќање: сметките ги внесуваш во Сметки како и досега, а од месецот подолу закупецот должи кирија плус сметките од претходниот месец. Месеците пред тоа остануваат исти.")
+        : T("Paying back with the next rent needs the database update (0010).", "Враќањето со следната кирија бара ажурирање на базата (0010).")}</p>
       <p class="muted" style="font-size:12.5px">${T("The tenant and the rent go under Apartments › Rent.", "Закупецот и киријата се во Станови › Кирија.")}</p>
     </div>` : ""}
     ${state.perm.owner ? `<label>${T("Managed by", "Го води")}</label>
@@ -9040,7 +9059,31 @@ const strayLease = (aptId) => {
 };
 // a lease owes a month's rent for every month it touches
 const leaseInMonth = (l, m) => ym(l.start_date) <= m && (!l.end_date || ym(l.end_date) >= m);
-const rentDue = (l, m) => (leaseInMonth(l, m) ? parseFloat(l.rent) || 0 : 0);
+// A flat whose bills you pay to the operators and the tenant pays back: with
+// each month's rent comes the month before's bills (from their first month on
+// it), and the last month of a tenancy carries its own bills too, as there is
+// no next rent to bring them. It runs from the month it was set for, so the
+// months already settled before it stay as they were.
+const billsOfMonth = (aptId, m) => sumBy((state.bills || []).filter((b) => b.apartment_id === aptId && ym(b.month) === m), (b) => b.amount);
+const billsBackOn = (a, m) => !!a && !!a.bills_back_from && m >= ym(a.bills_back_from);
+function billsBack(l, m) {
+  const a = state.apartments.find((x) => x.id === l.apartment_id);
+  if (!billsBackOn(a, m) || !leaseInMonth(l, m)) return 0;
+  const prev = shiftYm(m, -1);
+  return (leaseInMonth(l, prev) ? billsOfMonth(l.apartment_id, prev) : 0)
+    + (l.end_date && ym(l.end_date) === m ? billsOfMonth(l.apartment_id, m) : 0);
+}
+const rentDue = (l, m) => (leaseInMonth(l, m) ? (parseFloat(l.rent) || 0) + billsBack(l, m) : 0);
+// "15,000 rent + 3,420 October's bills", for a month that has bills on it
+function rentDueLine(l, m) {
+  const a = state.apartments.find((x) => x.id === l.apartment_id);
+  if (!billsBackOn(a, m) || !leaseInMonth(l, m)) return "";
+  const prev = shiftYm(m, -1), bb = billsBack(l, m);
+  if (!leaseInMonth(l, prev) && !bb) return "";
+  return bb
+    ? `${fmt(l.rent)} ${T("rent", "кирија")} + ${fmt(bb)} ${T(`bills for ${monthName(prev)}`, `сметки за ${monthName(prev)}`)} = ${fmt(rentDue(l, m))}`
+    : T(`${monthName(prev)}'s bills are not entered yet`, `Сметките за ${monthName(prev)} сè уште не се внесени`);
+}
 const rentPaid = (l, m) => sumBy((state.rentPays || []).filter((p) => p.lease_id === l.id && ym(p.month) === m), (p) => p.amount);
 const rentLeft = (l, m) => Math.max(0, rentDue(l, m) - rentPaid(l, m));
 // the day it falls due — the 31st in a short month is that month's last day
@@ -9121,6 +9164,7 @@ function renderRent() {
       <div class="tapp" role="button" tabindex="0" onclick="openLeaseSheet('${l.id}')" style="margin-top:2px">
         <div class="o-num">${esc(l.tenant_name)}${l.tenant_phone ? " · " + esc(l.tenant_phone) : ""} ·
           ${fmt(l.rent)} ${T("ден. a month, due on the", "ден. месечно, доспева на")} ${langMk() ? ordMk(day) : ordEn(day)} ›</div></div>
+      ${rentDueLine(l, m) ? `<div class="muted" style="font-size:12.5px;margin-top:4px">${monthName(m)}: ${rentDueLine(l, m)}</div>` : ""}
       <div class="rent-strip">${Array.from({ length: 6 }, (_, i) => rentCell(l, shiftYm(m, i - 5))).join("")}</div>
       ${earlier.length ? `<div class="hflag" style="font-size:12.5px;margin-top:6px">${T(
         `${earlier.length} earlier month${earlier.length > 1 ? "s" : ""} still open · ${fmt(sumBy(earlier, (x) => rentLeft(l, x)))} ден.`,
@@ -9245,9 +9289,10 @@ function openRentPay(leaseId, m) {
     <select id="rp-month" onchange="rentPayMonth('${leaseId}')">${months.map((k) =>
       `<option value="${k}" ${k === m ? "selected" : ""}>${monthName(k)} ${k.slice(0, 4)} — ${state_(k)}</option>`).join("")}</select>
     <div class="grid2">
-      <div><label>${T("Amount (ден.)", "Износ (ден.)")}</label><input id="rp-amt" type="number" inputmode="decimal" step="any" value="${rentLeft(l, m) || l.rent}"></div>
+      <div><label>${T("Amount (ден.)", "Износ (ден.)")}</label><input id="rp-amt" type="number" inputmode="decimal" step="any" value="${rentLeft(l, m) || rentDue(l, m) || l.rent}"></div>
       <div><label>${T("Paid on", "Платено на")}</label><input id="rp-on" type="date" value="${todayStr()}"></div>
     </div>
+    <p class="muted" id="rp-line" style="font-size:12.5px;margin-top:4px">${rentDueLine(l, m)}</p>
     <label>${T("Money went to", "Парите одат во")}</label>
     <select id="rp-acct">${state.accounts.map((x) => `<option value="${x.id}" ${(l.account_id || accountFor({})) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
     <label>${T("Note (opt.)", "Белешка (опц.)")}</label><input id="rp-note">
@@ -9258,7 +9303,10 @@ function openRentPay(leaseId, m) {
 // a different month: suggest what is still owed for it
 function rentPayMonth(leaseId) {
   const l = (state.leases || []).find((x) => x.id === leaseId);
-  if (l) $("rp-amt").value = rentLeft(l, $("rp-month").value) || l.rent;
+  if (!l) return;
+  const k = $("rp-month").value;
+  $("rp-amt").value = rentLeft(l, k) || rentDue(l, k) || l.rent;
+  $("rp-line").textContent = rentDueLine(l, k);
 }
 async function saveRentPay(leaseId) {
   const l = (state.leases || []).find((x) => x.id === leaseId);
@@ -9290,12 +9338,22 @@ function messageTenant(leaseId) {
   const text = (lang, key) => {
     const mk = lang === "mk", name = firstName(l.tenant_name), apt = aptName(l.apartment_id);
     if (key === "receipt") {
+      const withBills = billsBack(l, lastPaid) > 0.005, pm = shiftYm(lastPaid, -1);
       return msgLines(mk
-        ? [`Здраво ${name},`, `потврдувам дека ја примив киријата за ${monthIn("mk", lastPaid)} за ${apt} — ${fmt(rentPaid(l, lastPaid))} ден. Ви благодарам!`, "", myName()]
-        : [`Hello ${name},`, `this is to confirm I have received the rent for ${monthIn("en", lastPaid)} for ${apt} — ${fmt(rentPaid(l, lastPaid))} MKD. Thank you!`, "", myName()]);
+        ? [`Здраво ${name},`, `потврдувам дека ја примив киријата за ${monthIn("mk", lastPaid)}${withBills ? ` и сметките за ${monthIn("mk", pm)}` : ""} за ${apt} — ${fmt(rentPaid(l, lastPaid))} ден. Ви благодарам!`, "", myName()]
+        : [`Hello ${name},`, `this is to confirm I have received the rent for ${monthIn("en", lastPaid)}${withBills ? ` and the bills for ${monthIn("en", pm)}` : ""} for ${apt} — ${fmt(rentPaid(l, lastPaid))} MKD. Thank you!`, "", myName()]);
     }
     const mo = owed.includes(m) ? m : (owed[0] || m), due = rentDueDate(l, mo), late = due < todayStr();
     const before = owed.filter((x) => x !== mo), extra = sumBy(before, (x) => rentLeft(l, x));
+    // rent and the month before's bills, while nothing of the month is paid yet
+    const bb = billsBack(l, mo), prevM = shiftYm(mo, -1);
+    if (bb > 0.005 && rentPaid(l, mo) < 0.005) {
+      return msgLines(mk
+        ? [`Здраво ${name},`, `потсетник за киријата за ${monthIn("mk", mo)} за ${apt} — ${fmt(l.rent)} ден., и сметките за ${monthIn("mk", prevM)} — ${fmt(bb)} ден.: вкупно ${fmt(rentDue(l, mo))} ден., ${late ? "доспеано на" : "со рок"} ${dmy(due)}.`,
+           extra > 0.005 ? `Од претходните месеци останува уште ${fmt(extra)} ден.` : null, "", "Ви благодарам,", myName()]
+        : [`Hello ${name},`, `a reminder about the rent for ${monthIn("en", mo)} for ${apt} — ${fmt(l.rent)} MKD — and the bills for ${monthIn("en", prevM)} — ${fmt(bb)} MKD: ${fmt(rentDue(l, mo))} MKD in all, ${late ? "which was due on" : "due on"} ${dmy(due)}.`,
+           extra > 0.005 ? `There is also ${fmt(extra)} MKD still open from earlier months.` : null, "", "Thank you,", myName()]);
+    }
     return msgLines(mk
       ? [`Здраво ${name},`, `потсетник за киријата за ${monthIn("mk", mo)} за ${apt} — ${fmt(rentLeft(l, mo) || l.rent)} ден., ${late ? "која доспеа на" : "која доспева на"} ${dmy(due)}.`,
          extra > 0.005 ? `Од претходните месеци останува уште ${fmt(extra)} ден.` : null, "", "Ви благодарам,", myName()]
@@ -9722,7 +9780,9 @@ async function saveApt(id) {
   // only sent once the columns are there (migration 0006)
   if (state.rentCol) {
     row.rent_mode = (($("ap-mode") || {}).querySelector?.(".chip.on") || {}).dataset?.v || "short";
-    row.tenant_pays_bills = row.rent_mode === "monthly" && !!($("ap-tpb") && $("ap-tpb").classList.contains("on"));
+    const bills = row.rent_mode === "monthly" ? ((($("ap-bills") || {}).querySelector?.(".chip.on") || {}).dataset?.v || "me") : "me";
+    row.tenant_pays_bills = bills === "tenant";
+    if (state.billsBackCol) row.bills_back_from = bills === "back" ? ((($("ap-bbfrom") || {}).value || curYm()) + "-01") : null;
   }
   if (!row.name) return toast("Enter a name");
   try { await dbq(id ? db.from("apartments").update(row).eq("id", id) : db.from("apartments").insert(row), "Not saved"); } catch { return; }
