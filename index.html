@@ -602,6 +602,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
     <div class="subnav" id="elaks-tabs" role="tablist"></div>
     <div id="el-body-inv">
       <input class="search" id="inv-search" placeholder="Search name, code, supplier or specs…" oninput="renderInv()">
+      <input type="file" accept="image/*" id="art-pic" style="display:none" onchange="readProductPhoto(this)">
       <div class="chips" id="cat-filter" style="margin-bottom:12px"></div>
       <div id="cam-filter"></div>
       <div id="inv-list"></div>
@@ -1416,7 +1417,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261105-150000";
+const BUILD = "20261106-100000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -3203,6 +3204,7 @@ function renderInv() {
   const tools = [
     seesCosts() ? tool(`onclick="openCashSheet()"`, T("Cash register", "Каса"), fmt(cashBal())) : "",
     seesCosts() ? tool(`onclick="openReportSheet()"`, T("Monthly report", "Месечен извештај")) : "",
+    tool(`onclick="pickProductPhoto()"`, T("Add from a picture", "Додај од слика")),
     tool(`onclick="openOrderSheet()"`, T("To order", "За нарачка"), lowN || "", "bad"),
     tool(`onclick="openSerialSearch()"`, T("Find by serial", "Најди по сериски")),
     tool(`onclick="openCountAll()"`, T("Count stock", "Попис")),
@@ -3600,18 +3602,24 @@ async function delCashEntry(id, linked) {
   setTimeout(openCashSheet, 240); toast("Entry deleted");
 }
 let arImg = { mode: "keep", thumb: null, full: null };
+let arPreset = null;          // what a picture read, filled in for checking
 let arVat = 18;
 function setArVat(r) {
   arVat = r;
   [...$("ar-vat").querySelectorAll(".chip")].forEach((b, i) => b.classList.toggle("on", VAT_RATES[i] === r));
   sellHint();                 // what you make depends on the rate
 }
-function openArticleSheet(id) {
-  const a = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
-  arImg = { mode: "keep", thumb: a.image_thumb || null, full: null, id: id || null };
+function openArticleSheet(id, preset) {
+  const base = id ? state.stock.find((x) => x.id === id) : { category: "CCTV", unit: "ком" };
+  const a = preset ? { ...base, ...preset.fields } : base;
+  arPreset = preset || null;
+  arImg = { mode: "keep", thumb: base.image_thumb || null, full: null, id: id || null };
+  if (preset && preset.photo) arImg = { ...arImg, mode: "new", ...preset.photo };
   arVat = parseFloat(a.vat_rate ?? 18);
   openSheet(`
     <h2>${id ? "Edit article" : "New article"}</h2>
+    ${preset ? `<p class="muted" style="margin-top:-4px">${T("Filled in from the picture — check it, then Save.", "Пополнето од сликата — провери, па Зачувај.")}</p>`
+      : id ? "" : `<button class="btn sm ghost" onclick="pickProductPhoto()">${T("Fill in from a picture — a supplier's page, a price list, a box", "Пополни од слика — страница од добавувач, ценовник, кутија")}</button>`}
     <label>Name</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="e.g. 5MP Hikvision DS-2CE17K0T-LFS">
     <div class="grid2">
       <div><label>Code</label><input id="ar-code" value="${esc(a.code || "")}"></div>
@@ -3626,7 +3634,7 @@ function openArticleSheet(id) {
         <input id="ar-pp" type="number" inputmode="decimal" value="${a.purchase_price ?? ""}" oninput="autoSell()"></div>` : ""}
       <div><label>Sell price (со ДДВ)</label>
         <input id="ar-sp" type="number" inputmode="decimal" value="${a.sell_price ?? ""}"
-          ${a.sell_price ? 'data-touched="1"' : ""} oninput="this.dataset.touched='1';sellHint()"></div>
+          ${(preset ? preset.sellTouched : a.sell_price) ? 'data-touched="1"' : ""} oninput="this.dataset.touched='1';sellHint()"></div>
     </div>
     ${seesCosts() ? `<div class="chips" style="margin-top:6px">
       ${[30, 50, 80, 100].map((pct) => `<button class="chip" onclick="setMarkup(${pct})">+${pct}%</button>`).join("")}
@@ -3652,6 +3660,7 @@ function openArticleSheet(id) {
     <label>Specs for offers (each line starts with --)</label>
     <textarea id="ar-specs" rows="5" placeholder="-- 40m White Light&#10;-- 2.8 mm објектив">${esc(a.specs || "")}</textarea>
     <button class="btn" onclick="saveArticle('${id || ""}')">Save</button>
+    ${preset ? `<button class="btn ghost" onclick="closeSheet();backToProductRead()">‹ ${T("Back to the picture", "Назад кон сликата")}</button>` : ""}
     ${id ? `<div id="ar-hist"></div>
       <button class="btn ghost" onclick="openMergeSheet('${id}')">Merge with a duplicate…</button>
       <button class="btn danger" onclick="delArticle('${id}')">Deactivate</button>` : ""}
@@ -3860,14 +3869,16 @@ async function photoCleanUndoAll() {
 // the photo as both sizes the app keeps: a small one for lists, the large one for offers
 const photoSizes = (src) => ({ thumb: imgResize(src, 72, 0.6), full: imgResize(src, 700, 0.75) });
 // a picked photo: its white cut away when it has one, the original kept to go back to
-function setArticlePhoto(im, original) {
+function photoSet(im, original) {
   const clean = cutWhiteBackground(im);
   const orig = original || photoSizes(im);
-  arImg = clean
-    ? { ...arImg, mode: "new", ...photoSizes(clean), cut: true, alt: orig }
-    : { ...arImg, mode: "new", ...orig, cut: false, alt: null };
+  return clean ? { ...photoSizes(clean), cut: true, alt: orig } : { ...orig, cut: false, alt: null };
+}
+function setArticlePhoto(im, original) {
+  const p = photoSet(im, original);
+  arImg = { ...arImg, mode: "new", ...p };
   renderArImg();
-  return !!clean;
+  return p.cut;
 }
 function arImgToggleCut() {
   if (!arImg.alt) return;
@@ -4111,6 +4122,12 @@ async function saveArticle(id) {
     row.mp = mp > 0 ? mp : null;
   }
   if (!row.name) return toast("Enter a name");
+  // the shop's own code, read off the picture, where the article had none
+  const pic = arPreset;
+  if (pic && pic.supplier_code) {
+    const was = id && state.stock.find((x) => x.id === id);
+    if (!was || !was.supplier_code) row.supplier_code = pic.supplier_code;
+  }
   if (arImg.mode === "new") row.image_thumb = arImg.thumb;
   if (arImg.mode === "remove") row.image_thumb = null;
   try {
@@ -4121,6 +4138,7 @@ async function saveArticle(id) {
     if (arImg.mode === "remove") await dbq(db.from("article_images").delete().eq("article_id", artId), "Photo not removed");
   } catch { return; }
   closeSheet(); await refreshAll(["stock"]); renderInv(); toast("Saved");
+  if (pic && pic.pic != null) backToProductRead(id ? "updated" : "added");
 }
 async function delArticle(id) {
   if (!await ask("Deactivate this article?")) return;
@@ -7482,7 +7500,8 @@ function openSetSheet(kind) {
   } else if (kind === "aikey") {
     const on = setting("ai_key_set", "") === "yes";
     openSheet(`<h2>Document reading</h2>
-      <p class="muted">Lets Centrala read a photographed supplier note and fill in the purchase for you.</p>
+      <p class="muted">${T("Lets Centrala read a photographed supplier note and fill in the purchase for you, and a picture of goods — a supplier's page, a price list, a box — to add them to Stock.",
+        "Централа ќе ја прочита сликана испратница од добавувач и ќе ја пополни набавката, а од слика на стока — страница од добавувач, ценовник, кутија — ќе ја додаде во магацин.")}</p>
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <b>${on ? "Key saved" : "No key yet"}</b>
@@ -10513,6 +10532,325 @@ function openParsedPurchase() {
       renderPurItems();
       toast("Check the lines, then Save");
     }, 140);
+  }, 240);
+}
+/* ---------- Stock from a picture ----------
+   A supplier's web page, a price list, a box or its label: the server reads
+   it (read-doc, kind "product") and hands back each article on it — name,
+   codes, prices and where its own photo sits — to check before anything is
+   saved. New ones are added to Stock; one already there gets the new buy price. */
+let prodRead = null;
+const EUR_MKD = 61.5;
+// someone without the buy prices cannot see the key's setting either: the server says
+function pickProductPhoto() {
+  if (seesCosts() && setting("ai_key_set", "") !== "yes")
+    return say(T("Add your API key first: Settings → Document reading.", "Прво додај API клуч: Поставки → Читање документи."));
+  $("art-pic").click();
+}
+function readProductPhoto(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => sendProductPhoto(im);
+    im.onerror = () => toast(T("Could not read that picture", "Сликата не може да се прочита"));
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+async function sendProductPhoto(im) {
+  // big enough to read small print, small enough to send quickly
+  const scale = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.round(im.naturalWidth * scale);
+  c.height = Math.round(im.naturalHeight * scale);
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(im, 0, 0, c.width, c.height);
+  const b64 = c.toDataURL("image/jpeg", 0.85).split(",")[1];
+  openSheet(`<h2>${T("Reading the picture…", "Ја читам сликата…")}</h2>
+    <div class="skel tall"></div><div class="skel"></div><div class="skel"></div>
+    <p class="muted">${T("This takes a few seconds. Nothing is saved until you confirm.", "Ова трае неколку секунди. Ништо не се зачувува додека не потврдиш.")}</p>`);
+  try {
+    const { data: sess } = await db.auth.getSession();
+    const res = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/read-doc", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (sess?.session?.access_token || ""),
+        "apikey": CONFIG.SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ kind: "product", image: b64, mediaType: "image/jpeg", width: c.width, height: c.height, categories: CATS }),
+    });
+    const out = await res.json();
+    if (!res.ok || out.error) throw new Error(out.error || ("Reading failed (" + res.status + ")"));
+    showProductRead(out, im, c.width, c.height);
+  } catch (e) {
+    console.error(e);
+    openSheet(`<h2>${T("Could not read it", "Не може да се прочита")}</h2>
+      <p class="muted">${esc(e.message || "Something went wrong.")}</p>
+      <button class="btn" onclick="pickProductPhoto()">${T("Choose another picture", "Избери друга слика")}</button>
+      <button class="btn ghost" onclick="closeSheet()">${T("Close", "Затвори")}</button>`);
+  }
+}
+// 2100, "2,100", "1.250,00", "2 100 ден" — a price as a number, or null
+function priceNum(v) {
+  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? v : null;
+  let s = String(v ?? "").replace(/[^\d.,]/g, "");
+  if (!s) return null;
+  if (/^\d{1,3}([.,]\d{3})+$/.test(s)) s = s.replace(/[.,]/g, "");          // thousands only
+  else if (/[.,]\d{1,2}$/.test(s)) s = s.slice(0, -3).replace(/[.,]/g, "") + "." + s.slice(-2).replace(/[.,]/g, "");
+  else s = s.replace(/[.,]/g, "");
+  const n = parseFloat(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+// a supplier's name as the app knows it: "KONIKO" is Конико, whatever the legal form after it
+const LAT = { а: "a", б: "b", в: "v", г: "g", д: "d", ѓ: "g", е: "e", ж: "z", з: "z", ѕ: "z", и: "i", ј: "j", к: "k", л: "l", љ: "l",
+  м: "m", н: "n", њ: "n", о: "o", п: "p", р: "r", с: "s", т: "t", ќ: "k", у: "u", ф: "f", х: "h", ц: "c", ч: "c", џ: "d", ш: "s" };
+const latName = (s) => normName(s).replace(/[а-џ]/g, (ch) => LAT[ch] ?? ch).replace(/(dooel|doo)$/, "");
+function knownSupplier(name) {
+  const n = latName(name);
+  if (!n) return "";
+  const hit = state.suppliers.find((s) => { const m = latName(s.name); return m && (m === n || (Math.min(m.length, n.length) >= 4 && (n.startsWith(m) || m.startsWith(n)))); });
+  return hit ? hit.name : String(name).trim();
+}
+// the article this one already is, by the shop's code, the model, or the name
+function matchProduct(p, supplier) {
+  const eq = (a, b) => !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  const live = state.stock.filter((a) => a.active !== false);
+  const model = normName(p.model);
+  return (p.sku && live.find((a) => eq(a.supplier_code, p.sku) && (!supplier || !a.supplier || latName(a.supplier) === latName(supplier))))
+    || (p.model && live.find((a) => eq(a.code, p.model) || eq(a.supplier_code, p.model)))
+    || (model.length >= 6 && live.find((a) => normName(a.name).includes(model)))
+    || (normName(p.name).length >= 6 && live.find((a) => normName(a.name) === normName(p.name)))
+    || null;
+}
+// the box the reader gave, a little wider, out of the full-size picture; then
+// the plain white margin trimmed off. null when the box is no photo.
+function cropProductPhoto(im, box, w, h) {
+  if (!Array.isArray(box) || box.length !== 4) return null;
+  let [l, t, r, b] = box.map(Number);
+  if (![l, t, r, b].every(Number.isFinite) || r - l < 12 || b - t < 12) return null;
+  const W = im.naturalWidth || im.width, H = im.naturalHeight || im.height, sx = W / w, sy = H / h;
+  const px = (r - l) * 0.04, py = (b - t) * 0.04;
+  l = Math.max(0, (l - px) * sx); t = Math.max(0, (t - py) * sy);
+  r = Math.min(W, (r + px) * sx); b = Math.min(H, (b + py) * sy);
+  const cw = Math.round(r - l), ch = Math.round(b - t);
+  if (cw < 24 || ch < 24 || cw * ch > 0.8 * W * H) return null;     // the whole picture is not a product photo
+  const c = document.createElement("canvas");
+  c.width = cw; c.height = ch;
+  c.getContext("2d").drawImage(im, l, t, cw, ch, 0, 0, cw, ch);
+  return trimWhite(c);
+}
+function trimWhite(c) {
+  let d;
+  try { d = c.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data; } catch { return c; }
+  const W = c.width, H = c.height;
+  const plain = (x, y) => { const i = (y * W + x) * 4; return Math.min(d[i], d[i + 1], d[i + 2]) >= 240; };
+  const rowPlain = (y) => { for (let x = 0; x < W; x++) if (!plain(x, y)) return false; return true; };
+  const colPlain = (x, y0, y1) => { for (let y = y0; y <= y1; y++) if (!plain(x, y)) return false; return true; };
+  let top = 0, bot = H - 1, left = 0, right = W - 1;
+  while (top < bot && rowPlain(top)) top++;
+  while (bot > top && rowPlain(bot)) bot--;
+  while (left < right && colPlain(left, top, bot)) left++;
+  while (right > left && colPlain(right, top, bot)) right--;
+  if (right - left < 16 || bot - top < 16) return null;            // nothing but white
+  const m = 6;                                                      // a little air round it
+  top = Math.max(0, top - m); left = Math.max(0, left - m); bot = Math.min(H - 1, bot + m); right = Math.min(W - 1, right + m);
+  const o = document.createElement("canvas");
+  o.width = right - left + 1; o.height = bot - top + 1;
+  o.getContext("2d").drawImage(c, left, top, o.width, o.height, 0, 0, o.width, o.height);
+  return o;
+}
+const vatMemo = () => { try { return JSON.parse(localStorage.getItem("centrala_vat_by_supplier") || "{}") || {}; } catch { return {}; } };
+function rememberVat(supplier, vat) {
+  if (!supplier || !vat) return;
+  try { localStorage.setItem("centrala_vat_by_supplier", JSON.stringify({ ...vatMemo(), [latName(supplier)]: vat })); } catch {}
+}
+function showProductRead(d, im, w, h) {
+  const cur = String(d.currency || "MKD").toUpperCase();
+  const eur = /^(EUR|€)$/.test(cur), other = !eur && !/^(MKD|MKDEN|ДЕН|DEN)$/.test(cur);
+  const rate = eur ? EUR_MKD : 1;
+  const supplier = d.supplier ? knownSupplier(d.supplier) : "";
+  const said = d.prices_vat === "with" || d.prices_vat === "without" ? d.prices_vat : null;
+  const memo = supplier ? vatMemo()[latName(supplier)] : null;
+  const items = (d.products || []).map((p) => {
+    const name = String(p.name || "").trim();
+    const model = String(p.model || "").trim() || null, sku = String(p.sku || "").trim() || null;
+    const specs = (Array.isArray(p.specs) ? p.specs : []).map((x) => String(x).trim()).filter(Boolean).slice(0, 6);
+    const auto = camOf({ name, code: model, supplier_code: sku, specs: specs.join(" ") }).auto;
+    const ct = p.cam_type === "ip" || p.cam_type === "turbo" ? p.cam_type : null;
+    const mp = priceNum(p.mp);
+    const buy = priceNum(p.buy_price), list = priceNum(p.list_price);
+    const cat = CATS.includes(p.category) ? p.category : ct || auto.type ? "CCTV" : "Other";
+    let photo = null;
+    try { const cut = cropProductPhoto(im, p.photo_box, w, h); if (cut) photo = photoSet(cut); } catch (e) { console.warn("photo", e); }
+    return { name, model, sku, specs, category: cat, unit: p.unit === "m" ? "m" : "ком",
+      cam_type: ct && !auto.type ? ct : null, mp: mp && auto.mp == null && mp < 100 ? mp : null,
+      buy: buy != null ? Math.round(buy * rate * 100) / 100 : null, list: list != null ? Math.round(list * rate) : null,
+      photo, usePhoto: !!photo, on: true, done: null, match: matchProduct({ name, model, sku }, supplier) };
+  }).filter((it) => it.name);
+  prodRead = { supplier, vat: said || memo || null, vatHow: said ? "said" : memo ? "memo" : null, eur, other, cur,
+    sell: "markup", items };
+  openSheet(`<h2>${T("Found on the picture", "Пронајдено на сликата")}</h2><div id="pr-body"></div>`);
+  renderProductRead();
+}
+// what one article costs with ДДВ, as the prices on the picture are read
+const prodBuy = (it) => it.buy == null ? null : prodRead.vat === "without" ? Math.round(it.buy * 1.18 * 100) / 100 : it.buy;
+function prodSell(it) {
+  if (prodRead.sell === "list" && it.list) return it.list;
+  const b = prodBuy(it);
+  return b ? markupPrice(b, DEFAULT_MARKUP_PCT) : it.list || 0;
+}
+const prodNeedsVat = () => !prodRead.vat && prodRead.items.some((it) => it.on && !it.done && it.buy != null);
+function renderProductRead() {
+  const r = prodRead, el = $("pr-body");
+  if (!r || !el) return;
+  const own = seesCosts();
+  const anyBuy = r.items.some((it) => it.buy != null), anyList = r.items.some((it) => it.list != null);
+  if (!r.items.length) {
+    el.innerHTML = `<p class="muted">${T("No articles with a name were found on this picture. A supplier's product page, a price list or a box label reads best.",
+      "На сликата не се најдени артикли со име. Најдобро се читаат страница на производ кај добавувач, ценовник или етикета од кутија.")}</p>
+      <button class="btn" onclick="pickProductPhoto()">${T("Choose another picture", "Избери друга слика")}</button>`;
+    return;
+  }
+  const vatNote = r.vatHow === "said" ? T("The picture says so.", "Така пишува на сликата.")
+    : r.vatHow === "memo" ? T("As you chose last time for this supplier.", "Како што избра последен пат за овој добавувач.")
+    : r.vat ? "" : `<span style="color:var(--danger)">${T("The picture does not say — choose one.", "На сликата не пишува — избери.")}</span>`;
+  const pending = r.items.filter((it) => it.on && !it.done);
+  const adds = pending.filter((it) => !it.match).length, upd = pending.length - adds;
+  const go = adds && upd ? T(`Add ${adds} · update ${upd}`, `Додај ${adds} · ажурирај ${upd}`)
+    : adds ? (adds === 1 ? T("Add to Stock", "Додај во магацин") : T(`Add ${adds} to Stock`, `Додај ${adds} во магацин`))
+    : upd === 1 ? T("Update it in Stock", "Ажурирај во магацин") : T(`Update ${upd} in Stock`, `Ажурирај ${upd} во магацин`);
+  el.innerHTML = `
+    <p class="muted" style="margin-top:-4px">${r.items.length} ${r.items.length === 1 ? T("article", "артикл") : T("articles", "артикли")}${
+      r.eur ? ` · ${T(`prices were in euros, turned into denars at ${EUR_MKD}`, `цените беа во евра, претворени во денари по ${EUR_MKD}`)}` : ""}</p>
+    ${r.other ? `<p class="muted" style="color:var(--danger)">${T(`The prices are in ${esc(r.cur)} — check them before saving.`, `Цените се во ${esc(r.cur)} — провери ги пред да зачуваш.`)}</p>` : ""}
+    ${own ? `<label>${T("Supplier", "Добавувач")}</label>${supplierSelect("pr-sup", r.supplier)}` : ""}
+    ${anyBuy && (own || r.sell === "markup") ? `<label>${T("The prices on the picture are", "Цените на сликата се")}</label>
+      <div class="chips" id="pr-vat">
+        <button class="chip ${r.vat === "with" ? "on" : ""}" onclick="prodVat('with')">${T("With ДДВ", "Со ДДВ")}</button>
+        <button class="chip ${r.vat === "without" ? "on" : ""}" onclick="prodVat('without')">${T("Without ДДВ — add 18%", "Без ДДВ — додај 18%")}</button></div>
+      ${vatNote ? `<p class="muted" style="font-size:12.5px;margin-top:2px">${vatNote}</p>` : ""}` : ""}
+    ${anyList ? `<label>${T("Sell at", "Продавај по")}</label>
+      <div class="chips" id="pr-sell">
+        <button class="chip ${r.sell === "markup" ? "on" : ""}" onclick="prodSellBy('markup')">${T(`+${DEFAULT_MARKUP_PCT}% on the buy price`, `+${DEFAULT_MARKUP_PCT}% на набавната`)}</button>
+        <button class="chip ${r.sell === "list" ? "on" : ""}" onclick="prodSellBy('list')">${T("The shop's own price", "Цената на продавницата")}</button></div>` : ""}
+    <div id="pr-items" style="margin-top:12px">${r.items.map((it, i) => {
+      const b = prodBuy(it), s = prodSell(it), m = it.match;
+      const tag = camTag({ name: it.name, code: it.model, supplier_code: it.sku, specs: it.specs.join(" "), cam_type: it.cam_type, mp: it.mp });
+      const was = m ? parseFloat(m.purchase_price) || 0 : 0;
+      const fate = it.done === "added" ? `<span class="hok">✓ ${T("Added to Stock", "Додадено во магацин")}</span>`
+        : it.done ? `<span class="hok">✓ ${T("Updated", "Ажурирано")}</span>`
+        : m ? `${T("Already in Stock", "Веќе е во магацин")}: <b>${esc(m.name)}</b>${own && b != null && Math.abs(b - was) >= 1
+            ? ` — ${T("buy price", "набавна")} ${fmt(was)} → ${fmt(b)}; ${T("the sell price stays", "продажната останува")} ${fmt(m.sell_price)}` : ""}`
+        : T("New article", "Нов артикл");
+      return `<div class="card"><div style="display:flex;gap:10px;align-items:flex-start">
+        ${it.done ? "" : `<button class="clbox ${it.on ? "on" : ""}" aria-label="${T("Include", "Вклучи")}" onclick="prodTick(${i})">${it.on ? "✓" : ""}</button>`}
+        ${it.photo && it.usePhoto ? `<img class="thumb" style="width:56px;height:56px;object-fit:contain;flex:none" src="${it.photo.thumb}" alt="">` : ""}
+        <div style="flex:1;min-width:0">
+          <b>${esc(it.name)}</b>
+          <div class="muted" style="font-size:12.5px">${[it.model, it.sku ? T("shop code", "шифра") + " " + it.sku : "", it.category, tag].filter(Boolean).map(esc).join(" · ")}</div>
+          <div class="mono" style="font-size:13px;margin-top:2px">${[own ? (b != null ? T("Buy", "Набавна") + " " + fmt(b) : T("no buy price read", "не е прочитана набавна")) : "",
+            !m && s ? T("Sell", "Продажна") + " " + fmt(s) : "", it.list ? T("shop", "продавница") + " " + fmt(it.list) : ""].filter(Boolean).join(" · ")}</div>
+          <div class="muted" style="font-size:12.5px;margin-top:2px">${fate}</div>
+        </div></div>
+        ${it.done ? "" : `<div class="${it.photo ? "grid2" : ""}" style="margin-top:8px">
+          <button class="btn sm ghost" style="width:100%;margin:0" onclick="openProductArticle(${i})">${T("Check and edit…", "Провери и измени…")}</button>
+          ${it.photo ? `<button class="btn sm ghost" style="width:100%;margin:0" onclick="prodPhoto(${i})">${it.usePhoto ? T("Without the photo", "Без фотографија") : T("Use the photo", "Со фотографија")}</button>` : ""}
+        </div>`}</div>`; }).join("")}</div>
+    ${pending.length ? `<button class="btn" id="pr-go" onclick="addProducts()">${go}</button>` : ""}
+    <button class="btn ghost" onclick="pickProductPhoto()">${T("Another picture", "Друга слика")}</button>`;
+  translatePage(el);
+}
+function prodVat(v) { prodRead.vat = v; prodRead.vatHow = null; renderProductRead(); }
+function prodSellBy(v) { prodRead.sell = v; renderProductRead(); }
+function prodTick(i) { const it = prodRead.items[i]; it.on = !it.on; renderProductRead(); }
+function prodPhoto(i) { const it = prodRead.items[i]; it.usePhoto = !it.usePhoto; renderProductRead(); }
+const prodSupplier = () => { const el = $("pr-sup"); return el ? el.value.trim() : prodRead.supplier; };
+// the row an article from the picture is saved as
+function productRow(it, supplier) {
+  const b = prodBuy(it);
+  return {
+    name: it.name, code: it.model || null, category: it.category, unit: it.unit, min_stock: 0,
+    ...(seesCosts() ? { purchase_price: b || 0 } : {}),
+    sell_price: prodSell(it) || 0, vat_rate: 18, supplier: supplier || null, supplier_code: it.sku || null,
+    specs: it.specs.length ? it.specs.map((x) => "-- " + x.replace(/^-+\s*/, "")).join("\n") : null,
+    ...(state.camCol ? { cam_type: it.cam_type, mp: it.mp } : {}),
+    image_thumb: it.photo && it.usePhoto ? it.photo.thumb : null,
+  };
+}
+// on one already in Stock only what the picture adds: the new buy price, and
+// the shop's code, supplier and photo where it had none
+function productUpdate(it, supplier) {
+  const a = it.match, b = prodBuy(it), set = {};
+  if (seesCosts() && b != null && Math.abs(b - (parseFloat(a.purchase_price) || 0)) >= 1) set.purchase_price = b;
+  if (it.sku && !a.supplier_code) set.supplier_code = it.sku;
+  if (supplier && !a.supplier) set.supplier = supplier;
+  if (it.photo && it.usePhoto && !a.image_thumb) set.image_thumb = it.photo.thumb;
+  return set;
+}
+async function addProducts() {
+  const r = prodRead;
+  if (!r) return;
+  if (prodNeedsVat() && (seesCosts() || r.sell === "markup"))
+    return toast(T("First say whether the prices include ДДВ", "Прво кажи дали цените се со ДДВ"));
+  const sup = prodSupplier();
+  const btn = $("pr-go"); if (btn) btn.disabled = true;
+  rememberVat(sup || r.supplier, r.vatHow === "said" ? null : r.vat);
+  try {
+    if (sup && seesCosts()) await ensureSupplier(sup);
+    for (const it of r.items.filter((x) => x.on && !x.done)) {
+      let id = it.match && it.match.id;
+      if (id) {
+        const set = productUpdate(it, sup);
+        if (Object.keys(set).length) await dbq(db.from("articles").update(set).eq("id", id), T("Article not updated", "Артиклот не е ажуриран"));
+        it.done = "updated";
+      } else {
+        id = (await dbq(db.from("articles").insert(productRow(it, sup)).select().single(), T("Article not saved", "Артиклот не е зачуван"))).id;
+        it.done = "added";
+      }
+      if (it.photo && it.usePhoto && (it.done === "added" || !it.match.image_thumb))
+        await dbq(db.from("article_images").upsert({ article_id: id, data: it.photo.full }, { onConflict: "article_id" }), T("Photo not saved", "Фотографијата не е зачувана"));
+    }
+  } catch { renderProductRead(); return; }
+  await refreshAll(["stock"]);
+  if (state.tab === "elaks" && state.elaksView === "inv") renderInv();
+  const added = r.items.filter((it) => it.done === "added").length, upd = r.items.filter((it) => it.done === "updated").length;
+  if (r.items.every((it) => it.done || !it.on)) closeSheet(); else renderProductRead();
+  toast([added ? T(`${added} added to Stock`, `${added} додадени во магацин`) : "", upd ? T(`${upd} updated`, `${upd} ажурирани`) : ""].filter(Boolean).join(" · "));
+}
+// one of them in the article sheet, to check everything before it is saved
+function openProductArticle(i) {
+  const r = prodRead, it = r && r.items[i];
+  if (!it) return;
+  if (prodNeedsVat() && it.buy != null && (seesCosts() || r.sell === "markup"))
+    return toast(T("First say whether the prices include ДДВ", "Прво кажи дали цените се со ДДВ"));
+  const sup = prodSupplier();
+  rememberVat(sup || r.supplier, r.vatHow === "said" ? null : r.vat);
+  r.supplier = sup;
+  const m = it.match;
+  const fields = m ? productUpdate(it, sup) : productRow(it, sup);
+  delete fields.image_thumb;
+  closeSheet();
+  setTimeout(() => openArticleSheet(m ? m.id : null, {
+    pic: i, fields, supplier_code: it.sku || null,
+    photo: it.photo && it.usePhoto && (!m || !m.image_thumb) ? it.photo : null,
+    sellTouched: !!m || r.sell === "list",
+  }), 240);
+}
+// back from the article sheet to what the picture showed
+function backToProductRead(doneAs) {
+  const r = prodRead;
+  if (!r) return;
+  if (doneAs && arPreset && r.items[arPreset.pic]) r.items[arPreset.pic].done = doneAs;
+  arPreset = null;
+  if (doneAs && r.items.every((it) => it.done || !it.on)) return;
+  setTimeout(() => {
+    openSheet(`<h2>${T("Found on the picture", "Пронајдено на сликата")}</h2><div id="pr-body"></div>`);
+    renderProductRead();
   }, 240);
 }
 function openPurchaseSheet(id) {
