@@ -1417,7 +1417,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261106-100000";
+const BUILD = "20261106-120000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -7146,8 +7146,8 @@ function openPermSheet(uid) {
       <label>${T("Tabs to show", "Табови за приказ")}</label>
       <div id="pm-tabs"></div>
       <p class="muted" style="font-size:12.5px">${T(
-        "Unticking only puts a tab away — you keep full access and can bring it back here whenever you want.",
-        "Отчекирањето само го склонува табот — пристапот останува и можеш да го вратиш кога сакаш.")}</p>
+        "Unticking puts a tab away, and its notifications stop with it. You keep full access and can bring it back here whenever you want.",
+        "Отчекирањето го склонува табот, а со него престануваат и неговите известувања. Пристапот останува и можеш да го вратиш кога сакаш.")}</p>
       ${uid === state.uid && state.aptListCol ? `<button class="tool" style="width:100%;margin-top:6px"
         onclick="savePermThen('${uid}','openMyApts')"><span>${T("Apartments you see", "Станови што ги гледаш")}${
           state.hideApts.size ? ` · ${state.hideApts.size} ${T("put away", "склонети")}` : ""}</span><span class="chev">›</span></button>` : ""}
