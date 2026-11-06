@@ -39,8 +39,15 @@ const pad = (n: number) => String(n).padStart(2, "0");
 // Apartments tab, and if limited, the flat must be one they manage or one they
 // have been given (apt_ids). The columns arrive with migration 0006 and read
 // as empty before it, which leaves things as they were.
+// A section's news goes to whoever has it in front of them: the owner unless
+// they have put its tab away (Settings → Team, user_roles.hide_tabs), anyone
+// else when they have been given it. A tab put away is one you are not
+// following, so its reminders stop with it, the way the app stops loading it.
+const sees = (r: any, tab: "elaks" | "apt" | "ins") => r.role === "owner"
+  ? !(r.hide_tabs ?? []).includes(tab)
+  : !!r[tab === "elaks" ? "see_elaks" : tab === "apt" ? "see_apts" : "see_insurance"];
 const aptVisible = (r: any, a: any) => r.role === "owner"
-  ? !(r.hide_apts ?? []).includes(a.id)
+  ? sees(r, "apt") && !(r.hide_apts ?? []).includes(a.id)
   : !!r.see_apts && (!r.apts_own_only || a.managed_by === r.user_id || (r.apt_ids ?? []).includes(a.id));
 // the owner hears about a task unless it belongs to a flat they have put away
 const ownerSees = (r: any, t: any) => r.role === "owner" && !(t.apartment_id && (r.hide_apts ?? []).includes(t.apartment_id));
@@ -242,7 +249,7 @@ Deno.serve(async (req) => {
         : fresh.slice(0, 4).map((x: any) => x.name).join(", ") + (fresh.length > 4 ? ` и уште ${fresh.length - 4}` : ""))
         + (allLow > fresh.length ? ` · вкупно на минимум: ${allLow}` : "");
       await sendToAll(fresh.length === 1 ? "Залиха на минимум" : `Залиха на минимум: ${fresh.length} артикли`, body,
-        "low-stock", (r) => r.role === "owner" || !!r.see_elaks, null, null, "order");
+        "low-stock", (r) => sees(r, "elaks"), null, null, "order");
       for (const x of fresh) await db.from("articles").update({ low_alerted_on: today }).eq("id", x.id);
     }
     for (const x of (stock ?? []).filter((a: any) => !isLow(a) && a.low_alerted_on))
@@ -283,14 +290,15 @@ Deno.serve(async (req) => {
     const open = openToday((all ?? []).filter((t: any) =>
       (t.context !== "personal" || !t.owner_uid || t.owner_uid === ownerId) && (!ownerRow || ownerSees(ownerRow, t))));
     const byCtx = (c: string) => open.filter((t) => t.context === c).length;
-    const lowCount = (stock ?? []).filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length;
+    const elaksOn = !ownerRow || sees(ownerRow, "elaks");
+    const lowCount = elaksOn ? (stock ?? []).filter((a) => a.min_stock > 0 && a.stock <= a.min_stock).length : 0;
     // the per-area counts already contain these, so name them rather than
     // sending a second message that repeats the same tasks
     const lateN = open.filter((t) => !t.recurrence && t.due_date && t.due_date < today).length;
     let body = lateN ? `${lateN} overdue · ` : "";
     body += `Work: ${byCtx("work")} · Elaks: ${byCtx("elaks")} · Personal: ${byCtx("personal")} · Apts: ${byCtx("apts")}`;
     if (lowCount) body += ` · Low stock: ${lowCount}`;
-    try {
+    if (elaksOn) try {
       const lateInv = (await unpaidInvoices()).filter((i: any) => i.due_date && i.due_date < today).length;
       if (lateInv) body += ` · Overdue invoices: ${lateInv}`;
     } catch (e) { console.error("digest invoices", e); }
@@ -340,7 +348,7 @@ Deno.serve(async (req) => {
       };
       const byCount = new Map<number, Set<string>>();
       for (const r of roles ?? []) {
-        if (r.role !== "owner" && !r.see_apts) continue;
+        if (!sees(r, "apt")) continue;
         const n = unpaidFor(r);
         if (n > 0) byCount.set(n, (byCount.get(n) ?? new Set()).add(r.user_id));
       }
@@ -400,7 +408,7 @@ Deno.serve(async (req) => {
       const days = Math.floor((Date.parse(today) - Date.parse(o.offer_date)) / 86400000);
       if (days >= 5) {
         await sendToAll("Follow up offer", `${o.number} · ${o.clients?.name ?? ""} — sent ${days} days ago`,
-          `off-${o.id}`, (r) => r.role === "owner" || !!r.see_elaks);
+          `off-${o.id}`, (r) => sees(r, "elaks"));
         await db.from("offers").update({ followup_sent: today }).eq("id", o.id);
       }
     }
@@ -504,7 +512,7 @@ Deno.serve(async (req) => {
             + (clashes ? `, ${clashes} clash with an existing booking` : "");
           if (added) {
             await sendToAll("New booking", `${added} from ${feed.source}${apt ? " \u00b7 " + apt.name : ""}`,
-              `ical-${feed.id}`, (r) => r.role === "owner" || !!r.see_apts);
+              `ical-${feed.id}`, (r) => sees(r, "apt"));
           }
         } catch (e) {
           status = "Failed: " + (e instanceof Error ? e.message : String(e));
@@ -570,7 +578,7 @@ Deno.serve(async (req) => {
           if (passed.length) {
             await sendToAll("Полиса " + wording(days),
               `${p.holder_name}${p.policy_no ? " · " + p.policy_no : ""} · ${p.end_date}`,
-              `policy-${p.id}`, (r) => r.role === "owner" || !!r.see_insurance);
+              `policy-${p.id}`, (r) => sees(r, "ins"));
             await db.from("policies").update({ reminded_days: done.concat(passed) }).eq("id", p.id);
           }
         }
@@ -583,7 +591,7 @@ Deno.serve(async (req) => {
           if (gpassed.length) {
             await sendToAll("Зелен картон " + wording(gdays),
               `${p.holder_name}${p.green_card_no ? " · " + p.green_card_no : ""} · ${p.green_card_end}`,
-              `gc-${p.id}`, (r) => r.role === "owner" || !!r.see_insurance);
+              `gc-${p.id}`, (r) => sees(r, "ins"));
             await db.from("policies").update({ gc_reminded_days: gdone.concat(gpassed) }).eq("id", p.id);
           }
         }
@@ -657,7 +665,7 @@ Deno.serve(async (req) => {
     const { data: mk } = await db.from("app_settings").select("value").eq("key", "money_told_on").maybeSingle();
     const told = String(mk?.value ?? "").replace(/"/g, "").slice(0, 10);
     if (minutesPast >= 0 && minutesPast <= DIGEST_WINDOW_MIN && told !== today) {
-      const owner = (r: any) => r.role === "owner";
+      const owner = (r: any) => r.role === "owner" && sees(r, "elaks");
       const unpaid = await unpaidInvoices();
       const cids = [...new Set(unpaid.map((i: any) => i.client_id).filter(Boolean))];
       const { data: cl } = cids.length ? await db.from("clients").select("id, name").in("id", cids) : { data: [] };
