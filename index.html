@@ -1417,7 +1417,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261106-120000";
+const BUILD = "20261106-140000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -4387,6 +4387,12 @@ function profitOf(items) {
 // A line sold by the metre is measured after the work, so until then it has
 // no length. 0 is a length too — none was needed — and settles it as 20 does.
 const metred = (it) => typeof it.consumed === "number" && isFinite(it.consumed);
+// "5", "5 и 6", "5, 6 и 8" — a list as it is said in Macedonian
+const andList = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " и " + xs[xs.length - 1];
+// the line under an offer naming what is charged by the metre used
+const metersFoot = (ns) => !ns.length ? ""
+  : ns.length === 1 ? `* Ставката ${ns[0]} се пресметува по потрошена должина по завршување на монтажата.`
+  : `* Ставките ${andList(ns)} се пресметуваат по потрошена должина по завршување на монтажата.`;
 const metersOpenOf = (items) => (items || []).filter((it) => it.unit === "m" && !metred(it));
 function itemTotal(it) {
   if (it.unit === "m") return metred(it) ? it.consumed * (it.price || 0) : null; // measured after install
@@ -4520,7 +4526,7 @@ function updateTotal() {
   const metersOpen = metersOpenOf(offerItems);
   const noteEl = $("of-note");
   if (noteEl && !noteEl.dataset.manual) {
-    noteEl.value = metersOpen.length ? "(не се вклучени " + metersOpen.map((m) => m.name.split(" ")[0].toLowerCase()).join(" и ") + ")" : "";
+    noteEl.value = metersOpen.length ? "(не се вклучени " + andList([...new Set(metersOpen.map((m) => m.name.split(" ")[0].toLowerCase()))]) + ")" : "";
   }
   return sum;
 }
@@ -4615,9 +4621,7 @@ async function offerSheetHtml(o) {
       for (const r of data || []) imgOf[r.article_id] = r.data;
     }
     const meters = (o.items || []).map((it, i) => ({ it, n: i + 1 })).filter((x) => x.it.unit === "m" && !metred(x.it));
-    const foot = meters.length
-      ? `* Ставките ${meters.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
-      : "";
+    const foot = metersFoot(meters.map((m) => m.n));
     const rows = (o.items || []).map((it, i) => `<tr>
       <td class="c">${i + 1}</td>
       <td class="c">${imgOf[it.article_id] ? `<img src="${imgOf[it.article_id]}" alt="">` : ""}</td>
@@ -5124,9 +5128,7 @@ async function generateDocx(o) {
         img_mark: photo[it.article_id] ? `«IMG:${i}»` : "",
       })),
       total_note: o.total_note || "", grand_total: fmt(o.grand_total),
-      footnote: metersOpen.length
-        ? `* Ставките ${metersOpen.map((m) => m.n).join(" и ")} се пресметуваат по потрошена должина по завршување на монтажата.`
-        : "",
+      footnote: metersFoot(metersOpen.map((m) => m.n)),
     });
     insertPictures(doc.getZip(), (o.items || []).map((it) => photo[it.article_id] || null));
     const blob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
