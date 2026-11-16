@@ -6,6 +6,7 @@
 <title>Centrala</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E3A5F">
+<script>try { var th = localStorage.getItem("centrala_theme"); if (th === "light" || th === "dark") document.documentElement.setAttribute("data-theme", th); } catch (e) {}</script>
 <link rel="apple-touch-icon" href="icon-192.png?v=3">
 <link rel="icon" type="image/png" href="icon-192.png?v=3">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -49,14 +50,16 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   border-radius:999px;background:rgba(255,255,255,.13)}
 .bar-acts svg{width:15px;height:15px}
 .bar-icons{display:flex;gap:4px;align-self:center;flex:none}
-.bar-acts:empty ~ .bar-icons{margin-left:8px}
+.bar-icons{margin-left:8px}
 .bar-icons button{position:relative;width:34px;height:34px;border-radius:999px;color:#fff;background:rgba(255,255,255,.13);
   display:flex;align-items:center;justify-content:center}
 .bar-icons svg{width:18px;height:18px}
 .bell-dot{position:absolute;top:6px;right:7px;width:8px;height:8px;border-radius:999px;background:var(--amber);display:none}
 .bell-dot.on{display:block}
 /* on a phone the screen's own shortcuts keep their icon and lose the word, so the icons fit */
-@media (max-width:520px){ .bar-acts .bl{display:none} .bar-acts button{padding:7px 9px} .topbar .date{display:none} }
+@media (max-width:520px){ .bar-acts .bl{display:none} .bar-acts button{padding:7px 9px} }
+.topbar .date{white-space:nowrap}
+@media (max-width:379px){ .topbar .date{display:none} }
 
 /* ---- tab bar ---- */
 .tabbar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--navy-deep);
@@ -111,6 +114,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);
           mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
 .subnav::-webkit-scrollbar{display:none}
+/* Elaks has nine sections: on a phone they take two rows rather than hide past the edge */
+.subnav.wrap{flex-wrap:wrap;overflow:visible;padding-right:var(--pad);-webkit-mask-image:none;mask-image:none;row-gap:0}
+.subnav.wrap button{padding:10px 9px 8px}
 .subnav button{flex:none;padding:13px 10px 11px;font-size:14px;font-weight:500;color:var(--muted);
   border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
 .subnav button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--amber)}
@@ -429,10 +435,18 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .bank-big{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.05;letter-spacing:-.01em}
 .bank-lbl{font-size:12.5px;color:var(--muted);margin-top:2px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.aptcard .shut-only{display:none}
+.aptcard.shut .shut-only{display:block}
+.aptcard.shut > :not(.aptcard-top){display:none}
+.aptcard.shut .bank-lbl{display:none}
+.aptcard.shut .bank-big{font-size:24px}
+.aptcard-top{cursor:pointer}
+.aptcard-chev{margin-left:6px;color:var(--muted)}
 .acct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin:14px 0 2px}
 .acct{background:var(--paper);border:1px solid var(--line);border-radius:11px;padding:8px 10px;cursor:pointer}
 .acct:active{opacity:.65}
-.acct span{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct{display:flex;flex-direction:column;justify-content:space-between}
+.acct span{display:block;font-size:11.5px;color:var(--muted);line-height:1.25;overflow-wrap:anywhere}
 .acct b{display:block;font-family:var(--mono);font-size:14.5px;margin-top:1px}
 .stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
 .stat-row.top{margin-top:0;padding-top:0;border-top:0}
@@ -564,13 +578,35 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .rp-tbl th.r,.rp-tbl td.r{text-align:right}
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
+/* dark as the phone is, unless light was chosen in Settings → Appearance; or dark chosen */
 @media (prefers-color-scheme: dark){
   /* Elaks's orange a shade lighter, to stand out on a dark card */
-  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C}
-  .btn.ghost{background:var(--card);color:var(--ink)}
-  .tick{border-color:#39424F}
+  :root:not([data-theme="light"]){--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
+    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;color-scheme:dark}
+  :root:not([data-theme="light"]) .btn.ghost{background:var(--card);color:var(--ink)}
+  :root:not([data-theme="light"]) .tick{border-color:#39424F}
 }
+:root[data-theme="dark"]{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
+  --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;color-scheme:dark}
+:root[data-theme="dark"] .btn.ghost{background:var(--card);color:var(--ink)}
+:root[data-theme="dark"] .tick{border-color:#39424F}
+:root[data-theme="light"]{color-scheme:light}
+
+/* ---- a tablet or a computer: the width used, not one stretched column ---- */
+@media (min-width:900px){
+  .view{max-width:1160px;margin:0 auto}
+  #home-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+  #home-body > *{margin-bottom:0}
+  #home-body > .push-warn{grid-column:1/-1}
+  /* a sheet is a panel in the middle, not a strip across the screen */
+  .sheet{max-width:760px;margin:0 auto}
+  /* lists of cards in two columns; headings, notes and buttons across both */
+  #inv-list,#off-list,#job-list,#invoice-list,#work-list,#pur-list,#cli-list,#sup-list,#doc-list,#pol-list{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:10px;align-items:start}
+  :is(#inv-list,#off-list,#job-list,#invoice-list,#work-list,#pur-list,#cli-list,#sup-list,#doc-list,#pol-list) > :not(.card){grid-column:1/-1}
+  #inv-list > .card:first-child,#work-list > .card.row.tapp:first-child{grid-column:1/-1}
+}
+@media (min-width:1300px){ #home-body{grid-template-columns:repeat(3,minmax(0,1fr))} }
 </style>
 </head>
 <body>
@@ -619,7 +655,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
 
   <!-- ELAKS BUSINESS -->
   <div class="view" id="v-elaks">
-    <div class="subnav" id="elaks-tabs" role="tablist"></div>
+    <div class="subnav wrap" id="elaks-tabs" role="tablist"></div>
     <div id="el-body-inv">
       <input class="search" id="inv-search" placeholder="Search name, code, supplier or specs…" oninput="renderInv()">
       <input type="file" accept="image/*" id="art-pic" style="display:none" onchange="readProductPhoto(this)">
@@ -849,7 +885,7 @@ const ICON = (() => {
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", camType: "all", camMp: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true },
-  elaksView: "work", workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
+  elaksView: (() => { try { return localStorage.getItem("centrala_elaks_view") || "work"; } catch { return "work"; } })(), workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: keptAptFilter(), showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), skipSet: new Set(), templates: [], settings: [], installs: [],
@@ -1807,6 +1843,17 @@ window.addEventListener("popstate", () => {
   }
   if (tabPushed) { tabPushed = false; tab("home", true); return; }
 });
+
+/* ---------- light, dark, or as the phone is (this phone) ---------- */
+const themeNow = () => { try { const t = localStorage.getItem("centrala_theme"); return t === "light" || t === "dark" ? t : "auto"; } catch { return "auto"; } };
+const themeLbl = (t) => t === "light" ? T("Light", "Светла") : t === "dark" ? T("Dark", "Темна") : T("As the phone", "Како телефонот");
+function setTheme(t) {
+  try { if (t === "auto") localStorage.removeItem("centrala_theme"); else localStorage.setItem("centrala_theme", t); } catch { /* this time only */ }
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  document.querySelectorAll("#theme-chips .chip").forEach((b, i) => b.classList.toggle("on", ["auto", "light", "dark"][i] === t));
+  if (state.tab === "set") renderSettings();
+}
 
 /* ---------- what this phone is told, and when ----------
    Each kind can be turned off on this phone, and quiet hours set: then
@@ -4501,6 +4548,7 @@ const ELAKS_SECTIONS = () => [["work", T("Work", "Работа")], ["off", T("Of
   ["doc", T("Documents", "Документи")]].filter(([v]) => seesCosts() || (v !== "pur" && v !== "sup"));
 function renderElaks() {
   if (!ELAKS_SECTIONS().some(([v]) => v === state.elaksView)) state.elaksView = "work";
+  try { localStorage.setItem("centrala_elaks_view", state.elaksView); } catch { /* opens on Work next time */ }
   const bar = $("elaks-tabs");
   // replacing the buttons resets the strip to the start; keep where it was
   const kept = bar.scrollLeft;
@@ -7811,6 +7859,7 @@ function renderSettings() {
 
   html += '<div class="setgrp">App</div>'
     + row("&#127760;", "Language / Јазик", langMk() ? "Македонски" : "English", "openSetSheet('lang')")
+    + row("&#127763;", T("Appearance", "Изглед"), themeLbl(themeNow()), "openSetSheet('theme')")
     + row("&#8505;", "About Centrala", T("Version ", "Верзија ") + String(BUILD).slice(0, 8), "openSetSheet('about')")
     + `<div class="setrow" role="button" tabindex="0" onclick="logout()" style="border-color:var(--danger)">
         <span class="ico" style="background:var(--danger-bg)">&#9211;</span>
@@ -7923,6 +7972,14 @@ function openSetSheet(kind) {
       <button class="btn" onclick="saveAiKey()">${on ? "Replace key" : "Save key"}</button>
       ${on ? '<button class="btn danger" onclick="removeAiKey()">Remove key</button>' : ""}
       <p class="muted" style="font-size:12.5px">Create one at console.anthropic.com → API keys. Reading a note costs a fraction of a denar; you are billed by Anthropic, not through Centrala.</p>`);
+  } else if (kind === "theme") {
+    openSheet(`<h2>${T("Appearance", "Изглед")}</h2>
+      <div class="chips" id="theme-chips">
+        <button class="chip ${themeNow() === "auto" ? "on" : ""}" onclick="setTheme('auto')">${themeLbl("auto")}</button>
+        <button class="chip ${themeNow() === "light" ? "on" : ""}" onclick="setTheme('light')">${themeLbl("light")}</button>
+        <button class="chip ${themeNow() === "dark" ? "on" : ""}" onclick="setTheme('dark')">${themeLbl("dark")}</button>
+      </div>
+      <p class="muted" style="font-size:12.5px">${T("As the phone: light by day, dark when the phone is set to dark.", "Како телефонот: светла или темна, според поставката на телефонот.")}</p>`);
   } else if (kind === "lang") {
     openSheet(`<h2>Language / Јазик</h2>
       <div class="chips">
@@ -8437,6 +8494,13 @@ function keepAptFilter(v) {
 }
 function setAptFilter(v) { keepAptFilter(v); renderApt(); }
 
+// The money card on top of Apartments: one line, opened by a tap — and it
+// stays the way it was left on this phone.
+const aptCardOpen = () => { try { return localStorage.getItem("centrala_aptcard") === "open"; } catch { return false; } };
+function aptCardToggle() {
+  try { localStorage.setItem("centrala_aptcard", aptCardOpen() ? "shut" : "open"); } catch { /* this time only */ }
+  renderApt();
+}
 function renderApt() {
   // always one flat: the one chosen before, else the first — also when the
   // one chosen before has since been put away or taken off
@@ -8487,10 +8551,13 @@ function renderApt() {
   const accts = flat && aptsOwnOnly() ? state.accounts.filter((a) => Math.round(bal[a.id] || 0) !== 0) : state.accounts;
   const who = one && one.managed_by && one.managed_by !== state.uid ? personName(one.managed_by) : "";
   const arg = flat ? `'${flat}'` : "";
-  $("apt-bank").innerHTML = `<div class="card">
-    <div class="row" style="justify-content:space-between;align-items:flex-start">
+  const shut = !aptCardOpen();
+  $("apt-bank").innerHTML = `<div class="card aptcard${shut ? " shut" : ""}">
+    <div class="row aptcard-top" role="button" tabindex="0" onclick="aptCardToggle()" style="justify-content:space-between;align-items:flex-start">
       <div>
         <div class="bank-big">${fmt(total)} <span style="font-size:16px">ден.</span></div>
+        <div class="shut-only muted" style="font-size:13px">${T("To collect", "За наплата")} <b class="mono" style="color:${soon ? "var(--danger)" : "inherit"}">${fmt(soon)}</b>${
+          noPrice.length ? ` · <span style="color:var(--amber)">${noPrice.length} ${T("without a price", "без цена")}</span>` : ""}</div>
         <div class="bank-lbl">${flat
           // not money in hand: what the accounts really hold is only known for all of them together
           ? T("received from this apartment, less its costs", "примено од овој стан, минус трошоците")
@@ -8499,7 +8566,7 @@ function renderApt() {
       </div>
       <span class="muted nw">${flat
         ? (occ.has(flat) ? T("occupied tonight", "зафатен вечерва") : T("free tonight", "слободен вечерва"))
-        : `${occ.size}/${state.apartments.length} ${T("tonight", "вечерва")}`}</span>
+        : `${occ.size}/${state.apartments.length} ${T("tonight", "вечерва")}`} <span class="aptcard-chev">${shut ? "▾" : "▴"}</span></span>
     </div>
 
     ${accts.length ? `<div class="acct-grid">
@@ -10751,6 +10818,22 @@ function renderHome() {
       ${rentLateN ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();homeAptGo('rent')"><span>${T("Rent", "Кирија")} · ${monthName(curM)}</span>
         <b class="hflag">${rentLateN} ${T("late", "доцни")}</b></div>` : ""}
       <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='apartments';tab('apt')"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
+    </div>`;
+  }
+  if (state.perm.ins && (state.policies || []).length) {
+    const live = state.policies;
+    const ending = live.filter((p) => { const d = polDaysLeft(p); return d !== null && d >= 0 && d <= 30; });
+    const owe = live.filter((p) => !polSettled(p)), oweSum = sumBy(owe, polBalance);
+    const remit = sumBy(live.filter((p) => !polRemitted(p)), policyDue);
+    html += `<div class="hcard" role="button" tabindex="0" onclick="tab('ins')">
+      <h3>${T("Insurance", "Осигурување")}</h3>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.insView='policies';state.polFilter='expiring';tab('ins')">
+        <span>${T("Ending in 30 days", "Истекуваат за 30 дена")}</span><b class="${ending.length ? "hflag" : "hok"}" style="${ending.length ? "color:var(--amber)" : ""}">${ending.length}</b></div>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.insView='policies';state.polFilter='open';tab('ins')">
+        <span>${T("Clients still owe", "Клиентите должат")}</span><b class="${oweSum ? "hflag" : "hok"}">${fmt(oweSum)} ден.</b></div>
+      ${owe.length ? `<div class="hnote">${owe.length} ${T(owe.length === 1 ? "policy" : "policies", owe.length === 1 ? "полиса" : "полиси")}</div>` : ""}
+      ${remit ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.insView='statements';tab('ins')">
+        <span>${T("Premiums to settle", "Премии за порамнување")}</span><b>${fmt(remit)} ден.</b></div>` : ""}
     </div>`;
   }
   $("home-body").innerHTML = html;
