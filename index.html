@@ -619,6 +619,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
   <label>Email</label><input id="lg-email" type="email" autocomplete="username">
   <label>Password</label><input id="lg-pass" type="password" autocomplete="current-password">
   <button class="btn" onclick="login()">Sign in</button>
+  <button class="btn ghost" id="lg-forgot" onclick="forgotPassword()">Forgot password?</button>
   <p id="lg-err" class="muted" style="color:var(--danger);margin-top:10px"></p>
 </div>
 
@@ -1146,6 +1147,41 @@ async function boot() {
   if (keptWho() && (offlineNow() || netFailed(error))) return startApp(null);
   $("login").style.display = "block";
 }
+// Forgot the password: a link to set a new one goes to the e-mail. The link
+// opens the app signed in, and the app asks for the new password at once.
+// (Supabase → Authentication → URL Configuration must list the app's address.)
+let recovering = /type=recovery/.test(location.hash);
+if (db.auth.onAuthStateChange) db.auth.onAuthStateChange((ev) => {
+  if (ev === "PASSWORD_RECOVERY" && !recovering) { recovering = true; setTimeout(askNewPassword, 800); }
+});
+async function forgotPassword() {
+  const email = $("lg-email").value.trim(), out = $("lg-err");
+  if (!email) { out.style.color = "var(--danger)"; out.textContent = T("Type your e-mail above first.", "Прво внеси ја е-поштата погоре."); return; }
+  const { error } = await db.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  out.style.color = error ? "var(--danger)" : "var(--personal)";
+  out.textContent = error ? T("Could not send it — ", "Не може да се испрати — ") + plainError(error)
+    : T("If there is an account for that e-mail, a link to set a new password is on its way. Open it on this phone.",
+        "Ако постои сметка со таа е-пошта, стигнува врска за нова лозинка. Отвори ја на овој телефон.");
+}
+function askNewPassword() {
+  openSheet(`<h2>${T("Set a new password", "Постави нова лозинка")}</h2>
+    <p class="muted" style="margin-top:-4px">${T("You came from the e-mail link. Choose the password you will sign in with from now on.", "Дојде од врската во е-поштата. Избери ја лозинката со која ќе се најавуваш од сега.")}</p>
+    <label>${T("New password", "Нова лозинка")}</label><input id="np-1" type="password" autocomplete="new-password">
+    <label>${T("Once more", "Уште еднаш")}</label><input id="np-2" type="password" autocomplete="new-password">
+    <p class="muted" id="np-err" style="color:var(--danger)"></p>
+    <button class="btn" onclick="saveNewPassword()">${T("Save the password", "Зачувај ја лозинката")}</button>`);
+}
+async function saveNewPassword() {
+  const a = $("np-1").value, b = $("np-2").value, err = $("np-err");
+  if (a.length < 8) { err.textContent = T("At least 8 characters.", "Барем 8 знаци."); return; }
+  if (a !== b) { err.textContent = T("The two are not the same.", "Двете не се исти."); return; }
+  const { error } = await db.auth.updateUser({ password: a });
+  if (error) { err.textContent = plainError(error); return; }
+  recovering = false;
+  try { history.replaceState({}, "", location.pathname); } catch { /* the address keeps the link */ }
+  closeSheet();
+  toast(T("Password changed", "Лозинката е сменета"));
+}
 async function login() {
   const { error } = await db.auth.signInWithPassword({ email: $("lg-email").value.trim(), password: $("lg-pass").value });
   if (error) { $("lg-err").textContent = "Wrong email or password."; return; }
@@ -1222,7 +1258,8 @@ async function startApp(signedIn) {
   handleNotificationIntent();
   handleShortcut();
   updateBell();
-  setTimeout(() => { if (!sheetOpen) whatsNew(); }, 1200);
+  if (recovering) setTimeout(askNewPassword, 500);
+  else setTimeout(() => { if (!sheetOpen) whatsNew(); }, 1200);
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
     if (e.data && e.data.centrala && e.data.note) { updateBell(); return; }
     if (e.data && e.data.centrala && e.data.jobId) openJobFromNotice(e.data.jobId);
@@ -1503,7 +1540,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261116-120000";
+const BUILD = "20261116-150000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -9218,6 +9255,26 @@ function shiftAptMonth(dir) {
 function billOf(aptId, type) {
   return state.bills.find((b) => b.apartment_id === aptId && (b.month || "").slice(0, 7) === state.aptMonth && b.type === type);
 }
+// what the same bill came to the month before — most are the same or close,
+// so it is offered rather than typed again
+function billLast(aptId, type) {
+  const prev = shiftYm(state.aptMonth, -1);
+  const b = state.bills.find((x) => x.apartment_id === aptId && (x.month || "").slice(0, 7) === prev && x.type === type);
+  return b && parseFloat(b.amount) > 0 ? parseFloat(b.amount) : 0;
+}
+// "Same as last month": every bill of this flat still empty this month takes last month's figure
+async function billsAsLast(aptId) {
+  const a = state.apartments.find((x) => x.id === aptId);
+  if (!a) return;
+  const rows = billTypesFor(a).map((tp) => ({ tp, b: billOf(aptId, tp), last: billLast(aptId, tp) }))
+    .filter((r) => r.last && !(r.b && parseFloat(r.b.amount) > 0))
+    .map((r) => ({ apartment_id: aptId, month: state.aptMonth + "-01", type: r.tp, amount: r.last, paid: r.b ? !!r.b.paid : false,
+      account_id: (r.b && r.b.account_id) || state.billAccount || accountFor({}), paid_on: r.b ? r.b.paid_on || null : null }));
+  if (!rows.length) return;
+  try { await dbq(db.from("bills").upsert(rows, { onConflict: "apartment_id,month,type" }), T("Bills not saved", "Сметките не се зачувани")); } catch { return; }
+  await refreshAll(["bills", "aptCash"]); renderApt();
+  toast(T(`${rows.length} filled in from last month — change any that differ`, `${rows.length} пополнети од минатиот месец — смени ги различните`));
+}
 const EXP_CATS = [["repair", "поправка"], ["furniture", "опрема"], ["supplies", "потрошни"],
                   ["cleaning", "чистење"], ["platform", "платформа"], ["other", "друго"]];
 const expLabel = (c) => { const f = EXP_CATS.find((x) => x[0] === c); return f ? T(f[0], f[1]) : c; };
@@ -9349,7 +9406,8 @@ function renderBills() {
         <span class="muted">${T("the tenant pays the bills", "закупецот ги плаќа сметките")}</span></div>`;
       continue;
     }
-    const rows = types.map((tp) => ({ tp, b: billOf(a.id, tp) }));
+    const rows = types.map((tp) => ({ tp, b: billOf(a.id, tp), last: billLast(a.id, tp) }));
+    const fromLast = rows.filter((r) => r.last && !(r.b && parseFloat(r.b.amount) > 0)).length;
     const total = sumBy(rows, (r) => r.b?.amount);
     const paidN = rows.filter((r) => r.b && r.b.paid).length;
     grand += total;
@@ -9361,14 +9419,17 @@ function renderBills() {
         ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${T(
         `The tenant pays these back with ${monthName(shiftYm(state.aptMonth, 1))}'s rent.`,
         `Закупецот ги враќа со киријата за ${monthName(shiftYm(state.aptMonth, 1))}.`)}</div>` : ""}
-      ${rows.map(({ tp, b }) => `
+      ${rows.map(({ tp, b, last }) => `
         <div class="row" style="margin-top:7px">
           <button class="clbox ${b && b.paid ? "on" : ""}" onclick="setBill('${a.id}','${tp}','paid',${!(b && b.paid)})">${b && b.paid ? "✓" : ""}</button>
           <span style="flex:1">${billLbl(tp)}</span>
-          <input class="mono" type="number" inputmode="decimal" value="${b ? b.amount : ""}" placeholder="0"
+          <input class="mono" type="number" inputmode="decimal" value="${b && parseFloat(b.amount) ? b.amount : ""}" placeholder="${last ? last : 0}"
             style="width:96px;text-align:right;padding:7px 8px"
             onchange="setBill('${a.id}','${tp}','amount',parseFloat(this.value)||0)">
         </div>`).join("")}
+      ${fromLast ? `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;margin-top:10px">
+        <span class="muted" style="font-size:12.5px">${T("Grey figures are last month's. Ticking one pays that.", "Сивите износи се од минатиот месец. Штиклирањето го плаќа тој износ.")}</span>
+        <button class="btn sm ghost" style="flex:none" onclick="billsAsLast('${a.id}')">${T("Same as last month", "Исто како минатиот")}</button></div>` : ""}
       ${shown.length > 1 ? `<div class="row" style="justify-content:space-between;margin-top:8px">
         <span class="muted">${T("Total", "Вкупно")}</span>
         <b class="mono">${fmt(total)} ден.</b></div>` : ""}
@@ -9388,6 +9449,7 @@ async function setBill(aptId, type, field, value) {
   };
   row[field] = value;
   if (field === "paid") row.paid_on = value ? todayStr() : null;
+  if (field === "paid" && value && !(parseFloat(row.amount) > 0)) row.amount = billLast(aptId, type);
   try { await dbq(db.from("bills").upsert(row, { onConflict: "apartment_id,month,type" }), "Bill not saved"); } catch { return; }
   await refreshAll(["bills", "aptCash"]); renderApt();
 }
@@ -11767,6 +11829,7 @@ function renderPurchases() {
    not in the list simply stays in English.
 ============================================================ */
 const MK = {
+  "Forgot password?": "Ја заборави лозинката?",
   "New guest": "Нов гостин", "Edit stay": "Измени престој", "New article": "Нов артикл",
   "Search supplier or document…": "Барај добавувач или документ…", "Search clients…": "Барај клиенти…",
   "Search number, client or note…": "Барај број, клиент или белешка…", "Search name, policy number or phone…": "Барај име, број на полиса или телефон…",
