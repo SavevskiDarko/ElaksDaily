@@ -48,6 +48,15 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .bar-acts button{display:flex;align-items:center;gap:5px;color:#fff;font-size:13px;font-weight:600;padding:6px 11px;
   border-radius:999px;background:rgba(255,255,255,.13)}
 .bar-acts svg{width:15px;height:15px}
+.bar-icons{display:flex;gap:4px;align-self:center;flex:none}
+.bar-acts:empty ~ .bar-icons{margin-left:8px}
+.bar-icons button{position:relative;width:34px;height:34px;border-radius:999px;color:#fff;background:rgba(255,255,255,.13);
+  display:flex;align-items:center;justify-content:center}
+.bar-icons svg{width:18px;height:18px}
+.bell-dot{position:absolute;top:6px;right:7px;width:8px;height:8px;border-radius:999px;background:var(--amber);display:none}
+.bell-dot.on{display:block}
+/* on a phone the screen's own shortcuts keep their icon and lose the word, so the icons fit */
+@media (max-width:520px){ .bar-acts .bl{display:none} .bar-acts button{padding:7px 9px} .topbar .date{display:none} }
 
 /* ---- tab bar ---- */
 .tabbar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--navy-deep);
@@ -334,6 +343,8 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .hrow.hgo{border-radius:8px;margin:0 -6px;padding-left:6px;padding-right:6px;flex-wrap:nowrap}
 .hrow.hgo::after{content:"›";color:var(--muted);margin-left:8px;flex:none}
 .hrow.hgo:active{background:var(--line)}
+.card.unread{border-left:3px solid var(--amber)}
+ul.whatsnew{margin:6px 0 14px 18px;display:flex;flex-direction:column;gap:8px;font-size:14.5px;line-height:1.4}
 .pick{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px}
 .pickrow{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;padding:11px 12px;
   border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-size:14px}
@@ -578,7 +589,9 @@ a.btn{text-decoration:none;display:block;text-align:center}
 <!-- ================= APP ================= -->
 <div id="app" style="display:none">
   <div class="app-head">
-  <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="bar-acts" id="bar-acts"></span><span class="date" id="bar-date"></span></div>
+  <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="bar-acts" id="bar-acts"></span><span class="date" id="bar-date"></span><span class="bar-icons">
+    <button id="bar-search" onclick="openSearch()" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+    <button id="bar-bell" onclick="openNotifList()" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg><span class="bell-dot" id="bell-dot"></span></button></span></div>
   <div id="loadbar" style="display:none"><span id="loadmsg">Could not load data.</span><button onclick="retryLoad()">Retry</button></div>
   </div>
 
@@ -736,6 +749,8 @@ const CONFIG = {
 const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const CTX = { work: "Work", elaks: "Elaks", personal: "Personal", apts: "Apts" };
+// the same, said in the language the app is in
+const ctxLbl = (c) => langMk() ? ({ work: "Работа", elaks: "Елакс", personal: "Лично", apts: "Станови" })[c] || CTX[c] : CTX[c];
 // Elaks is ДДВ registered: 18% standard, 5% preferential. Every price in the app
 // is GROSS (ДДВ included), so the base and the tax are always derived, never stored.
 const VAT_RATES = [18, 5];
@@ -745,6 +760,8 @@ const myCtx = () => state.perm.owner ? ["work", "elaks", "personal", "apts"] : (
 // the one context that is private, so it is the safer thing to land on.
 const defaultCtx = () => myCtx().includes("personal") ? "personal" : (myCtx()[0] || "personal");
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
+// a category as it reads on screen; what is stored stays as above
+const catLbl = (c) => langMk() ? ({ Alarm: "Аларм", Access: "Пристап", Cables: "Кабли", Other: "Друго" })[c] || c : c;
 // read each time, so they come out in the language chosen
 const STATUS = {
   get draft() { return T("Draft", "Нацрт"); }, get sent() { return T("Sent", "Испратена"); },
@@ -1168,7 +1185,10 @@ async function startApp(signedIn) {
   keepPushAlive();
   handleNotificationIntent();
   handleShortcut();
+  updateBell();
+  setTimeout(() => { if (!sheetOpen) whatsNew(); }, 1200);
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data && e.data.centrala && e.data.note) { updateBell(); return; }
     if (e.data && e.data.centrala && e.data.jobId) openJobFromNotice(e.data.jobId);
     else if (e.data && e.data.centrala && e.data.go) runGo(e.data.go);
     else if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
@@ -1447,7 +1467,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261106-140000";
+const BUILD = "20261116-120000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1788,6 +1808,258 @@ window.addEventListener("popstate", () => {
   if (tabPushed) { tabPushed = false; tab("home", true); return; }
 });
 
+/* ---------- what this phone is told, and when ----------
+   Each kind can be turned off on this phone, and quiet hours set: then
+   notifications still arrive, without a sound. Kept with this phone's
+   subscription (push_subscriptions.prefs, migration 0011); the server reads it. */
+const PUSH_KINDS = () => [
+  ["tasks", T("Tasks", "Задачи"), T("reminders, tasks given to you, done by others", "потсетници, задачи за тебе, завршени од други"), true],
+  ["digest", T("Morning summary", "Утрински преглед"), T("what is on today", "што е денес"), state.perm.owner],
+  ["jobs", T("Jobs", "Работи"), T("given to you, tomorrow's", "дадени тебе, утрешните"), state.perm.elaks],
+  ["stock", T("Low stock", "Мала залиха"), "", state.perm.elaks],
+  ["money", T("Money owed", "Долгови"), T("unpaid invoices, supplier bills, offers to follow up", "неплатени фактури, сметки кон добавувачи, понуди за следење"), state.perm.elaks && seesCosts()],
+  ["bookings", T("New bookings", "Нови резервации"), "", state.perm.apts],
+  ["bills", T("Apartment bills", "Сметки за станови"), "", state.perm.apts],
+  ["rent", T("Rent late", "Кирија доцни"), "", state.perm.apts],
+  ["insurance", T("Insurance", "Осигурување"), T("policies and green cards ending", "полиси и зелени картони што истекуваат"), state.perm.ins],
+].filter((k) => k[3]);
+let pushPrefs = null, pushEp = null;
+// this phone's subscription, if notifications are on here
+async function myPushEndpoint() {
+  if (!navigator.serviceWorker || !("PushManager" in window)) return null;
+  try {
+    const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_, no) => setTimeout(() => no(new Error("no sw")), 3000))]);
+    const sub = await reg.pushManager.getSubscription();
+    return sub ? sub.endpoint : null;
+  } catch { return null; }
+}
+async function loadPushPrefs() {
+  const el = $("push-kinds");
+  if (!el) return;
+  pushEp = await myPushEndpoint();
+  if (!$("push-kinds")) return;
+  if (!pushEp) { el.innerHTML = `<p class="muted">${T("Turn notifications on above first; then choose here what this phone gets.", "Прво вклучи ги известувањата погоре; потоа избери тука што добива овој телефон.")}</p>`; return; }
+  const r = await db.from("push_subscriptions").select("prefs").eq("endpoint", pushEp).maybeSingle();
+  if (r.error && (r.error.code === "42703" || /prefs/.test(r.error.message || ""))) {
+    el.innerHTML = `<p class="muted">${T("Choosing needs the database update (0011).", "За избирање е потребно ажурирање на базата (0011).")}</p>`; return;
+  }
+  pushPrefs = (r.data && r.data.prefs) || {};
+  renderPushPrefs();
+}
+function renderPushPrefs() {
+  const el = $("push-kinds");
+  if (!el || !pushPrefs) return;
+  const off = new Set(pushPrefs.off || []), q = pushPrefs.quiet || {};
+  el.innerHTML = PUSH_KINDS().map(([k, l, sub]) => `<div class="row" style="gap:10px;margin:8px 0">
+      <button class="clbox ${off.has(k) ? "" : "on"}" data-k="${k}" onclick="pushKindToggle('${k}')">${off.has(k) ? "" : "\u2713"}</button>
+      <span style="flex:1"><b>${l}</b>${sub ? `<span class="muted" style="display:block;font-size:12.5px">${sub}</span>` : ""}</span></div>`).join("")
+    + `<label>${T("Quiet hours — they arrive without a sound", "Тивки часови — стигнуваат без звук")}</label>
+      <div class="grid2"><div><input id="pq-from" type="time" value="${esc(q.from || "")}"></div><div><input id="pq-to" type="time" value="${esc(q.to || "")}"></div></div>
+      <p class="muted" style="font-size:12.5px">${T("Empty: always with a sound. For example 22:00 to 07:00.", "Празно: секогаш со звук. На пример од 22:00 до 07:00.")}</p>
+      <button class="btn" onclick="savePushPrefs()">${T("Save for this phone", "Зачувај за овој телефон")}</button>`;
+}
+function pushKindToggle(k) {
+  const off = new Set(pushPrefs.off || []);
+  if (off.has(k)) off.delete(k); else off.add(k);
+  pushPrefs.off = [...off];
+  sheetDirty = true;
+  renderPushPrefs();
+}
+async function savePushPrefs() {
+  const from = $("pq-from").value, to = $("pq-to").value;
+  const prefs = { off: pushPrefs.off || [], ...(from && to && from !== to ? { quiet: { from, to } } : {}) };
+  try { await dbq(db.from("push_subscriptions").update({ prefs }).eq("endpoint", pushEp), T("Not saved", "Не е зачувано")); } catch { return; }
+  pushPrefs = prefs; sheetDirty = false;
+  toast(T("Saved for this phone", "Зачувано за овој телефон"));
+}
+
+/* ---------- the notifications this phone has had ----------
+   The service worker keeps each one (the last 50); the bell at the top lists
+   them, and lights up while some are unread. */
+function notesDb() {
+  return new Promise((ok, no) => {
+    const r = indexedDB.open("centrala-notes", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("notes", { keyPath: "at" });
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => no(r.error);
+  });
+}
+async function readNotes() {
+  try {
+    const d = await notesDb();
+    const all = await new Promise((ok) => { const r = d.transaction("notes").objectStore("notes").getAll(); r.onsuccess = () => ok(r.result || []); r.onerror = () => ok([]); });
+    d.close();
+    return all.sort((a, b) => b.at - a.at);
+  } catch { return []; }
+}
+async function markNotesRead() {
+  try {
+    const d = await notesDb();
+    await new Promise((ok) => {
+      const tx = d.transaction("notes", "readwrite"), st = tx.objectStore("notes"), r = st.getAll();
+      r.onsuccess = () => { for (const n of r.result || []) if (!n.read) st.put({ ...n, read: true }); };
+      tx.oncomplete = ok; tx.onerror = ok;
+    });
+    d.close();
+  } catch { /* nothing kept */ }
+}
+async function updateBell() {
+  const n = (await readNotes()).filter((x) => !x.read).length;
+  const dot = $("bell-dot");
+  if (dot) dot.classList.toggle("on", n > 0);
+}
+const agoText = (ms) => {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return T("just now", "сега");
+  if (m < 60) return `${m} ${T("min ago", "мин.")}`;
+  if (m < 60 * 12) return `${Math.round(m / 60)} ${T("h ago", "ч.")}`;
+  const d = new Date(ms);
+  return `${dmy(d.toLocaleDateString("sv-SE"))} ${d.toTimeString().slice(0, 5)}`;
+};
+async function openNotifList() {
+  const list = await readNotes();
+  openSheet(`<h2>${T("Notifications", "Известувања")}</h2>
+    <p class="muted" style="margin-top:-4px">${T("What this phone received — the last 50. Tap one to open it.", "Што стигнало на овој телефон — последните 50. Допри за да отвориш.")}</p>
+    ${list.length ? list.map((n) => `<div class="card row tapp${n.read ? "" : " unread"}" role="button" tabindex="0" onclick="noteGo(${n.at})" style="gap:10px;align-items:flex-start">
+        <div style="flex:1;min-width:0"><b>${esc(n.title)}</b><div class="muted" style="font-size:13px">${esc(n.body)}</div></div>
+        <span class="muted nw" style="font-size:12px">${agoText(n.at)}</span></div>`).join("")
+      : `<div class="empty">${state.pushOn === false ? T("Notifications are off on this phone.", "Известувањата се исклучени на овој телефон.") : T("Nothing yet.", "Сè уште ништо.")}</div>`}
+    <button class="btn ghost" onclick="closeSheet();setTimeout(() => openSetSheet('push'), 240)">${T("Choose what this phone gets", "Избери што добива овој телефон")}</button>`);
+  await markNotesRead();
+  updateBell();
+}
+async function noteGo(at) {
+  const n = (await readNotes()).find((x) => x.at === at);
+  closeSheet();
+  if (!n) return;
+  setTimeout(() => {
+    if (n.jobId) openJobFromNotice(n.jobId);
+    else if (n.go) runGo(n.go);
+    else if (n.taskId) runTaskIntent(n.taskId, "open");
+  }, 240);
+}
+
+/* ---------- what is new, once, after an update ---------- */
+const WHATS_NEW = [
+  { build: "20261116", en: [
+    "Search everything from the magnifier at the top: clients, guests, tenants, articles, offers, jobs, invoices, policies, tasks.",
+    "The bell at the top lists the notifications this phone received.",
+    "Settings → Notifications: choose which kinds this phone gets, and quiet hours without a sound.",
+    "A form you are typing in asks before it closes, and a new offer is kept until you save it.",
+    "Each row on Home opens what it names.",
+    "Bills show last month's amounts; deleting a payment, expense or booking now has Undo.",
+    "Light or dark: Settings → Appearance.",
+  ], mk: [
+    "Барај сè од лупата горе: клиенти, гости, закупци, артикли, понуди, работи, фактури, полиси, задачи.",
+    "Ѕвончето горе ги покажува известувањата што стигнале на овој телефон.",
+    "Поставки → Известувања: избери кои видови ги добива овој телефон и тивки часови без звук.",
+    "Формулар во кој пишуваш прашува пред да се затвори, а новата понуда се чува додека не ја зачуваш.",
+    "Секој ред на Дома го отвора она што го кажува.",
+    "Сметките ги покажуваат износите од минатиот месец; бришењето уплата, трошок или резервација има Врати.",
+    "Светла или темна: Поставки → Изглед.",
+  ] },
+];
+function whatsNew(all) {
+  let seen = null;
+  try { seen = localStorage.getItem("centrala_seen_build"); } catch { /* private mode */ }
+  // a phone from before this list sees its first entry once
+  const since = String(seen || "20261106").slice(0, 8);
+  const list = WHATS_NEW.filter((w) => all || w.build > since);
+  try { localStorage.setItem("centrala_seen_build", String(BUILD).slice(0, 8)); } catch { /* shown again next time */ }
+  if (!list.length) return;
+  openSheet(`<h2>${T("What's new", "Што е ново")}</h2>
+    ${list.map((w) => `<ul class="whatsnew">${(langMk() ? w.mk : w.en).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}
+    <button class="btn" onclick="closeSheet()">${T("Got it", "Во ред")}</button>`);
+}
+
+/* ---------- one search for everything ----------
+   From the magnifier at the top of every screen: a client, a guest, a tenant,
+   an article, an offer, a job, an invoice, a purchase, a supplier, a policy,
+   a document, a flat or a task — by name, phone, number, code or plate.
+   Cyrillic and Latin find each other: "petrov" finds Петров. Only what this
+   person can see is searched. */
+const foldText = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[а-џ]/g, (ch) => LAT[ch] ?? ch);
+function openSearch() {
+  openSheet(`<h2>${T("Search", "Пребарај")}</h2>
+    <input class="search" id="gs-q" autocomplete="off" enterkeyhint="search"
+      placeholder="${T("Name, phone, number, code, plate…", "Име, телефон, број, шифра, регистрација…")}" oninput="renderSearch()">
+    <div id="gs-res"><p class="muted">${T("Clients, guests, tenants, articles, offers, jobs, invoices, purchases, policies, documents, flats and tasks.",
+      "Клиенти, гости, закупци, артикли, понуди, работи, фактури, набавки, полиси, документи, станови и задачи.")}</p></div>`);
+  setTimeout(() => { const q = $("gs-q"); if (q) q.focus(); }, 60);
+}
+function searchGroups() {
+  const cn = (id) => (state.clients.find((c) => c.id === id) || {}).name || "";
+  const an = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+  const g = [];
+  const add = (label, list, hay, title, sub, go) => g.push({ label, list: list || [], hay, title, sub, go });
+  add(T("Tasks", "Задачи"), state.tasks.filter((t) => !t.done || t.recurrence), (t) => [t.title, t.notes],
+    (t) => t.title, (t) => [t.due_date ? dmy(t.due_date) : T("no date", "без датум"), t.due_time ? t.due_time.slice(0, 5) : ""].filter(Boolean).join(" "),
+    (t) => `tab('today');openTaskSheet('${t.id}')`);
+  if (state.perm.elaks) {
+    add(T("Clients", "Клиенти"), state.clients, (c) => [c.name, c.phone, c.email, c.address, c.contact], (c) => c.name,
+      (c) => [c.phone, c.address].filter(Boolean).join(" · "), (c) => `state.elaksView='cli';tab('elaks');openClientCard('${c.id}')`);
+    add(T("Offers", "Понуди"), state.offers, (o) => [o.number, o.title, cn(o.client_id), o.clients && o.clients.name], (o) => o.title,
+      (o) => [o.number, cn(o.client_id) || (o.clients && o.clients.name), STATUS[o.status]].filter(Boolean).join(" · "), (o) => `state.elaksView='off';tab('elaks');openOfferSheet('${o.id}')`);
+    add(T("Jobs", "Работи"), state.jobs, (j) => [j.title, cn(j.client_id)], (j) => j.title,
+      (j) => [cn(j.client_id), j.scheduled_on ? dmy(j.scheduled_on) : ""].filter(Boolean).join(" · "), (j) => `state.elaksView='job';tab('elaks');openJobSheet('${j.id}')`);
+    add(T("Invoices", "Фактури"), state.invoices, (i) => [i.number, cn(i.client_id)], (i) => T("Invoice ", "Фактура ") + i.number,
+      (i) => [cn(i.client_id), fmt(i.total) + " ден."].filter(Boolean).join(" · "), (i) => `state.elaksView='invoice';tab('elaks');openInvoiceSheet('${i.id}')`);
+    add(T("Articles", "Артикли"), state.stock.filter((a) => a.active !== false), (a) => [a.name, a.code, a.supplier_code, a.supplier, camTag(a)], (a) => a.name,
+      (a) => [a.code, `${fmt(a.stock)} ${unitLbl(a.unit)}`].filter(Boolean).join(" · "), (a) => `state.elaksView='inv';tab('elaks');openArticleDetail('${a.id}')`);
+    if (seesCosts()) {
+      add(T("Purchases", "Набавки"), state.purchases, (p) => [p.supplier, p.doc_no], (p) => p.supplier || T("Purchase", "Набавка"),
+        (p) => [p.doc_no, p.doc_date ? dmy(p.doc_date) : "", fmt(p.total) + " ден."].filter(Boolean).join(" · "), (p) => `state.elaksView='pur';tab('elaks');openPurchaseSheet('${p.id}')`);
+      add(T("Suppliers", "Добавувачи"), state.suppliers, (x) => [x.name, x.phone], (x) => x.name, (x) => x.phone || "",
+        (x) => `state.elaksView='sup';tab('elaks');openSupplierSheet('${x.id}')`);
+    }
+    add(T("Documents", "Документи"), state.docs, (d) => [d.kind, d.doc_no, d.supplier, cn(d.client_id), d.note], (d) => [d.kind, d.doc_no].filter(Boolean).join(" "),
+      (d) => [d.supplier || cn(d.client_id), d.doc_date ? dmy(d.doc_date) : ""].filter(Boolean).join(" · "), (d) => `state.elaksView='doc';tab('elaks');openDocSheet('${d.id}')`);
+  }
+  if (state.perm.apts) {
+    add(T("Apartments", "Станови"), state.apartments, (a) => [a.name, a.address], (a) => a.name, (a) => a.address || "",
+      (a) => `keepAptFilter('${a.id}');state.aptView='stays';tab('apt')`);
+    add(T("Guests", "Гости"), state.stays, (x) => [x.guest_name, x.guest_phone, x.source], (x) => x.guest_name || T("Guest", "Гостин"),
+      (x) => [an(x.apartment_id), `${dmy(x.check_in)} → ${dmy(x.check_out)}`].filter(Boolean).join(" · "),
+      (x) => `keepAptFilter('${x.apartment_id}');state.aptView='stays';tab('apt');openStaySheet('${x.id}')`);
+    add(T("Tenants", "Закупци"), state.leases, (l) => [l.tenant_name, l.tenant_phone], (l) => l.tenant_name,
+      (l) => [an(l.apartment_id), l.tenant_phone].filter(Boolean).join(" · "), (l) => `keepAptFilter('${l.apartment_id}');state.aptView='rent';tab('apt');openLeaseSheet('${l.id}')`);
+  }
+  if (state.perm.ins) {
+    add(T("Policies", "Полиси"), state.policies, (x) => [x.holder_name, x.policy_no, x.plate, x.phone, x.kind, x.green_card_no], (x) => x.holder_name,
+      (x) => [x.kind, x.plate, x.policy_no, x.end_date ? dmy(x.end_date) : ""].filter(Boolean).join(" · "), (x) => `tab('ins');openPolicySheet('${x.id}')`);
+  }
+  return g;
+}
+function renderSearch() {
+  const el = $("gs-res");
+  if (!el) return;
+  const raw = $("gs-q").value.trim();
+  const words = foldText(raw).split(/\s+/).filter(Boolean);
+  const digits = raw.replace(/\D/g, "");
+  if (!words.length || raw.length < 2) { el.innerHTML = `<p class="muted">${T("Type at least two letters.", "Внеси барем две букви.")}</p>`; return; }
+  const html = searchGroups().map((gr) => {
+    const hits = gr.list.filter((x) => {
+      const parts = gr.hay(x).filter(Boolean).map(String);
+      const hay = foldText(parts.join(" "));
+      if (words.every((w) => hay.includes(w))) return true;
+      // a phone typed with or without its spaces and leading zero
+      return digits.length >= 4 && parts.some((p) => p.replace(/\D/g, "").includes(digits));
+    });
+    if (!hits.length) return "";
+    return `<div class="sec">${esc(gr.label)} · ${hits.length}</div>` + hits.slice(0, 6).map((x) => `
+      <div class="card row tapp" role="button" tabindex="0" onclick="searchGo(${JSON.stringify(gr.go(x)).replace(/"/g, "&quot;")})">
+        <div style="flex:1;min-width:0"><b>${esc(gr.title(x) || "—")}</b><div class="muted" style="font-size:12.5px">${esc(gr.sub(x) || "")}</div></div>
+        <span class="chev">›</span></div>`).join("") + (hits.length > 6 ? `<p class="muted" style="font-size:12.5px;margin:-2px 0 8px">${T(`and ${hits.length - 6} more — type a little more`, `и уште ${hits.length - 6} — внеси уште малку`)}</p>` : "");
+  }).join("");
+  el.innerHTML = html || `<p class="muted">${T("Nothing found for", "Ништо не е најдено за")} “${esc(raw)}”.</p>`;
+}
+// the search closes, then the place opens, as if it had been tapped there
+function searchGo(js) {
+  closeSheet();
+  setTimeout(() => { try { (new Function(js))(); } catch (e) { console.error("search open", e); } }, 240);
+}
+
 /* ============================================================
    TASKS
 ============================================================ */
@@ -2119,8 +2391,8 @@ function renderTaskBar() {
   const el = $("bar-acts");
   if (!el || state.tab !== "today") return;
   el.innerHTML = (state.tasks.some((t) => isHabit(t) && taskInScope(t, state.ctxFilter))
-    ? `<button onclick="openHabits()" aria-label="${T("Habits", "Навики")}">${ICON.flame}${T("Habits", "Навики")}</button>` : "")
-    + `<button onclick="openHistory()" aria-label="${T("Completed", "Завршени")}">${ICON.check}${T("Completed", "Завршени")}</button>`;
+    ? `<button onclick="openHabits()" aria-label="${T("Habits", "Навики")}">${ICON.flame}<span class="bl">${T("Habits", "Навики")}</span></button>` : "")
+    + `<button onclick="openHistory()" aria-label="${T("Completed", "Завршени")}">${ICON.check}<span class="bl">${T("Completed", "Завршени")}</span></button>`;
 }
 function renderTaskStrip() {
   const el = $("tk-strip");
@@ -3226,7 +3498,7 @@ function camGroups(list) {
 
 function renderInv() {
   $("cat-filter").innerHTML = ["all", ...CATS].map((c) =>
-    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "All" : c}</button>`).join("");
+    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? T("All", "Сите") : catLbl(c)}</button>`).join("");
   const q = ($("inv-search").value || "").trim().toLowerCase();
   // you may remember the supplier's code, or a line from the specs, rather
   // than the name — so match against all of it, the IP / Turbo HD / MP tag
@@ -3687,7 +3959,7 @@ function openArticleSheet(id, preset) {
     <label>Name</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="e.g. 5MP Hikvision DS-2CE17K0T-LFS">
     <div class="grid2">
       <div><label>Code</label><input id="ar-code" value="${esc(a.code || "")}"></div>
-      <div><label>Category</label><select id="ar-cat">${CATS.map((c) => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+      <div><label>Category</label><select id="ar-cat">${CATS.map((c) => `<option value="${c}" ${a.category === c ? "selected" : ""}>${catLbl(c)}</option>`).join("")}</select></div>
     </div>
     <div class="grid2">
       <div><label>Unit</label><select id="ar-unit"><option value="ком" ${a.unit === "ком" ? "selected" : ""}>${T("pcs", "ком")}</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
@@ -4274,7 +4546,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${needsDeduct(o) ? ' · <span style="color:var(--danger)">stock not taken out</span>' : ""}${authorTag(o.created_by)}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || T("no client", "без клиент"))} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ` · <span style="color:var(--personal)">${T("paid", "платена")}</span>` : ` · <span style="color:var(--amber)">${T("part paid", "делумно платена")}</span>`) : ""}${needsDeduct(o) ? ` · <span style="color:var(--danger)">${T("stock not taken out", "не е разнижено од магацин")}</span>` : ""}${authorTag(o.created_by)}${offerExpired(o) ? ` · <span style="color:var(--danger)">${T("expired", "истечена")}</span>` : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)}</span>
     </div>`).join("") + olderButton("offers", T("Show older offers", "Прикажи постари понуди"))
@@ -7515,30 +7787,31 @@ function renderSettings() {
     `<div class="setrow" role="button" tabindex="0" onclick="${action}"><span class="ico">${icon}</span>
       <span class="txt"><b>${title}</b><span>${sub}</span></span><span class="chev">›</span></div>`;
 
-  const pushSub = state.pushOn === true ? `On · daily summary ${setting("digest_hour", "07:30")}`
-    : state.pushOn === false ? "Off — tap to turn on" : "Daily summary " + setting("digest_hour", "07:30");
+  const pushSub = state.pushOn === true ? `${T("On · daily summary", "Вклучени · дневен преглед")} ${setting("digest_hour", "07:30")}`
+    : state.pushOn === false ? T("Off — tap to turn on", "Исклучени — допри за да ги вклучиш") : T("Daily summary ", "Дневен преглед ") + setting("digest_hour", "07:30");
   let html = '<div class="setgrp" style="margin-top:2px">You</div>'
     + row("&#128276;", "Notifications", pushSub, "openSetSheet('push')")
     + row("&#10003;", "Checklist templates",
-        state.templates.length ? `${state.templates.length} saved` : "None yet", "openSetSheet('templates')");
+        state.templates.length ? `${state.templates.length} ${T("saved", "зачувани")}` : T("None yet", "Сè уште нема"), "openSetSheet('templates')");
 
   if (state.perm.elaks || state.perm.apts) html += '<div class="setgrp">Business</div>';
-  if (state.perm.elaks) html += row("&#128230;", "Elaks", "Export articles, movements and offers", "openSetSheet('elaks')");
+  if (state.perm.elaks) html += row("&#128230;", "Elaks", T("Company details, export articles, movements and offers", "Податоци за фирма, извоз на артикли, движења и понуди"), "openSetSheet('elaks')");
   if (state.perm.apts) html += row("&#127968;", "Apartments",
-    `Check-out ${setting("checkout_time", "11:00")} · arrivals ${setting("stay_remind_time", "09:00")} · bills from day ${setting("bills_day", "5")}`,
+    T(`Check-out ${setting("checkout_time", "11:00")} · arrivals ${setting("stay_remind_time", "09:00")} · bills from day ${setting("bills_day", "5")}`,
+      `Заминување ${setting("checkout_time", "11:00")} · доаѓања ${setting("stay_remind_time", "09:00")} · сметки од ${setting("bills_day", "5")}-ти`),
     "openSetSheet('apts')");
 
   if (state.perm.owner) html += '<div class="setgrp">Administration</div>'
     + row("&#128274;", "Document reading",
-        setting("ai_key_set", "") === "yes" ? "Key saved · reading notes is on" : "Not set up — add your API key",
+        setting("ai_key_set", "") === "yes" ? T("Key saved · reading notes and pictures is on", "Клучот е зачуван · читањето е вклучено") : T("Not set up — add your API key", "Не е поставено — додај API клуч"),
         "openSetSheet('aikey')")
-    + row("&#128220;", "Activity", "Who added what, across the app", "openSetSheet('activity')")
-    + row("&#128101;", "Team", `${(state.team || []).length} ${(state.team || []).length === 1 ? "person" : "people"} with access`, "openSetSheet('team')")
-    + row("&#128190;", "Backup", "Download everything as one file", "openSetSheet('backup')");
+    + row("&#128220;", "Activity", T("Who added what, across the app", "Кој што додал, низ целата апликација"), "openSetSheet('activity')")
+    + row("&#128101;", "Team", `${(state.team || []).length} ${T((state.team || []).length === 1 ? "person" : "people", (state.team || []).length === 1 ? "лице" : "лица")} ${T("with access", "со пристап")}`, "openSetSheet('team')")
+    + row("&#128190;", "Backup", T("Download everything as one file", "Преземи сè во една датотека"), "openSetSheet('backup')");
 
   html += '<div class="setgrp">App</div>'
     + row("&#127760;", "Language / Јазик", langMk() ? "Македонски" : "English", "openSetSheet('lang')")
-    + row("&#8505;", "About Centrala", "Version " + String(BUILD).slice(0, 8), "openSetSheet('about')")
+    + row("&#8505;", "About Centrala", T("Version ", "Верзија ") + String(BUILD).slice(0, 8), "openSetSheet('about')")
     + `<div class="setrow" role="button" tabindex="0" onclick="logout()" style="border-color:var(--danger)">
         <span class="ico" style="background:var(--danger-bg)">&#9211;</span>
         <span class="txt"><b style="color:var(--danger)">Sign out</b><span>${esc(state.email || "")}</span></span></div>`;
@@ -7555,8 +7828,11 @@ function openSetSheet(kind) {
       <label>Daily summary at</label>
       <div class="row"><input id="digest-hour" type="time" value="${setting("digest_hour", "07:30")}" style="flex:1">
         <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
-      <p class="muted" style="font-size:12.5px">One message each morning with what is due — plus reminders for tasks with a time, guest arrivals the day before, and unpaid bills.</p>`);
+      <p class="muted" style="font-size:12.5px">One message each morning with what is due — plus reminders for tasks with a time, guest arrivals the day before, and unpaid bills.</p>
+      <div class="sec">${T("What this phone gets", "Што добива овој телефон")}</div>
+      <div id="push-kinds"><p class="muted">…</p></div>`);
     updatePushState();
+    loadPushPrefs();
     keepPushAlive();
   } else if (kind === "templates") {
     openSheet(`<h2>Checklist templates</h2><div id="tpl-list"></div>
@@ -7617,7 +7893,8 @@ function openSetSheet(kind) {
     loadActivity();
   } else if (kind === "team") {
     openSheet(`<h2>Team</h2><div id="team-list"></div>
-      <p class="muted" style="font-size:12.5px">Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.</p>`);
+      <p class="muted" style="font-size:12.5px">${T("Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.",
+        "Најавите се создаваат во Supabase → Authentication. Лицето се појавува тука по првата најава — потоа дозволи што да гледа.")}</p>`);
     loadTeam();
   } else if (kind === "backup") {
     openSheet(`<h2>Backup</h2>
@@ -7658,7 +7935,8 @@ function openSetSheet(kind) {
       <div class="hrow"><span class="muted">Version</span><b class="mono">${BUILD}</b></div>
       <div class="hrow"><span class="muted">Signed in as</span><b>${esc(state.email || "")}</b></div>
       <div class="hrow"><span class="muted">Access</span><b>${[state.perm.elaks ? "Elaks" : "", state.perm.apts ? "Apartments" : ""].filter(Boolean).join(" · ") || "Tasks only"}</b></div>
-      <button class="btn ghost" style="margin-top:14px" onclick="lastBuildCheck=0;checkForUpdate();toast('Checking…')">Check for updates</button>`);
+      <button class="btn ghost" style="margin-top:14px" onclick="lastBuildCheck=0;checkForUpdate();toast('Checking…')">Check for updates</button>
+      <button class="btn ghost" onclick="whatsNew(true)">${T("What's new", "Што е ново")}</button>`);
   }
 }
 
@@ -7872,6 +8150,10 @@ async function saveDigestHour() {
 ============================================================ */
 const BILL_TYPES = ["electricity", "water", "internet", "building", "heating", "booking"];
 const BILL_LBL = { electricity: "Electricity", water: "Water", internet: "Internet", building: "Building", heating: "Heating", booking: "Booking" };
+const BILL_LBL_MK = { electricity: "Струја", water: "Вода", internet: "Интернет", building: "Зграда", heating: "Греење", booking: "Booking" };
+const billLbl = (t) => (langMk() ? BILL_LBL_MK[t] : BILL_LBL[t]) || t;
+// "November 2026" / "Ноември 2026"
+const monthYear = (ym) => { const n = monthName(ym); return n.charAt(0).toUpperCase() + n.slice(1) + " " + String(ym).slice(0, 4); };
 const sumBy = (arr, f) => arr.reduce((a, x) => a + (parseFloat(f(x)) || 0), 0);
 
 // one row of the apartments bank: net on the right, the arithmetic beneath it
@@ -8308,7 +8590,7 @@ function renderCalendar() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
   const [y, m] = state.aptMonth.split("-").map(Number);
   const days = new Date(y, m, 0).getDate();
-  const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const label = monthYear(state.aptMonth);
   const today = todayStr();
   let html = `<div class="row" style="justify-content:center;gap:18px;margin-bottom:6px">
     <button class="chip" onclick="shiftAptMonth(-1)">‹</button><b>${label}</b>
@@ -8696,10 +8978,10 @@ function openStaySheet(id, pre) {
     <div class="row" style="margin-top:12px">
       <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${stayHasTask(id) ? "\u2713" : ""}</button>
-      <span>Reminder task the day before they arrive${(() => {
+      <span>${T("Reminder task the day before they arrive", "Задача-потсетник ден пред доаѓањето")}${(() => {
         const ex = id ? state.tasks.find((t) => t.stay_id === id) : null;
         return ex && ex.due_date
-          ? ` <span class="muted">· set for ${dmy(ex.due_date)}</span>`
+          ? ` <span class="muted">· ${T("set for", "за")} ${dmy(ex.due_date)}</span>`
           : "";
       })()}</span>
     </div>
@@ -8979,7 +9261,7 @@ async function delExpense(id) {
 
 function renderBills() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
-  const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const label = monthYear(state.aptMonth);
   let grand = 0;
   const payFrom = state.billAccount || accountFor({});
   let html = `<div class="row" style="justify-content:center;gap:18px;margin-bottom:10px">
@@ -9006,7 +9288,7 @@ function renderBills() {
     grand += total;
     html += `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
-        <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? "✓ PAID" : paidN + "/" + types.length + " paid"}</span></div>
+        <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? T("✓ PAID", "✓ ПЛАТЕНО") : paidN + "/" + types.length + " " + T("paid", "платени")}</span></div>
       ${billsBackOn(a, shiftYm(state.aptMonth, 1)) && isMonthly(a)
         && (state.leases || []).some((l) => l.apartment_id === a.id && leaseInMonth(l, shiftYm(state.aptMonth, 1)))
         ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${T(
@@ -9015,7 +9297,7 @@ function renderBills() {
       ${rows.map(({ tp, b }) => `
         <div class="row" style="margin-top:7px">
           <button class="clbox ${b && b.paid ? "on" : ""}" onclick="setBill('${a.id}','${tp}','paid',${!(b && b.paid)})">${b && b.paid ? "✓" : ""}</button>
-          <span style="flex:1">${BILL_LBL[tp]}</span>
+          <span style="flex:1">${billLbl(tp)}</span>
           <input class="mono" type="number" inputmode="decimal" value="${b ? b.amount : ""}" placeholder="0"
             style="width:96px;text-align:right;padding:7px 8px"
             onchange="setBill('${a.id}','${tp}','amount',parseFloat(this.value)||0)">
@@ -9025,7 +9307,7 @@ function renderBills() {
         <b class="mono">${fmt(total)} ден.</b></div>` : ""}
     </div>`;
   }
-  html += `<div class="totalbar"><span>All bills · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
+  html += `<div class="totalbar"><span>${T("All bills", "Сите сметки")} · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
   html += expensesBlock(state.aptMonth);
   $("apt-body").innerHTML = html;
 }
@@ -9078,7 +9360,7 @@ function openAptStatement(id, year) {
       .reduce((n, s) => n + nightsBetween(s.check_in, s.check_out), 0);
     ti += inc; tb += bil; te += exp; tn += nights;
     if (!inc && !bil && !exp) continue;
-    rows += `<div class="mov"><span>${new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
+    rows += `<div class="mov"><span>${langMk() ? monthName(key).slice(0, 3) : new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
       <span class="muted">${nights ? nights + "n" : ""}</span></span>
       <span class="mono">${fmt(inc)} − ${fmt(bil)}${exp ? ` − <span style="color:var(--amber)">${fmt(exp)}</span>` : ""} = <b>${fmt(inc - bil - exp)}</b></span></div>`;
   }
@@ -9138,7 +9420,7 @@ function openAptSheet(id) {
     <input id="ap-access" value="${esc(a.access_note || "")}" placeholder="bins on Tuesday · parking spot 4">
     <label>${T("Cleaning normally costs (ден.)", "Чистењето обично чини (ден.)")}</label>
     <input id="ap-clean" type="number" inputmode="decimal" step="any" value="${a.cleaning_cost ?? 0}">
-    <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
+    <label>${T("Check-out time", "Време на заминување")} (${T("empty", "празно")} = ${setting("checkout_time", "11:00")})</label>
     <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
     ${state.rentCol ? `<label>${T("How it is let", "Како се издава")}</label>
@@ -9188,8 +9470,8 @@ function aptModeChanged() {
 // The other direction: what Centrala publishes, so a booking taken here
 // closes the same nights on the platforms.
 function outFeedBlock(a) {
-  if (!a.feed_token) return `<div class="sec">Your calendar</div>
-    <p class="muted" style="font-size:12.5px">Run feeds-audit-migration.sql to switch this on.</p>`;
+  if (!a.feed_token) return `<div class="sec">${T("Your calendar", "Твојот календар")}</div>
+    <p class="muted" style="font-size:12.5px">${T("Not switched on yet — it needs the database update (feeds-audit-migration.sql).", "Сè уште не е вклучено — потребно е ажурирање на базата (feeds-audit-migration.sql).")}</p>`;
   const base = CONFIG.SUPABASE_URL + "/functions/v1/ical?apt=" + a.feed_token;
   const link = (label, url, why) => `<div class="card">
     <div class="row" style="justify-content:space-between"><b>${label}</b>
@@ -9907,14 +10189,14 @@ function messageGuest(id) {
 function feedBlock(aptId) {
   const mine = state.feeds.filter((f) => f.apartment_id === aptId);
   return `<div class="sec">Calendar sync</div>
-    <p class="muted" style="font-size:12.5px">Paste the calendar link from each platform and bookings arrive here by themselves, once an hour.</p>
+    <p class="muted" style="font-size:12.5px">${T("Paste the calendar link from each platform and bookings arrive here by themselves, once an hour.", "Залепи ја врската до календарот од секоја платформа и резервациите ќе доаѓаат тука сами, еднаш на час.")}</p>
     ${mine.map((f) => `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(f.source)}</b>
         <button class="chip" onclick="delFeed('${f.id}')">Remove</button></div>
       <div class="muted" style="word-break:break-all;font-size:11.5px">${esc((f.url || "").slice(0, 60))}…</div>
       <div class="muted">${f.last_sync
         ? "Last checked " + dmyTime(f.last_sync) + (f.last_status ? " · " + esc(f.last_status) : "")
-        : "Not checked yet — the first sync runs within the hour"}</div>
+        : T("Not checked yet — the first sync runs within the hour", "Сè уште не е проверено — првото синхронизирање е во текот на часот")}</div>
     </div>`).join("")}
     <div class="card">
       <label>Add a calendar</label>
@@ -10372,15 +10654,15 @@ function renderHome() {
     || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
   const areas = myCtx().filter((c) => byCtx(c) > 0);
   let html = pushWarning() + `<div class="hcard" role="button" tabindex="0" onclick="tab('today')">
-    <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
+    <h3>${T("Today", "Денес")}${state.mineOnly ? ` <span class="muted" style="font-weight:400;font-size:12.5px">· ${T("mine only", "само мои")}</span>` : ""}</h3>
     <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
       <span class="hbig">${B.todays.length}</span>
-      <span style="white-space:nowrap">${B.late ? `<span class="hflag">${B.late} overdue</span>` : '<span class="hok">nothing late</span>'}</span>
+      <span style="white-space:nowrap">${B.late ? `<span class="hflag">${B.late} ${T("overdue", "задоцнети")}</span>` : `<span class="hok">${T("nothing late", "ништо не доцни")}</span>`}</span>
     </div>
     <div class="hsub">${areas.length
-      ? areas.map((c) => `${CTX[c]} <b>${byCtx(c)}</b>`).join(" · ")
-      : (B.todays.length ? "" : "nothing scheduled today")}${
-      B.undated.length ? `${areas.length ? " · " : ""}no date <b>${B.undated.length}</b>` : ""}</div>
+      ? areas.map((c) => `${ctxLbl(c)} <b>${byCtx(c)}</b>`).join(" · ")
+      : (B.todays.length ? "" : T("nothing scheduled today", "ништо закажано денес"))}${
+      B.undated.length ? `${areas.length ? " · " : ""}${T("no date", "без датум")} <b>${B.undated.length}</b>` : ""}</div>
     ${upNext.slice(0, 3).map((t) => `<div class="hrow">
       <span style="display:flex;align-items:center;gap:9px;min-width:0">
         <button class="tick sm" onclick="event.stopPropagation();toggleTask('${t.id}',null,this)" aria-label="done"></button>
@@ -10389,7 +10671,7 @@ function renderHome() {
       <span class="muted mono" style="display:flex;align-items:center;gap:7px;flex:none">
         ${t.assigned_to && t.assigned_to !== state.uid ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
         ${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
-    ${B.todays.length > 3 ? `<div class="hrow"><span class="muted">+ ${B.todays.length - 3} more</span><span class="muted">›</span></div>` : ""}
+    ${B.todays.length > 3 ? `<div class="hrow"><span class="muted">+ ${B.todays.length - 3} ${T("more", "уште")}</span><span class="muted">›</span></div>` : ""}
   </div>`;
   // Work given to other people, one line each: what they have open, what is
   // for today, what is late. Tap a line for their list.
@@ -10421,7 +10703,7 @@ function renderHome() {
     html += `<div class="hcard" role="button" tabindex="0" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
       ${seesCosts() ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openCashSheet()"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>` : ""}
-      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openOrderSheet()"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openOrderSheet()"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " " + T(low.length === 1 ? "article" : "articles", low.length === 1 ? "артикл" : "артикли") : T("all ok", "сè е во ред")}</b></div>
       ${(() => {
         const t = todayStr();
         const todays = state.jobs.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled");
@@ -10431,10 +10713,10 @@ function renderHome() {
           <b>${todays.length}${late.length ? ` <span class="hflag">+${late.length} ${T("late", "задоцнети")}</span>` : ""}</b></div>`;
       })()}
       <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='sent';tab('elaks')"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
-      ${expired.length ? `<div class="hnote warn">${expired.length} expired</div>` : ""}
+      ${expired.length ? `<div class="hnote warn">${expired.length} ${T("expired", expired.length === 1 ? "истечена" : "истечени")}</div>` : ""}
       ${seesCosts() ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openReportSheet()"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>` : ""}
       ${owed.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='accepted';tab('elaks')"><span>Accepted, not paid yet</span><b class="hflag">${fmt(owedSum)} ден.</b></div>
-      <div class="hnote">${owed.length} offer${owed.length > 1 ? "s" : ""}</div>` : ""}
+      <div class="hnote">${owed.length} ${T(owed.length > 1 ? "offers" : "offer", owed.length > 1 ? "понуди" : "понуда")}</div>` : ""}
       ${waiting.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='pur';tab('elaks')"><span>Waiting to arrive</span>
         <b style="color:var(--amber)">${waiting.length}</b></div>` : ""}
       ${pendingStock.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='accepted';tab('elaks')"><span>Stock not taken out</span>
@@ -11402,6 +11684,11 @@ function renderPurchases() {
    not in the list simply stays in English.
 ============================================================ */
 const MK = {
+  "New guest": "Нов гостин", "Edit stay": "Измени престој", "New article": "Нов артикл",
+  "Search supplier or document…": "Барај добавувач или документ…", "Search clients…": "Барај клиенти…",
+  "Search number, client or note…": "Барај број, клиент или белешка…", "Search name, policy number or phone…": "Барај име, број на полиса или телефон…",
+  "e.g. Standup · Order cameras": "пр. Состанок · Нарачај камери", "e.g. 5MP Hikvision DS-2CE17K0T-LFS": "пр. 5MP Hikvision DS-2CE17K0T-LFS",
+  "e.g. Apartment Center 1": "пр. Стан Центар 1", "bins on Tuesday · parking spot 4": "ѓубре во вторник · паркинг место 4",
   "Search work…": "Барај работа…", "Search jobs…": "Барај работи…", "Search invoices…": "Барај фактури…",
   "Search name, code, supplier or specs…": "Барај име, шифра, добавувач или опис…", "Search offers…": "Барај понуди…",
   // Elaks, whole labels

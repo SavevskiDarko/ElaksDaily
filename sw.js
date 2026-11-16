@@ -1,4 +1,4 @@
-const CACHE = "centrala-v6";
+const CACHE = "centrala-v7";
 const SHELL = ["./", "./index.html", "./manifest.json", "./Ponuda_TEMPLATE.docx", "./brand-logo.png", "./brand-banner.png", "./brand-footer.png", "./icon-192.png?v=3", "./icon-512.png?v=3"];
 
 // The scripts and fonts the app loads from elsewhere, kept too: without the
@@ -56,6 +56,31 @@ self.addEventListener("fetch", (e) => {
   if (CDN_HOSTS.includes(url.hostname)) e.respondWith(netOrKept(e.request, CDN));
 });
 
+// Every notification is kept on the phone too, the last 50, so one swiped
+// away can be read again in the app (the bell at the top). The app reads the
+// same store; it marks them read when the list is opened.
+function notesDb() {
+  return new Promise((ok, no) => {
+    const r = indexedDB.open("centrala-notes", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("notes", { keyPath: "at" });
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => no(r.error);
+  });
+}
+async function keepNote(note) {
+  try {
+    const db = await notesDb();
+    await new Promise((done) => {
+      const tx = db.transaction("notes", "readwrite"), st = tx.objectStore("notes");
+      st.put(note);
+      const keys = st.getAllKeys();
+      keys.onsuccess = () => { for (const k of keys.result.slice(0, Math.max(0, keys.result.length - 50))) st.delete(k); };
+      tx.oncomplete = done; tx.onerror = done; tx.onabort = done;
+    });
+    db.close();
+  } catch (_) { /* a phone that keeps nothing still shows the notification */ }
+}
+
 self.addEventListener("push", (e) => {
   let data = { title: "Centrala", body: "", tag: "general" };
   try { data = e.data.json(); } catch (_) {}
@@ -64,9 +89,11 @@ self.addEventListener("push", (e) => {
     tag: data.tag,
     icon: "./icon-192.png?v=3",
     badge: "./icon-192.png?v=3",
-    vibrate: [100, 50, 100],
     data: { taskId: data.taskId || null, jobId: data.jobId || null, go: data.go || null },
   };
+  // in the quiet hours this phone chose: shown, without a sound or a buzz
+  if (data.quiet) opts.silent = true;
+  else opts.vibrate = [100, 50, 100];
   // A phone shows two buttons at most on Android: Done, and Snooze 1h during
   // the day or Tomorrow in the evening, when an hour on is no use. Where three
   // fit, all three.
@@ -77,7 +104,13 @@ self.addEventListener("push", (e) => {
     const max = (self.Notification && Notification.maxActions) || 2;
     opts.actions = max >= 3 ? [done, snooze, later] : [done, new Date().getHours() >= 20 ? later : snooze];
   }
-  e.waitUntil(self.registration.showNotification(data.title, opts));
+  const note = { at: Date.now() + Math.random(), title: data.title || "Centrala", body: data.body || "", tag: data.tag || "",
+    taskId: data.taskId || null, jobId: data.jobId || null, go: data.go || null, read: false };
+  e.waitUntil(Promise.all([
+    self.registration.showNotification(data.title, opts),
+    keepNote(note).then(() => clients.matchAll({ type: "window", includeUncontrolled: true }))
+      .then((list) => list.forEach((c) => c.postMessage({ centrala: true, note: true }))),
+  ]));
 });
 
 self.addEventListener("notificationclick", (e) => {

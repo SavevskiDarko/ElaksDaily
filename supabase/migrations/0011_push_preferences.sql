@@ -1,0 +1,23 @@
+-- ============================================================
+--  Which notifications a phone wants, and when it wants quiet
+--
+--  Each phone that has notifications on has a row in push_subscriptions.
+--  This adds
+--
+--    push_subscriptions.prefs   what this phone has chosen in
+--                               Settings → Notifications:
+--                                 { "off":   ["stock", "money", ...],
+--                                   "quiet": { "from": "22:00", "to": "07:00" } }
+--                               A kind in "off" is not sent to this phone.
+--                               In the quiet hours notifications still
+--                               arrive, but without a sound or vibration.
+--                               Empty: everything, with sound, as before.
+--
+--  The kinds: tasks, digest, jobs, stock, money, bookings, bills, rent,
+--  insurance. The push function reads them; a "Send a test" always arrives.
+--
+--  Safe to run more than once. The existing policy ("own subscriptions")
+--  already lets each person change their own phones' rows and no one else's.
+-- ============================================================
+
+alter table public.push_subscriptions add column if not exists prefs jsonb not null default '{}'::jsonb;
