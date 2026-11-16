@@ -290,7 +290,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .oitem .del{color:var(--danger);font-size:18px;text-align:center}
 /* A line item on a phone: the name deserves the full width, the figures read
    as qty × price = total underneath it. */
-.lrow{display:grid;grid-template-columns:22px 1fr 24px;gap:8px;align-items:center;
+.lrow{display:grid;grid-template-columns:36px 1fr 24px;gap:8px;align-items:center;
   padding:8px 0;border-bottom:1px solid var(--line)}
 .lrow.nomove{grid-template-columns:1fr 24px}
 .lbody{min-width:0;display:flex;flex-direction:column;gap:6px}
@@ -309,14 +309,14 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 /* From tablet width up there is room for the original single row, so the
    name, quantity, price and total line up in columns again. */
 @media (min-width:640px){
-  .lrow{grid-template-columns:22px 1fr 58px 100px 88px 24px;gap:6px;
+  .lrow{grid-template-columns:36px 1fr 58px 100px 88px 24px;gap:6px;
     padding:0;margin-bottom:6px;border-bottom:0}
   .lrow.nomove{grid-template-columns:1fr 58px 100px 88px 24px}
   .lbody,.lnums{display:contents}        /* their children become row columns */
   .lop{display:none}
   .lname{font-weight:400}
   .ltot{align-self:center}
-  .lhead{display:grid;grid-template-columns:22px 1fr 58px 100px 88px 24px;gap:6px;
+  .lhead{display:grid;grid-template-columns:36px 1fr 58px 100px 88px 24px;gap:6px;
     font-family:var(--cond);font-weight:700;font-size:11.5px;letter-spacing:.06em;
     text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
   .lhead.nomove{grid-template-columns:1fr 58px 100px 88px 24px}
@@ -331,9 +331,16 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
   align-items:center;justify-content:center}
 .pnum{position:absolute;bottom:3px;left:4px;background:rgba(21,42,70,.78);color:#fff;
   border-radius:5px;padding:1px 5px;font-size:10.5px;font-weight:700}
-.omove{display:flex;flex-direction:column;gap:2px}
-.omove button{font-size:9px;line-height:1;padding:4px 0;color:var(--muted);border:1px solid var(--line);
-  border-radius:5px;background:var(--surface);width:100%}
+.hrow.hgo{border-radius:8px;margin:0 -6px;padding-left:6px;padding-right:6px;flex-wrap:nowrap}
+.hrow.hgo::after{content:"›";color:var(--muted);margin-left:8px;flex:none}
+.hrow.hgo:active{background:var(--line)}
+.pick{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px}
+.pickrow{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;padding:11px 12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-size:14px}
+.pickrow.add{color:var(--work);font-weight:600}
+.omove{display:flex;flex-direction:column;gap:4px}
+.omove button{font-size:13px;line-height:1;min-height:32px;padding:0;color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);width:100%}
 .omove button:disabled{opacity:.25}
 .omove button:active:not(:disabled){background:var(--line);color:var(--ink)}
 .oitem.moved{animation:movedflash .7s ease}
@@ -708,7 +715,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
   </div>
 </div>
 
-<div class="overlay" id="overlay" onclick="closeSheet()"></div>
+<div class="overlay" id="overlay" onclick="closeSheetAsked()"></div>
 <div class="sheet" id="sheet"></div>
 <div class="toast" id="toast"></div>
 <div id="printroot"></div>
@@ -840,13 +847,36 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", camType: "all", 
 const PAYMENTS = { limit: 400 };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
+// What went wrong, said so a person knows what to do — not the database's own words.
+function plainError(e) {
+  const m = String((e && (e.message || e.details)) || e || ""), c = e && e.code;
+  if (/Failed to fetch|NetworkError|Load failed|network|offline/i.test(m))
+    return T("no connection — check the signal and try again", "нема врска — провери го сигналот и обиди се пак");
+  if (c === "42501" || /row-level security|permission denied/i.test(m))
+    return T("you are not allowed to change this — ask the owner for access", "немаш дозвола да го смениш ова — побарај пристап од сопственикот");
+  if (c === "23505" || /duplicate key/i.test(m))
+    return T("one with the same number or name is already there", "веќе постои едно со ист број или име");
+  if (c === "23503" || /foreign key/i.test(m))
+    return T("something else still uses this", "нешто друго сè уште го користи ова");
+  if (c === "42703" || c === "PGRST204" || /column .* does not exist|Could not find the .* column/i.test(m))
+    return T("the database needs an update for this — run the latest SQL from the repository", "базата треба да се ажурира — пушти го последниот SQL од репозиториумот");
+  if (c === "23502" || /null value in column/i.test(m))
+    return T("something required was left empty", "нешто задолжително е оставено празно");
+  if (c === "22P02" || c === "22007" || c === "22008" || /invalid input syntax/i.test(m))
+    return T("a number or a date is not written the right way", "број или датум не е внесен правилно");
+  if (/JWT|expired|not authenticated|401/i.test(m))
+    return T("you have been signed out — sign in again", "одјавен си — најави се повторно");
+  if (/timeout|timed out/i.test(m))
+    return T("the server took too long — try again", "серверот не одговори навреме — обиди се пак");
+  return T("something went wrong — try again", "нешто тргна наопаку — обиди се пак");
+}
 async function dbq(q, failMsg) {
   if (offlineNow()) {
     toast(T("No signal — not saved. Only tasks and jobs save without a signal.", "Нема сигнал — не е зачувано. Без сигнал се зачувуваат само задачите и работите."));
     throw new Error("offline");
   }
   const { data, error } = await q;
-  if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + error.message); throw error; }
+  if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + plainError(error)); throw error; }
   return data;
 }
 
@@ -1222,7 +1252,7 @@ async function loadOlder(key) {
   const page = state.olderPage[key] || 0, from = K.limit + page * OLDER_PAGE;
   const r = await db.from(K.table).select(K.select).order(K.order, { ascending: false }).range(from, from + OLDER_PAGE - 1);
   loadingOlder = false;
-  if (r.error) return toast(T("Could not load older ones", "Постарите не може да се вчитаат") + " — " + r.error.message);
+  if (r.error) return toast(T("Could not load older ones", "Постарите не може да се вчитаат") + " — " + plainError(r.error));
   const have = new Set(state[key].map((x) => x.id)), fresh = (r.data || []).filter((x) => !have.has(x.id));
   state[key] = state[key].concat(fresh);
   state.olderIds[key] = (state.olderIds[key] || []).concat(fresh.map((x) => x.id));
@@ -1650,8 +1680,9 @@ function toastUndo(msg, undo, seconds = 15) {
   t._timer = setTimeout(() => t.classList.remove("on", "act"), seconds * 1000);
 }
 
-// Delete, but keep the row in hand so it can be put straight back.
-async function deleteUndoable(table, row, label, keys) {
+// Delete, but keep the row in hand so it can be put straight back — and the
+// rows the database takes with it (children: [{ table, rows }]), after it.
+async function deleteUndoable(table, row, label, keys, children = []) {
   try { await dbq(db.from(table).delete().eq("id", row.id), T("Not deleted", "Не е избришано")); }
   catch { return false; }
   closeSheet();
@@ -1662,11 +1693,37 @@ async function deleteUndoable(table, row, label, keys) {
     ["stock", "clients", "apartments", "articles", "warranty_until"].forEach((k) => delete copy[k]);
     const { error } = await db.from(table).insert(copy);
     if (error) { console.error(error); return toast(T("Could not undo", "Не може да се врати")); }
+    for (const c of children) {
+      const rows = (c.rows || []).map((r) => { const x = { ...r }; ["stock", "clients", "apartments", "articles", "warranty_until"].forEach((k) => delete x[k]); return x; });
+      if (rows.length) { const r = await db.from(c.table).insert(rows); if (r.error) console.error("undo", c.table, r.error); }
+    }
     await refreshAll(keys); render(); toast(T("Restored", "Вратено"));
   });
   return true;
 }
 let sheetOpen = false, tabPushed = false, ignorePop = false;
+// Typing in an open sheet that has not been saved. Closing it by hand — the
+// ✕, a tap beside it, a swipe down, the back button — asks first; a sheet
+// closed by its own Save does not, and a search box is not typing worth keeping.
+let sheetDirty = false;
+function markSheetDirty(e) {
+  const t = e.target;
+  if (!sheetOpen || !t || !t.closest || !t.closest("#sheet")) return;
+  if (t.matches(".search,[data-nodirty],[type=file],[type=search]") || /search|-q$/i.test(t.id || "")) return;
+  sheetDirty = true;
+  if (offerDraftOn) keepOfferDraft();
+}
+document.addEventListener("input", markSheetDirty, true);
+document.addEventListener("change", markSheetDirty, true);
+async function closeSheetAsked() {
+  if (sheetDirty) {
+    if (!await ask(T("Close without saving? What you typed here will be lost.", "Да се затвори без зачувување? Внесеното ќе се изгуби."),
+      T("Close without saving", "Затвори без зачувување"))) return false;
+    if (offerDraftOn) clearOfferDraft();
+  }
+  closeSheet();
+  return true;
+}
 
 // drag the handle down to dismiss — only on the top bar, so scrolling still works
 let sheetDragY = null;
@@ -1686,7 +1743,7 @@ function sheetDragEnd(e) {
   const sh = $("sheet");
   sh.style.transition = ""; sh.style.transform = "";
   sheetDragY = null;
-  if (dy > 90) closeSheet();
+  if (dy > 90) closeSheetAsked();
 }
 function goBackSilently() { ignorePop = true; history.back(); }
 
@@ -1694,7 +1751,8 @@ function openSheet(html) {
   $("sheet").innerHTML = '<div class="sheet-top" ontouchstart="sheetDragStart(event)" '
     + 'ontouchmove="sheetDragMove(event)" ontouchend="sheetDragEnd(event)">'
     + '<div class="grab"></div>'
-    + '<button class="sheet-x" onclick="closeSheet()" aria-label="Close">\u2715</button></div>' + html;
+    + '<button class="sheet-x" onclick="closeSheetAsked()" aria-label="Close">\u2715</button></div>' + html;
+  sheetDirty = false; offerDraftOn = false;
   $("overlay").classList.add("on");
   requestAnimationFrame(() => $("sheet").classList.add("on"));
   $("sheet").style.display = "block";
@@ -1708,6 +1766,7 @@ function closeSheet(fromBack) {
     try { rec.stop(); } catch (_) {}
     const m = $("mic"); if (m) m.classList.remove("rec");
   }
+  sheetDirty = false; offerDraftOn = false;
   $("sheet").classList.remove("on");
   $("overlay").classList.remove("on");
   setTimeout(() => { $("sheet").style.display = "none"; }, 220);
@@ -1721,7 +1780,11 @@ function closeSheet(fromBack) {
 // and only leave the app from Home with nothing open.
 window.addEventListener("popstate", () => {
   if (ignorePop) { ignorePop = false; return; }
-  if (sheetOpen) { closeSheet(true); return; }
+  if (sheetOpen) {
+    // typing in it: stay, and ask — the step back is put back until they say
+    if (sheetDirty) { history.pushState({ centrala: "sheet" }, ""); closeSheetAsked(); return; }
+    closeSheet(true); return;
+  }
   if (tabPushed) { tabPushed = false; tab("home", true); return; }
 });
 
@@ -3027,7 +3090,7 @@ async function saveTask(id) {
 }
 async function delTask(id) {
   const row = state.tasks.find((x) => x.id === id);
-  if (!row || !await ask("Delete this task?")) return;
+  if (!row) return;
   const copy = { ...row }, days = state.completions.filter((c) => c.task_id === id)
     .map((c) => ({ task_id: id, done_on: c.done_on, skipped: !!c.skipped }));
   ["clients", "apartments"].forEach((k) => delete copy[k]);
@@ -3595,7 +3658,8 @@ async function saveCashEntry(id) {
 async function delCashEntry(id, linked) {
   const row = state.cash.find((x) => x.id === id);
   const extra = linked ? "\n\nThe stock movement it came from will stay — remove that separately if it was also wrong." : "";
-  if (!await ask("Delete this cash entry?" + extra)) return;
+  // one tied to a stock movement asks, as undoing it here would not undo that
+  if ((linked || !row) && !await ask("Delete this cash entry?" + extra)) return;
   if (row) return void await deleteUndoable("elaks_cash", row, T("Entry deleted", "Ставката е избришана"), ["cash", "cashTotal"]);
   try { await dbq(db.from("elaks_cash").delete().eq("id", id), "Not deleted"); } catch { return; }
   closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
@@ -4228,6 +4292,30 @@ async function nextOfferNumber() {
     return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
   }
 }
+// A new offer being written is kept on the phone as it grows, so a phone call,
+// a closed app or a slip of the finger does not lose it. Saving it, or
+// choosing to close without saving, lets it go.
+const OFFER_DRAFT = "centrala_offer_draft";
+let offerDraftOn = false;
+const offerDraft = () => { try { return JSON.parse(localStorage.getItem(OFFER_DRAFT) || "null"); } catch { return null; } };
+function clearOfferDraft() { try { localStorage.removeItem(OFFER_DRAFT); } catch { /* nothing kept */ } }
+function keepOfferDraft() {
+  if (!offerDraftOn || !$("of-title")) return;
+  const d = { at: Date.now(), title: $("of-title").value, system: $("of-system").value, client_id: $("of-client").value,
+    validity: parseInt($("of-val").value) || 7, items: offerItems, show_total: offerShowsTotal() };
+  if (!d.title.trim() && !d.items.length) return clearOfferDraft();
+  try { localStorage.setItem(OFFER_DRAFT, JSON.stringify(d)); } catch { /* no room: the sheet still has it */ }
+}
+function resumeOfferDraft() {
+  const d = offerDraft();
+  if (!d) return;
+  openOfferSheet(null, d.client_id || "", { title: d.title, system: d.system, validity: d.validity, items: d.items || [], show_total: d.show_total, draft: true });
+}
+function dropOfferDraft() {
+  clearOfferDraft();
+  const el = $("of-draft"); if (el) el.remove();
+  offerDraftOn = true;
+}
 async function openOfferSheet(id, forClient, preset) {
   if (id && !await ensureLoaded("offers", id)) return toast(T("That offer could not be loaded", "Понудата не може да се вчита"));
   if (id) await ensurePaymentsOf(id);
@@ -4242,23 +4330,28 @@ async function openOfferSheet(id, forClient, preset) {
     const a = state.stock.find((x) => x.id === aid);
     if (a) offerItems.push(articleItem(a));
   }
+  const draft = !id && !preset && !forClient ? offerDraft() : null;
   openSheet(`
     <h2>${id ? T("Offer ", "Понуда ") + o.number : T("New offer ", "Нова понуда ") + o.number}</h2>
+    ${draft ? `<div class="card" id="of-draft" style="border-color:var(--amber)">
+      <b>${T("An offer you did not save", "Понуда што не ја зачува")}</b>
+      <div class="muted" style="margin:2px 0 8px">${new Date(draft.at).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${
+        draft.title ? " · " + esc(draft.title) : ""} · ${(draft.items || []).length} ${T("items", "ставки")}</div>
+      <div class="grid2"><button class="btn sm amber" style="width:100%;margin:0" onclick="resumeOfferDraft()">${T("Carry on with it", "Продолжи ја")}</button>
+        <button class="btn sm ghost" style="width:100%;margin:0" onclick="dropOfferDraft()">${T("Start a new one", "Започни нова")}</button></div></div>` : ""}
     <label>System title</label><input id="of-title" value="${esc(o.title)}" placeholder="e.g. 2 Камери + Аларм Систем">
     <label>Description (Систем:)</label><input id="of-system" value="${esc(o.system || "")}" placeholder="e.g. 2 IP камери + DVR + Централа">
+    <label>Client</label>
+    <input type="hidden" id="of-client" value="${esc(o.client_id || "")}">
+    <input id="of-client-name" autocomplete="off" value="${esc((state.clients.find((c) => c.id === o.client_id) || {}).name || "")}"
+      placeholder="${T("Type a name or phone…", "Внеси име или телефон…")}" oninput="offerClientSuggest()" onfocus="offerClientSuggest(true)">
+    <div id="of-client-list"></div>
     <div class="grid2">
-      <div><label>Client</label><select id="of-client">
-        <option value="">${T("— select —", "— избери —")}</option>
-        ${state.clients.filter((c) => c.active !== false || o.client_id === c.id)
-        .map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}${c.active === false ? " · " + T("hidden", "скриен") : ""}</option>`).join("")}
-      </select></div>
       <div><label>Date</label><input id="of-date" type="date" value="${o.offer_date}"></div>
-    </div>
-    <div class="grid2">
       <div><label>Validity (days)</label><input id="of-val" type="number" value="${o.validity}"></div>
-      <div><label>Status</label><select id="of-status">${Object.keys(STATUS).map((s) =>
-        `<option value="${s}" ${o.status === s ? "selected" : ""}>${STATUS[s]}</option>`).join("")}</select></div>
     </div>
+    <label>Status</label><select id="of-status">${Object.keys(STATUS).map((s) =>
+      `<option value="${s}" ${o.status === s ? "selected" : ""}>${STATUS[s]}</option>`).join("")}</select>
     <div class="sec">Items</div>
     <input id="of-search" placeholder="Search article to add…" oninput="renderPicker()">
     <div id="of-picker"></div>
@@ -4316,6 +4409,40 @@ async function openOfferSheet(id, forClient, preset) {
     ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Delete</button>` : ""}
   `);
   renderOfferItems();
+  // a new one is kept as it is written — once an older draft has been taken up or let go
+  offerDraftOn = !id && !draft;
+  if (preset && preset.draft) sheetDirty = true;
+}
+// The client, by typing: a name or a phone finds them; a name nobody has yet
+// adds them on the spot, without leaving the offer.
+function offerClientSuggest(focusing) {
+  const box = $("of-client-name"), el = $("of-client-list");
+  if (!box || !el) return;
+  const q = box.value.trim(), n = normName(q), digits = q.replace(/\D/g, "");
+  const live = state.clients.filter((c) => c.active !== false);
+  const exact = live.find((c) => normName(c.name) === n) || null;
+  if (!focusing) $("of-client").value = exact ? exact.id : "";
+  if (!q || (focusing && exact && $("of-client").value === exact.id)) { el.innerHTML = ""; return; }
+  const hits = live.filter((c) => normName(c.name).includes(n) || (digits.length >= 3 && String(c.phone || "").replace(/\D/g, "").includes(digits))).slice(0, 6);
+  el.innerHTML = `<div class="pick">${hits.map((c) => `<button class="pickrow" onclick="pickOfferClient('${c.id}')"><b>${esc(c.name)}</b>${
+      c.phone ? `<span class="muted">${esc(c.phone)}</span>` : ""}</button>`).join("")}${exact ? ""
+      : `<button class="pickrow add" onclick="addOfferClient()">+ ${T("New client", "Нов клиент")} “${esc(q)}”</button>`}</div>`;
+}
+function pickOfferClient(id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  $("of-client").value = c.id; $("of-client-name").value = c.name; $("of-client-list").innerHTML = "";
+  sheetDirty = true; keepOfferDraft();
+}
+async function addOfferClient() {
+  const name = $("of-client-name").value.trim();
+  if (!name) return;
+  let made;
+  try { made = await dbq(db.from("clients").insert({ name }).select().single(), T("Client not saved", "Клиентот не е зачуван")); } catch { return; }
+  state.clients.push(made);
+  state.clients.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  pickOfferClient(made.id);
+  toast(T(`${name} added to clients — their phone and address can go on their card`, `${name} е додаден во клиенти — телефонот и адресата на неговата картичка`));
 }
 function renderPicker() {
   const q = ($("of-search").value || "").toLowerCase();
@@ -4491,6 +4618,7 @@ function offerMarkupAll() {
   toast(T(`${n} item${n > 1 ? "s" : ""} at +${pct}%`, `${n} ставки на +${pct}%`));
 }
 function updateTotal() {
+  if (offerDraftOn) setTimeout(keepOfferDraft, 0);
   let sum = 0;
   offerItems.forEach((it, i) => {
     const t = itemTotal(it);
@@ -4571,8 +4699,9 @@ async function saveOffer(id, generate, pdf, share, send) {
         row.number = await nextOfferNumber();
         ins = await db.from("offers").insert(row).select().single();
       }
-      if (ins.error) { toast("Offer not saved — " + ins.error.message); return; }
+      if (ins.error) { toast(T("Offer not saved", "Понудата не е зачувана") + " — " + plainError(ins.error)); return; }
       saved = ins.data;
+      clearOfferDraft();
     }
   } catch { return; }
   await refreshAll(["offers", "stock"]);
@@ -6728,7 +6857,7 @@ async function saveDoc(id) {
 
 async function delDoc(id) {
   const d = state.docs.find((x) => x.id === id);
-  if (!await ask(T("Remove this document?", "Отстрани го документот?"))) return;
+  if (!d) return;
   await deleteUndoable("documents", d, T("Document removed", "Документот е отстранет"), ["docs"]);
 }
 
@@ -7358,7 +7487,7 @@ async function testPush() {
     r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/push?test=1", { method: "POST",
       headers: { Authorization: "Bearer " + session.access_token, apikey: CONFIG.SUPABASE_ANON_KEY } });
     j = await r.json().catch(() => ({}));
-  } catch (e) { return say(T("Could not reach the server: ", "Серверот не е достапен: ") + e.message); }
+  } catch (e) { return say(T("Could not reach the server: ", "Серверот не е достапен: ") + plainError(e)); }
   if (!r.ok) return say(T(`The server did not send it (${r.status}).`, `Серверот не го испрати (${r.status}).`));
   if (!j.sent) {
     state.pushSaved = false; updatePushState();
@@ -7685,9 +7814,10 @@ function renderTemplates() {
     : '<p class="muted">No templates yet.</p>';
 }
 async function delTemplate(id) {
-  if (!await ask("Delete this template?")) return;
-  try { await dbq(db.from("task_templates").delete().eq("id", id), "Not deleted"); } catch { return; }
-  await refreshAll(["templates"]); renderTemplates();
+  const row = state.templates.find((x) => x.id === id);
+  if (!row) return;
+  if (await deleteUndoable("task_templates", row, T("Template deleted", "Шаблонот е избришан"), ["templates"]))
+    setTimeout(() => openSetSheet("templates"), 240);
 }
 async function saveCheckoutTime() {
   const t = $("apt-checkout").value || "11:00";
@@ -8356,10 +8486,9 @@ async function saveStayPayment(stayId) {
 
 async function delStayPayment(id) {
   const r = state.stayPays.find((x) => x.id === id);
-  if (!r || !await ask(T("Remove this payment of " + fmt(r.amount) + " ден.?", "Отстрани го плаќањето од " + fmt(r.amount) + " ден.?"))) return;
-  try { await dbq(db.from("stay_payments").delete().eq("id", id), T("Not removed", "Не е отстрането")); } catch { return; }
-  closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
-  setTimeout(() => openStaySheet(r.stay_id), 240);
+  if (!r) return;
+  if (await deleteUndoable("stay_payments", r, T("Payment removed", "Плаќањето е отстрането"), ["stayPays", "aptCash"]))
+    setTimeout(() => openStaySheet(r.stay_id), 240);
 }
 
 // who still owes something, so it can be chased
@@ -8512,7 +8641,7 @@ function openStaySheet(id, pre) {
     "Сите станови се под месечна кирија. Гостите се за станови што се издаваат на ноќ."));
   const chosen = flats.find((a) => a.id === state.aptFilter);
   const s = id ? state.stays.find((x) => x.id === id)
-              : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "",
+              : { check_in: (pre && pre.check_in) || todayStr(), check_out: plusDays((pre && pre.check_in) || todayStr(), 1), amount: "",
                   apartment_id: (pre && pre.apartment_id) || (chosen && chosen.id) || flats[0].id };
   openSheet(`
     <h2>${id ? "Edit stay" : "New guest"}</h2>
@@ -8522,8 +8651,14 @@ function openStaySheet(id, pre) {
     ${state.stayPhoneCol ? `<label>${T("Guest phone (opt.)", "Телефон на гостинот (опц.)")}</label>
       <input id="st-phone" type="tel" inputmode="tel" value="${esc(s.guest_phone || "")}">` : ""}
     <div class="grid2">
-      <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}" onchange="stayCalc()"></div>
+      <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}" data-was="${s.check_in || ""}" onchange="stayInMoved()"></div>
       <div><label>Check-out</label><input id="st-out" type="date" value="${s.check_out || ""}" onchange="stayCalc()"></div>
+    </div>
+    <div class="row" style="gap:10px;margin-top:8px;align-items:center">
+      <span class="muted nw">${T("Nights", "Ноќи")}</span>
+      <button class="btn sm ghost" style="width:46px;margin:0" onclick="stayNights(-1)" aria-label="${T("One night less", "Една ноќ помалку")}">−</button>
+      <b class="mono" id="st-n" style="min-width:24px;text-align:center">${nightsBetween(s.check_in, s.check_out) || "–"}</b>
+      <button class="btn sm ghost" style="width:46px;margin:0" onclick="stayNights(1)" aria-label="${T("One night more", "Една ноќ повеќе")}">+</button>
     </div>
     <div class="grid2">
       <div><label>Booked via</label><select id="st-src" onchange="stayAcct()">
@@ -8615,11 +8750,31 @@ function stayNetHint() {
     : "";
 }
 
+// the day so many days after another, "2026-11-16" + 3 → "2026-11-19"
+const plusDays = (ds, n) => { const d = new Date(ds + "T12:00"); d.setDate(d.getDate() + n); return d.toLocaleDateString("sv-SE"); };
+// − / + on the nights move the check-out; moving the check-in keeps the nights
+function stayNights(d) {
+  const i = $("st-in").value;
+  if (!i) return;
+  const n = Math.max(1, (nightsBetween(i, $("st-out").value) || 0) + d);
+  $("st-out").value = plusDays(i, n);
+  sheetDirty = true;
+  stayCalc();
+}
+function stayInMoved() {
+  const inEl = $("st-in"), was = inEl.dataset.was, out = $("st-out").value;
+  const n = was && out ? nightsBetween(was, out) : 0;
+  if (inEl.value && (n > 0 || !out || out <= inEl.value)) $("st-out").value = plusDays(inEl.value, Math.max(1, n));
+  inEl.dataset.was = inEl.value;
+  stayCalc();
+}
 function stayCalc() {
   const n = nightsBetween($("st-in").value, $("st-out").value);
   const a = state.apartments.find((x) => x.id === $("st-apt").value);
   const amt = $("st-amt");
-  if (n > 0 && a && a.nightly_rate && !amt.dataset.touched && !amt.value) amt.value = n * a.nightly_rate;
+  // a figure the app filled in follows the nights; one typed stays as typed
+  if (n > 0 && a && a.nightly_rate && !amt.dataset.touched && (!amt.value || amt.dataset.auto)) { amt.value = n * a.nightly_rate; amt.dataset.auto = "1"; }
+  if ($("st-n")) $("st-n").textContent = n > 0 ? n : "–";
   $("st-nights").textContent = n > 0
     ? `${n} night${n > 1 ? "s" : ""}${a && a.nightly_rate ? ` · rate ${fmt(a.nightly_rate)} ден./night` : ""}`
     : "";
@@ -8699,8 +8854,10 @@ async function saveStay(id) {
 }
 async function delStay(id) {
   const row = state.stays.find((x) => x.id === id);
-  if (!row || !await ask("Delete this stay?")) return;
-  await deleteUndoable("stays", row, T("Booking deleted", "Резервацијата е избришана"), ["stays", "tasks", "aptCash"]);
+  if (!row) return;
+  // its payments and its reminder go with it in the database, so they come back with it
+  await deleteUndoable("stays", row, T("Booking deleted", "Резервацијата е избришана"), ["stays", "stayPays", "tasks", "aptCash"],
+    [{ table: "stay_payments", rows: state.stayPays.filter((p) => p.stay_id === id) }, { table: "tasks", rows: state.tasks.filter((t) => t.stay_id === id) }]);
 }
 
 function shiftAptMonth(dir) {
@@ -8816,7 +8973,7 @@ async function saveExpense(id) {
 
 async function delExpense(id) {
   const e = (state.expenses || []).find((x) => x.id === id);
-  if (!await ask(T("Remove this expense?", "Отстрани го трошокот?"))) return;
+  if (!e) return;
   await deleteUndoable("apt_expenses", e, T("Expense removed", "Трошокот е отстранет"), ["expenses", "aptCash"]);
 }
 
@@ -9351,7 +9508,7 @@ async function saveRentPay(leaseId) {
 }
 async function delRentPay(id) {
   const row = (state.rentPays || []).find((x) => x.id === id);
-  if (!row || !await ask(T("Delete this payment?", "Да се избрише уплатата?"))) return;
+  if (!row) return;
   await deleteUndoable("rent_payments", row, T("Payment deleted", "Уплатата е избришана"), ["rentPays"]);
 }
 
@@ -10263,26 +10420,26 @@ function renderHome() {
     const waiting = state.purchases.filter((p) => (p.items || []).length && !purFullyArrived(p));
     html += `<div class="hcard" role="button" tabindex="0" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
-      ${seesCosts() ? `<div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>` : ""}
-      <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
+      ${seesCosts() ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openCashSheet()"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>` : ""}
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openOrderSheet()"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
       ${(() => {
         const t = todayStr();
         const todays = state.jobs.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled");
         const late = state.jobs.filter((j) => j.scheduled_on && j.scheduled_on < t && j.status !== "done" && j.status !== "cancelled");
         if (!todays.length && !late.length) return "";
-        return `<div class="hrow"><span>${T("Work today", "Работа денес")}</span>
+        return `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='job';state.jobFilter='${todays.length ? "today" : "upcoming"}';tab('elaks')"><span>${T("Work today", "Работа денес")}</span>
           <b>${todays.length}${late.length ? ` <span class="hflag">+${late.length} ${T("late", "задоцнети")}</span>` : ""}</b></div>`;
       })()}
-      <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='sent';tab('elaks')"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
       ${expired.length ? `<div class="hnote warn">${expired.length} expired</div>` : ""}
-      ${seesCosts() ? `<div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>` : ""}
-      ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${fmt(owedSum)} ден.</b></div>
+      ${seesCosts() ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openReportSheet()"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>` : ""}
+      ${owed.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='accepted';tab('elaks')"><span>Accepted, not paid yet</span><b class="hflag">${fmt(owedSum)} ден.</b></div>
       <div class="hnote">${owed.length} offer${owed.length > 1 ? "s" : ""}</div>` : ""}
-      ${waiting.length ? `<div class="hrow"><span>Waiting to arrive</span>
+      ${waiting.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='pur';tab('elaks')"><span>Waiting to arrive</span>
         <b style="color:var(--amber)">${waiting.length}</b></div>` : ""}
-      ${pendingStock.length ? `<div class="hrow"><span>Stock not taken out</span>
+      ${pendingStock.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='accepted';tab('elaks')"><span>Stock not taken out</span>
         <b class="hflag">${pendingStock.length}</b></div>` : ""}
-      ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
+      ${billsOpen.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();runGo('bills')"><span>Owed to suppliers</span>
         <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.</b></div>
       <div class="hnote ${billsLate.length ? "warn" : ""}">${billsOpen.length} ${T(billsOpen.length > 1 ? "bills" : "bill", "фактури")}${billsLate.length ? ` · ${billsLate.length} ${T("overdue", "задоцнети")}` : ""}</div>` : ""}
     </div>`;
@@ -10305,18 +10462,30 @@ function renderHome() {
     const inn = state.stays.filter((s) => s.check_in === today && !s.arrived_at).length;
     html += `<div class="hcard" role="button" tabindex="0" onclick="state.aptView='stays';tab('apt')">
       <h3>Apartments</h3>
-      <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
-      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
-      <div class="hrow"><span>${T("Bills", "Сметки")} · ${monthName(billM)}</span>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='stays';tab('apt')"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
+      ${(inn || out) ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='stays';tab('apt')"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();homeAptGo('bills','${billM}')"><span>${T("Bills", "Сметки")} · ${monthName(billM)}</span>
         <b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " " + T("unpaid", "неплатени") : T("all paid", "сите платени")}</b></div>
-      ${rentLateN ? `<div class="hrow"><span>${T("Rent", "Кирија")} · ${monthName(curM)}</span>
+      ${rentLateN ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();homeAptGo('rent')"><span>${T("Rent", "Кирија")} · ${monthName(curM)}</span>
         <b class="hflag">${rentLateN} ${T("late", "доцни")}</b></div>` : ""}
-      <div class="hrow"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='apartments';tab('apt')"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
     </div>`;
   }
   $("home-body").innerHTML = html;
 }
 
+// The Bills or Rent row on Home: the flat that has them, on that month.
+function homeAptGo(view, month) {
+  const curM = todayStr().slice(0, 7);
+  const want = view === "bills"
+    ? (a) => billTypesFor(a).some((t) => !state.bills.some((b) => b.apartment_id === a.id && (b.month || "").slice(0, 7) === month && b.type === t && b.paid))
+    : (a) => (state.leases || []).some((l) => l.apartment_id === a.id && rentLate(l, curM));
+  const flat = state.apartments.find(want);
+  if (flat) keepAptFilter(flat.id);
+  state.aptView = view;
+  if (month) state.aptMonth = month;
+  tab("apt");
+}
 const paymentsOf = (offerId) => state.payments.filter((p) => p.offer_id === offerId);
 // The payments loaded are the latest few hundred, so an older offer may have
 // only some of its own among them. Its kept total (paid_amount, written by
@@ -12743,7 +12912,7 @@ async function saveInstall(id) {
 }
 async function delInstall(id) {
   const row = state.installs.find((x) => x.id === id);
-  if (!row || !await ask("Remove this equipment record?")) return;
+  if (!row) return;
   const copy = { ...row }; delete copy.warranty_until;   // worked out by the database
   await deleteUndoable("installations", copy, T("Equipment removed", "Опремата е отстранета"), ["installs"]);
 }
