@@ -22,6 +22,7 @@ export default [
         Notification: "readonly", NodeFilter: "readonly", SpeechSynthesisUtterance: "readonly",
         speechSynthesis: "readonly", atob: "readonly", btoa: "readonly",
         alert: "readonly", TextEncoder: "readonly", AbortController: "readonly",
+        indexedDB: "readonly",
         // loaded from the CDN in index.html, before this script
         supabase: "readonly", PizZip: "readonly", docxtemplater: "readonly",
       },

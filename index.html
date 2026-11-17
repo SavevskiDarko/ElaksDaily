@@ -6,6 +6,7 @@
 <title>Centrala</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E3A5F">
+<script>try { var th = localStorage.getItem("centrala_theme"); if (th === "light" || th === "dark") document.documentElement.setAttribute("data-theme", th); } catch (e) {}</script>
 <link rel="apple-touch-icon" href="icon-192.png?v=3">
 <link rel="icon" type="image/png" href="icon-192.png?v=3">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -48,6 +49,17 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
 .bar-acts button{display:flex;align-items:center;gap:5px;color:#fff;font-size:13px;font-weight:600;padding:6px 11px;
   border-radius:999px;background:rgba(255,255,255,.13)}
 .bar-acts svg{width:15px;height:15px}
+.bar-icons{display:flex;gap:4px;align-self:center;flex:none}
+.bar-icons{margin-left:8px}
+.bar-icons button{position:relative;width:34px;height:34px;border-radius:999px;color:#fff;background:rgba(255,255,255,.13);
+  display:flex;align-items:center;justify-content:center}
+.bar-icons svg{width:18px;height:18px}
+.bell-dot{position:absolute;top:6px;right:7px;width:8px;height:8px;border-radius:999px;background:var(--amber);display:none}
+.bell-dot.on{display:block}
+/* on a phone the screen's own shortcuts keep their icon and lose the word, so the icons fit */
+@media (max-width:520px){ .bar-acts .bl{display:none} .bar-acts button{padding:7px 9px} }
+.topbar .date{white-space:nowrap}
+@media (max-width:379px){ .topbar .date{display:none} }
 
 /* ---- tab bar ---- */
 .tabbar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--navy-deep);
@@ -102,6 +114,9 @@ label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:1
   -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);
           mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
 .subnav::-webkit-scrollbar{display:none}
+/* Elaks has nine sections: on a phone they take two rows rather than hide past the edge */
+.subnav.wrap{flex-wrap:wrap;overflow:visible;padding-right:var(--pad);-webkit-mask-image:none;mask-image:none;row-gap:0}
+.subnav.wrap button{padding:10px 9px 8px}
 .subnav button{flex:none;padding:13px 10px 11px;font-size:14px;font-weight:500;color:var(--muted);
   border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
 .subnav button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--amber)}
@@ -290,7 +305,7 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 .oitem .del{color:var(--danger);font-size:18px;text-align:center}
 /* A line item on a phone: the name deserves the full width, the figures read
    as qty × price = total underneath it. */
-.lrow{display:grid;grid-template-columns:22px 1fr 24px;gap:8px;align-items:center;
+.lrow{display:grid;grid-template-columns:36px 1fr 24px;gap:8px;align-items:center;
   padding:8px 0;border-bottom:1px solid var(--line)}
 .lrow.nomove{grid-template-columns:1fr 24px}
 .lbody{min-width:0;display:flex;flex-direction:column;gap:6px}
@@ -309,14 +324,14 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
 /* From tablet width up there is room for the original single row, so the
    name, quantity, price and total line up in columns again. */
 @media (min-width:640px){
-  .lrow{grid-template-columns:22px 1fr 58px 100px 88px 24px;gap:6px;
+  .lrow{grid-template-columns:36px 1fr 58px 100px 88px 24px;gap:6px;
     padding:0;margin-bottom:6px;border-bottom:0}
   .lrow.nomove{grid-template-columns:1fr 58px 100px 88px 24px}
   .lbody,.lnums{display:contents}        /* their children become row columns */
   .lop{display:none}
   .lname{font-weight:400}
   .ltot{align-self:center}
-  .lhead{display:grid;grid-template-columns:22px 1fr 58px 100px 88px 24px;gap:6px;
+  .lhead{display:grid;grid-template-columns:36px 1fr 58px 100px 88px 24px;gap:6px;
     font-family:var(--cond);font-weight:700;font-size:11.5px;letter-spacing:.06em;
     text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
   .lhead.nomove{grid-template-columns:1fr 58px 100px 88px 24px}
@@ -331,9 +346,18 @@ button.t-time{padding:8px 0 8px 8px;margin:-8px 0}
   align-items:center;justify-content:center}
 .pnum{position:absolute;bottom:3px;left:4px;background:rgba(21,42,70,.78);color:#fff;
   border-radius:5px;padding:1px 5px;font-size:10.5px;font-weight:700}
-.omove{display:flex;flex-direction:column;gap:2px}
-.omove button{font-size:9px;line-height:1;padding:4px 0;color:var(--muted);border:1px solid var(--line);
-  border-radius:5px;background:var(--surface);width:100%}
+.hrow.hgo{border-radius:8px;margin:0 -6px;padding-left:6px;padding-right:6px;flex-wrap:nowrap}
+.hrow.hgo::after{content:"›";color:var(--muted);margin-left:8px;flex:none}
+.hrow.hgo:active{background:var(--line)}
+.card.unread{border-left:3px solid var(--amber)}
+ul.whatsnew{margin:6px 0 14px 18px;display:flex;flex-direction:column;gap:8px;font-size:14.5px;line-height:1.4}
+.pick{display:flex;flex-direction:column;gap:4px;margin:6px 0 2px}
+.pickrow{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;padding:11px 12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-size:14px}
+.pickrow.add{color:var(--work);font-weight:600}
+.omove{display:flex;flex-direction:column;gap:4px}
+.omove button{font-size:13px;line-height:1;min-height:32px;padding:0;color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);width:100%}
 .omove button:disabled{opacity:.25}
 .omove button:active:not(:disabled){background:var(--line);color:var(--ink)}
 .oitem.moved{animation:movedflash .7s ease}
@@ -411,10 +435,18 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .bank-big{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.05;letter-spacing:-.01em}
 .bank-lbl{font-size:12.5px;color:var(--muted);margin-top:2px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.aptcard .shut-only{display:none}
+.aptcard.shut .shut-only{display:block}
+.aptcard.shut > :not(.aptcard-top){display:none}
+.aptcard.shut .bank-lbl{display:none}
+.aptcard.shut .bank-big{font-size:24px}
+.aptcard-top{cursor:pointer}
+.aptcard-chev{margin-left:6px;color:var(--muted)}
 .acct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin:14px 0 2px}
 .acct{background:var(--paper);border:1px solid var(--line);border-radius:11px;padding:8px 10px;cursor:pointer}
 .acct:active{opacity:.65}
-.acct span{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct{display:flex;flex-direction:column;justify-content:space-between}
+.acct span{display:block;font-size:11.5px;color:var(--muted);line-height:1.25;overflow-wrap:anywhere}
 .acct b{display:block;font-family:var(--mono);font-size:14.5px;margin-top:1px}
 .stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
 .stat-row.top{margin-top:0;padding-top:0;border-top:0}
@@ -546,13 +578,35 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .rp-tbl th.r,.rp-tbl td.r{text-align:right}
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
+/* dark as the phone is, unless light was chosen in Settings → Appearance; or dark chosen */
 @media (prefers-color-scheme: dark){
   /* Elaks's orange a shade lighter, to stand out on a dark card */
-  :root{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C}
-  .btn.ghost{background:var(--card);color:var(--ink)}
-  .tick{border-color:#39424F}
+  :root:not([data-theme="light"]){--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
+    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;color-scheme:dark}
+  :root:not([data-theme="light"]) .btn.ghost{background:var(--card);color:var(--ink)}
+  :root:not([data-theme="light"]) .tick{border-color:#39424F}
 }
+:root[data-theme="dark"]{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
+  --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;color-scheme:dark}
+:root[data-theme="dark"] .btn.ghost{background:var(--card);color:var(--ink)}
+:root[data-theme="dark"] .tick{border-color:#39424F}
+:root[data-theme="light"]{color-scheme:light}
+
+/* ---- a tablet or a computer: the width used, not one stretched column ---- */
+@media (min-width:900px){
+  .view{max-width:1160px;margin:0 auto}
+  #home-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+  #home-body > *{margin-bottom:0}
+  #home-body > .push-warn{grid-column:1/-1}
+  /* a sheet is a panel in the middle, not a strip across the screen */
+  .sheet{max-width:760px;margin:0 auto}
+  /* lists of cards in two columns; headings, notes and buttons across both */
+  #inv-list,#off-list,#job-list,#invoice-list,#work-list,#pur-list,#cli-list,#sup-list,#doc-list,#pol-list{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:10px;align-items:start}
+  :is(#inv-list,#off-list,#job-list,#invoice-list,#work-list,#pur-list,#cli-list,#sup-list,#doc-list,#pol-list) > :not(.card){grid-column:1/-1}
+  #inv-list > .card:first-child,#work-list > .card.row.tapp:first-child{grid-column:1/-1}
+}
+@media (min-width:1300px){ #home-body{grid-template-columns:repeat(3,minmax(0,1fr))} }
 </style>
 </head>
 <body>
@@ -565,13 +619,16 @@ a.btn{text-decoration:none;display:block;text-align:center}
   <label>Email</label><input id="lg-email" type="email" autocomplete="username">
   <label>Password</label><input id="lg-pass" type="password" autocomplete="current-password">
   <button class="btn" onclick="login()">Sign in</button>
+  <button class="btn ghost" id="lg-forgot" onclick="forgotPassword()">Forgot password?</button>
   <p id="lg-err" class="muted" style="color:var(--danger);margin-top:10px"></p>
 </div>
 
 <!-- ================= APP ================= -->
 <div id="app" style="display:none">
   <div class="app-head">
-  <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="bar-acts" id="bar-acts"></span><span class="date" id="bar-date"></span></div>
+  <div class="topbar"><img src="icon-192.png?v=3" alt=""><h1 id="bar-title">Home</h1><span class="bar-acts" id="bar-acts"></span><span class="date" id="bar-date"></span><span class="bar-icons">
+    <button id="bar-search" onclick="openSearch()" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+    <button id="bar-bell" onclick="openNotifList()" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg><span class="bell-dot" id="bell-dot"></span></button></span></div>
   <div id="loadbar" style="display:none"><span id="loadmsg">Could not load data.</span><button onclick="retryLoad()">Retry</button></div>
   </div>
 
@@ -599,7 +656,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
 
   <!-- ELAKS BUSINESS -->
   <div class="view" id="v-elaks">
-    <div class="subnav" id="elaks-tabs" role="tablist"></div>
+    <div class="subnav wrap" id="elaks-tabs" role="tablist"></div>
     <div id="el-body-inv">
       <input class="search" id="inv-search" placeholder="Search name, code, supplier or specs…" oninput="renderInv()">
       <input type="file" accept="image/*" id="art-pic" style="display:none" onchange="readProductPhoto(this)">
@@ -708,7 +765,7 @@ a.btn{text-decoration:none;display:block;text-align:center}
   </div>
 </div>
 
-<div class="overlay" id="overlay" onclick="closeSheet()"></div>
+<div class="overlay" id="overlay" onclick="closeSheetAsked()"></div>
 <div class="sheet" id="sheet"></div>
 <div class="toast" id="toast"></div>
 <div id="printroot"></div>
@@ -729,6 +786,8 @@ const CONFIG = {
 const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const CTX = { work: "Work", elaks: "Elaks", personal: "Personal", apts: "Apts" };
+// the same, said in the language the app is in
+const ctxLbl = (c) => langMk() ? ({ work: "Работа", elaks: "Елакс", personal: "Лично", apts: "Станови" })[c] || CTX[c] : CTX[c];
 // Elaks is ДДВ registered: 18% standard, 5% preferential. Every price in the app
 // is GROSS (ДДВ included), so the base and the tax are always derived, never stored.
 const VAT_RATES = [18, 5];
@@ -738,6 +797,8 @@ const myCtx = () => state.perm.owner ? ["work", "elaks", "personal", "apts"] : (
 // the one context that is private, so it is the safer thing to land on.
 const defaultCtx = () => myCtx().includes("personal") ? "personal" : (myCtx()[0] || "personal");
 const CATS = ["CCTV", "DVR", "Alarm", "Access", "Cables", "Other"];
+// a category as it reads on screen; what is stored stays as above
+const catLbl = (c) => langMk() ? ({ Alarm: "Аларм", Access: "Пристап", Cables: "Кабли", Other: "Друго" })[c] || c : c;
 // read each time, so they come out in the language chosen
 const STATUS = {
   get draft() { return T("Draft", "Нацрт"); }, get sent() { return T("Sent", "Испратена"); },
@@ -825,7 +886,7 @@ const ICON = (() => {
 
 let state = { tab: "today", ctxFilter: "all", catFilter: "all", camType: "all", camMp: "all", offStatus: "all", role: "owner", uid: null, team: [],
   perm: { owner: true, ctx: ["work", "elaks", "personal", "apts"], elaks: true, apts: true, ins: true },
-  elaksView: "work", workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
+  elaksView: (() => { try { return localStorage.getItem("centrala_elaks_view") || "work"; } catch { return "work"; } })(), workFilter: "active", aptView: "stays", aptMonth: new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0"),
   loading: true, mineOnly: false, showDone: false, billAccount: null, aptFilter: keptAptFilter(), showHiddenClients: false,
   people: [], cashMonth: null, repMonth: null,
   tasks: [], completions: [], doneSet: new Set(), skipSet: new Set(), templates: [], settings: [], installs: [],
@@ -840,13 +901,36 @@ let state = { tab: "today", ctxFilter: "all", catFilter: "all", camType: "all", 
 const PAYMENTS = { limit: 400 };
 
 function offlineNow() { return typeof navigator !== "undefined" && navigator.onLine === false; }
+// What went wrong, said so a person knows what to do — not the database's own words.
+function plainError(e) {
+  const m = String((e && (e.message || e.details)) || e || ""), c = e && e.code;
+  if (/Failed to fetch|NetworkError|Load failed|network|offline/i.test(m))
+    return T("no connection — check the signal and try again", "нема врска — провери го сигналот и обиди се пак");
+  if (c === "42501" || /row-level security|permission denied/i.test(m))
+    return T("you are not allowed to change this — ask the owner for access", "немаш дозвола да го смениш ова — побарај пристап од сопственикот");
+  if (c === "23505" || /duplicate key/i.test(m))
+    return T("one with the same number or name is already there", "веќе постои едно со ист број или име");
+  if (c === "23503" || /foreign key/i.test(m))
+    return T("something else still uses this", "нешто друго сè уште го користи ова");
+  if (c === "42703" || c === "PGRST204" || /column .* does not exist|Could not find the .* column/i.test(m))
+    return T("the database needs an update for this — run the latest SQL from the repository", "базата треба да се ажурира — пушти го последниот SQL од репозиториумот");
+  if (c === "23502" || /null value in column/i.test(m))
+    return T("something required was left empty", "нешто задолжително е оставено празно");
+  if (c === "22P02" || c === "22007" || c === "22008" || /invalid input syntax/i.test(m))
+    return T("a number or a date is not written the right way", "број или датум не е внесен правилно");
+  if (/JWT|expired|not authenticated|401/i.test(m))
+    return T("you have been signed out — sign in again", "одјавен си — најави се повторно");
+  if (/timeout|timed out/i.test(m))
+    return T("the server took too long — try again", "серверот не одговори навреме — обиди се пак");
+  return T("something went wrong — try again", "нешто тргна наопаку — обиди се пак");
+}
 async function dbq(q, failMsg) {
   if (offlineNow()) {
     toast(T("No signal — not saved. Only tasks and jobs save without a signal.", "Нема сигнал — не е зачувано. Без сигнал се зачувуваат само задачите и работите."));
     throw new Error("offline");
   }
   const { data, error } = await q;
-  if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + error.message); throw error; }
+  if (error) { console.error(error); toast((failMsg || "Not saved") + " — " + plainError(error)); throw error; }
   return data;
 }
 
@@ -1063,6 +1147,41 @@ async function boot() {
   if (keptWho() && (offlineNow() || netFailed(error))) return startApp(null);
   $("login").style.display = "block";
 }
+// Forgot the password: a link to set a new one goes to the e-mail. The link
+// opens the app signed in, and the app asks for the new password at once.
+// (Supabase → Authentication → URL Configuration must list the app's address.)
+let recovering = /type=recovery/.test(location.hash);
+if (db.auth.onAuthStateChange) db.auth.onAuthStateChange((ev) => {
+  if (ev === "PASSWORD_RECOVERY" && !recovering) { recovering = true; setTimeout(askNewPassword, 800); }
+});
+async function forgotPassword() {
+  const email = $("lg-email").value.trim(), out = $("lg-err");
+  if (!email) { out.style.color = "var(--danger)"; out.textContent = T("Type your e-mail above first.", "Прво внеси ја е-поштата погоре."); return; }
+  const { error } = await db.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  out.style.color = error ? "var(--danger)" : "var(--personal)";
+  out.textContent = error ? T("Could not send it — ", "Не може да се испрати — ") + plainError(error)
+    : T("If there is an account for that e-mail, a link to set a new password is on its way. Open it on this phone.",
+        "Ако постои сметка со таа е-пошта, стигнува врска за нова лозинка. Отвори ја на овој телефон.");
+}
+function askNewPassword() {
+  openSheet(`<h2>${T("Set a new password", "Постави нова лозинка")}</h2>
+    <p class="muted" style="margin-top:-4px">${T("You came from the e-mail link. Choose the password you will sign in with from now on.", "Дојде од врската во е-поштата. Избери ја лозинката со која ќе се најавуваш од сега.")}</p>
+    <label>${T("New password", "Нова лозинка")}</label><input id="np-1" type="password" autocomplete="new-password">
+    <label>${T("Once more", "Уште еднаш")}</label><input id="np-2" type="password" autocomplete="new-password">
+    <p class="muted" id="np-err" style="color:var(--danger)"></p>
+    <button class="btn" onclick="saveNewPassword()">${T("Save the password", "Зачувај ја лозинката")}</button>`);
+}
+async function saveNewPassword() {
+  const a = $("np-1").value, b = $("np-2").value, err = $("np-err");
+  if (a.length < 8) { err.textContent = T("At least 8 characters.", "Барем 8 знаци."); return; }
+  if (a !== b) { err.textContent = T("The two are not the same.", "Двете не се исти."); return; }
+  const { error } = await db.auth.updateUser({ password: a });
+  if (error) { err.textContent = plainError(error); return; }
+  recovering = false;
+  try { history.replaceState({}, "", location.pathname); } catch { /* the address keeps the link */ }
+  closeSheet();
+  toast(T("Password changed", "Лозинката е сменета"));
+}
 async function login() {
   const { error } = await db.auth.signInWithPassword({ email: $("lg-email").value.trim(), password: $("lg-pass").value });
   if (error) { $("lg-err").textContent = "Wrong email or password."; return; }
@@ -1138,7 +1257,11 @@ async function startApp(signedIn) {
   keepPushAlive();
   handleNotificationIntent();
   handleShortcut();
+  updateBell();
+  if (recovering) setTimeout(askNewPassword, 500);
+  else setTimeout(() => { if (!sheetOpen) whatsNew(); }, 1200);
   if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data && e.data.centrala && e.data.note) { updateBell(); return; }
     if (e.data && e.data.centrala && e.data.jobId) openJobFromNotice(e.data.jobId);
     else if (e.data && e.data.centrala && e.data.go) runGo(e.data.go);
     else if (e.data && e.data.centrala) runTaskIntent(e.data.taskId, e.data.action);
@@ -1222,7 +1345,7 @@ async function loadOlder(key) {
   const page = state.olderPage[key] || 0, from = K.limit + page * OLDER_PAGE;
   const r = await db.from(K.table).select(K.select).order(K.order, { ascending: false }).range(from, from + OLDER_PAGE - 1);
   loadingOlder = false;
-  if (r.error) return toast(T("Could not load older ones", "Постарите не може да се вчитаат") + " — " + r.error.message);
+  if (r.error) return toast(T("Could not load older ones", "Постарите не може да се вчитаат") + " — " + plainError(r.error));
   const have = new Set(state[key].map((x) => x.id)), fresh = (r.data || []).filter((x) => !have.has(x.id));
   state[key] = state[key].concat(fresh);
   state.olderIds[key] = (state.olderIds[key] || []).concat(fresh.map((x) => x.id));
@@ -1417,7 +1540,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261106-140000";
+const BUILD = "20261116-150000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1650,8 +1773,9 @@ function toastUndo(msg, undo, seconds = 15) {
   t._timer = setTimeout(() => t.classList.remove("on", "act"), seconds * 1000);
 }
 
-// Delete, but keep the row in hand so it can be put straight back.
-async function deleteUndoable(table, row, label, keys) {
+// Delete, but keep the row in hand so it can be put straight back — and the
+// rows the database takes with it (children: [{ table, rows }]), after it.
+async function deleteUndoable(table, row, label, keys, children = []) {
   try { await dbq(db.from(table).delete().eq("id", row.id), T("Not deleted", "Не е избришано")); }
   catch { return false; }
   closeSheet();
@@ -1662,11 +1786,37 @@ async function deleteUndoable(table, row, label, keys) {
     ["stock", "clients", "apartments", "articles", "warranty_until"].forEach((k) => delete copy[k]);
     const { error } = await db.from(table).insert(copy);
     if (error) { console.error(error); return toast(T("Could not undo", "Не може да се врати")); }
+    for (const c of children) {
+      const rows = (c.rows || []).map((r) => { const x = { ...r }; ["stock", "clients", "apartments", "articles", "warranty_until"].forEach((k) => delete x[k]); return x; });
+      if (rows.length) { const r = await db.from(c.table).insert(rows); if (r.error) console.error("undo", c.table, r.error); }
+    }
     await refreshAll(keys); render(); toast(T("Restored", "Вратено"));
   });
   return true;
 }
 let sheetOpen = false, tabPushed = false, ignorePop = false;
+// Typing in an open sheet that has not been saved. Closing it by hand — the
+// ✕, a tap beside it, a swipe down, the back button — asks first; a sheet
+// closed by its own Save does not, and a search box is not typing worth keeping.
+let sheetDirty = false;
+function markSheetDirty(e) {
+  const t = e.target;
+  if (!sheetOpen || !t || !t.closest || !t.closest("#sheet")) return;
+  if (t.matches(".search,[data-nodirty],[type=file],[type=search]") || /search|-q$/i.test(t.id || "")) return;
+  sheetDirty = true;
+  if (offerDraftOn) keepOfferDraft();
+}
+document.addEventListener("input", markSheetDirty, true);
+document.addEventListener("change", markSheetDirty, true);
+async function closeSheetAsked() {
+  if (sheetDirty) {
+    if (!await ask(T("Close without saving? What you typed here will be lost.", "Да се затвори без зачувување? Внесеното ќе се изгуби."),
+      T("Close without saving", "Затвори без зачувување"))) return false;
+    if (offerDraftOn) clearOfferDraft();
+  }
+  closeSheet();
+  return true;
+}
 
 // drag the handle down to dismiss — only on the top bar, so scrolling still works
 let sheetDragY = null;
@@ -1686,7 +1836,7 @@ function sheetDragEnd(e) {
   const sh = $("sheet");
   sh.style.transition = ""; sh.style.transform = "";
   sheetDragY = null;
-  if (dy > 90) closeSheet();
+  if (dy > 90) closeSheetAsked();
 }
 function goBackSilently() { ignorePop = true; history.back(); }
 
@@ -1694,7 +1844,8 @@ function openSheet(html) {
   $("sheet").innerHTML = '<div class="sheet-top" ontouchstart="sheetDragStart(event)" '
     + 'ontouchmove="sheetDragMove(event)" ontouchend="sheetDragEnd(event)">'
     + '<div class="grab"></div>'
-    + '<button class="sheet-x" onclick="closeSheet()" aria-label="Close">\u2715</button></div>' + html;
+    + '<button class="sheet-x" onclick="closeSheetAsked()" aria-label="Close">\u2715</button></div>' + html;
+  sheetDirty = false; offerDraftOn = false;
   $("overlay").classList.add("on");
   requestAnimationFrame(() => $("sheet").classList.add("on"));
   $("sheet").style.display = "block";
@@ -1708,6 +1859,7 @@ function closeSheet(fromBack) {
     try { rec.stop(); } catch (_) {}
     const m = $("mic"); if (m) m.classList.remove("rec");
   }
+  sheetDirty = false; offerDraftOn = false;
   $("sheet").classList.remove("on");
   $("overlay").classList.remove("on");
   setTimeout(() => { $("sheet").style.display = "none"; }, 220);
@@ -1721,9 +1873,276 @@ function closeSheet(fromBack) {
 // and only leave the app from Home with nothing open.
 window.addEventListener("popstate", () => {
   if (ignorePop) { ignorePop = false; return; }
-  if (sheetOpen) { closeSheet(true); return; }
+  if (sheetOpen) {
+    // typing in it: stay, and ask — the step back is put back until they say
+    if (sheetDirty) { history.pushState({ centrala: "sheet" }, ""); closeSheetAsked(); return; }
+    closeSheet(true); return;
+  }
   if (tabPushed) { tabPushed = false; tab("home", true); return; }
 });
+
+/* ---------- light, dark, or as the phone is (this phone) ---------- */
+const themeNow = () => { try { const t = localStorage.getItem("centrala_theme"); return t === "light" || t === "dark" ? t : "auto"; } catch { return "auto"; } };
+const themeLbl = (t) => t === "light" ? T("Light", "Светла") : t === "dark" ? T("Dark", "Темна") : T("As the phone", "Како телефонот");
+function setTheme(t) {
+  try { if (t === "auto") localStorage.removeItem("centrala_theme"); else localStorage.setItem("centrala_theme", t); } catch { /* this time only */ }
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  document.querySelectorAll("#theme-chips .chip").forEach((b, i) => b.classList.toggle("on", ["auto", "light", "dark"][i] === t));
+  if (state.tab === "set") renderSettings();
+}
+
+/* ---------- what this phone is told, and when ----------
+   Each kind can be turned off on this phone, and quiet hours set: then
+   notifications still arrive, without a sound. Kept with this phone's
+   subscription (push_subscriptions.prefs, migration 0011); the server reads it. */
+const PUSH_KINDS = () => [
+  ["tasks", T("Tasks", "Задачи"), T("reminders, tasks given to you, done by others", "потсетници, задачи за тебе, завршени од други"), true],
+  ["digest", T("Morning summary", "Утрински преглед"), T("what is on today", "што е денес"), state.perm.owner],
+  ["jobs", T("Jobs", "Работи"), T("given to you, tomorrow's", "дадени тебе, утрешните"), state.perm.elaks],
+  ["stock", T("Low stock", "Мала залиха"), "", state.perm.elaks],
+  ["money", T("Money owed", "Долгови"), T("unpaid invoices, supplier bills, offers to follow up", "неплатени фактури, сметки кон добавувачи, понуди за следење"), state.perm.elaks && seesCosts()],
+  ["bookings", T("New bookings", "Нови резервации"), "", state.perm.apts],
+  ["bills", T("Apartment bills", "Сметки за станови"), "", state.perm.apts],
+  ["rent", T("Rent late", "Кирија доцни"), "", state.perm.apts],
+  ["insurance", T("Insurance", "Осигурување"), T("policies and green cards ending", "полиси и зелени картони што истекуваат"), state.perm.ins],
+].filter((k) => k[3]);
+let pushPrefs = null, pushEp = null;
+// this phone's subscription, if notifications are on here
+async function myPushEndpoint() {
+  if (!navigator.serviceWorker || !("PushManager" in window)) return null;
+  try {
+    const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_, no) => setTimeout(() => no(new Error("no sw")), 3000))]);
+    const sub = await reg.pushManager.getSubscription();
+    return sub ? sub.endpoint : null;
+  } catch { return null; }
+}
+async function loadPushPrefs() {
+  const el = $("push-kinds");
+  if (!el) return;
+  pushEp = await myPushEndpoint();
+  if (!$("push-kinds")) return;
+  if (!pushEp) { el.innerHTML = `<p class="muted">${T("Turn notifications on above first; then choose here what this phone gets.", "Прво вклучи ги известувањата погоре; потоа избери тука што добива овој телефон.")}</p>`; return; }
+  const r = await db.from("push_subscriptions").select("prefs").eq("endpoint", pushEp).maybeSingle();
+  if (r.error && (r.error.code === "42703" || /prefs/.test(r.error.message || ""))) {
+    el.innerHTML = `<p class="muted">${T("Choosing needs the database update (0011).", "За избирање е потребно ажурирање на базата (0011).")}</p>`; return;
+  }
+  pushPrefs = (r.data && r.data.prefs) || {};
+  renderPushPrefs();
+}
+function renderPushPrefs() {
+  const el = $("push-kinds");
+  if (!el || !pushPrefs) return;
+  const off = new Set(pushPrefs.off || []), q = pushPrefs.quiet || {};
+  el.innerHTML = PUSH_KINDS().map(([k, l, sub]) => `<div class="row" style="gap:10px;margin:8px 0">
+      <button class="clbox ${off.has(k) ? "" : "on"}" data-k="${k}" onclick="pushKindToggle('${k}')">${off.has(k) ? "" : "\u2713"}</button>
+      <span style="flex:1"><b>${l}</b>${sub ? `<span class="muted" style="display:block;font-size:12.5px">${sub}</span>` : ""}</span></div>`).join("")
+    + `<label>${T("Quiet hours — they arrive without a sound", "Тивки часови — стигнуваат без звук")}</label>
+      <div class="grid2"><div><input id="pq-from" type="time" value="${esc(q.from || "")}"></div><div><input id="pq-to" type="time" value="${esc(q.to || "")}"></div></div>
+      <p class="muted" style="font-size:12.5px">${T("Empty: always with a sound. For example 22:00 to 07:00.", "Празно: секогаш со звук. На пример од 22:00 до 07:00.")}</p>
+      <button class="btn" onclick="savePushPrefs()">${T("Save for this phone", "Зачувај за овој телефон")}</button>`;
+}
+function pushKindToggle(k) {
+  const off = new Set(pushPrefs.off || []);
+  if (off.has(k)) off.delete(k); else off.add(k);
+  pushPrefs.off = [...off];
+  sheetDirty = true;
+  renderPushPrefs();
+}
+async function savePushPrefs() {
+  const from = $("pq-from").value, to = $("pq-to").value;
+  const prefs = { off: pushPrefs.off || [], ...(from && to && from !== to ? { quiet: { from, to } } : {}) };
+  try { await dbq(db.from("push_subscriptions").update({ prefs }).eq("endpoint", pushEp), T("Not saved", "Не е зачувано")); } catch { return; }
+  pushPrefs = prefs; sheetDirty = false;
+  toast(T("Saved for this phone", "Зачувано за овој телефон"));
+}
+
+/* ---------- the notifications this phone has had ----------
+   The service worker keeps each one (the last 50); the bell at the top lists
+   them, and lights up while some are unread. */
+function notesDb() {
+  return new Promise((ok, no) => {
+    const r = indexedDB.open("centrala-notes", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("notes", { keyPath: "at" });
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => no(r.error);
+  });
+}
+async function readNotes() {
+  try {
+    const d = await notesDb();
+    const all = await new Promise((ok) => { const r = d.transaction("notes").objectStore("notes").getAll(); r.onsuccess = () => ok(r.result || []); r.onerror = () => ok([]); });
+    d.close();
+    return all.sort((a, b) => b.at - a.at);
+  } catch { return []; }
+}
+async function markNotesRead() {
+  try {
+    const d = await notesDb();
+    await new Promise((ok) => {
+      const tx = d.transaction("notes", "readwrite"), st = tx.objectStore("notes"), r = st.getAll();
+      r.onsuccess = () => { for (const n of r.result || []) if (!n.read) st.put({ ...n, read: true }); };
+      tx.oncomplete = ok; tx.onerror = ok;
+    });
+    d.close();
+  } catch { /* nothing kept */ }
+}
+async function updateBell() {
+  const n = (await readNotes()).filter((x) => !x.read).length;
+  const dot = $("bell-dot");
+  if (dot) dot.classList.toggle("on", n > 0);
+}
+const agoText = (ms) => {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return T("just now", "сега");
+  if (m < 60) return `${m} ${T("min ago", "мин.")}`;
+  if (m < 60 * 12) return `${Math.round(m / 60)} ${T("h ago", "ч.")}`;
+  const d = new Date(ms);
+  return `${dmy(d.toLocaleDateString("sv-SE"))} ${d.toTimeString().slice(0, 5)}`;
+};
+async function openNotifList() {
+  const list = await readNotes();
+  openSheet(`<h2>${T("Notifications", "Известувања")}</h2>
+    <p class="muted" style="margin-top:-4px">${T("What this phone received — the last 50. Tap one to open it.", "Што стигнало на овој телефон — последните 50. Допри за да отвориш.")}</p>
+    ${list.length ? list.map((n) => `<div class="card row tapp${n.read ? "" : " unread"}" role="button" tabindex="0" onclick="noteGo(${n.at})" style="gap:10px;align-items:flex-start">
+        <div style="flex:1;min-width:0"><b>${esc(n.title)}</b><div class="muted" style="font-size:13px">${esc(n.body)}</div></div>
+        <span class="muted nw" style="font-size:12px">${agoText(n.at)}</span></div>`).join("")
+      : `<div class="empty">${state.pushOn === false ? T("Notifications are off on this phone.", "Известувањата се исклучени на овој телефон.") : T("Nothing yet.", "Сè уште ништо.")}</div>`}
+    <button class="btn ghost" onclick="closeSheet();setTimeout(() => openSetSheet('push'), 240)">${T("Choose what this phone gets", "Избери што добива овој телефон")}</button>`);
+  await markNotesRead();
+  updateBell();
+}
+async function noteGo(at) {
+  const n = (await readNotes()).find((x) => x.at === at);
+  closeSheet();
+  if (!n) return;
+  setTimeout(() => {
+    if (n.jobId) openJobFromNotice(n.jobId);
+    else if (n.go) runGo(n.go);
+    else if (n.taskId) runTaskIntent(n.taskId, "open");
+  }, 240);
+}
+
+/* ---------- what is new, once, after an update ---------- */
+const WHATS_NEW = [
+  { build: "20261116", en: [
+    "Search everything from the magnifier at the top: clients, guests, tenants, articles, offers, jobs, invoices, policies, tasks.",
+    "The bell at the top lists the notifications this phone received.",
+    "Settings → Notifications: choose which kinds this phone gets, and quiet hours without a sound.",
+    "A form you are typing in asks before it closes, and a new offer is kept until you save it.",
+    "Each row on Home opens what it names.",
+    "Bills show last month's amounts; deleting a payment, expense or booking now has Undo.",
+    "Light or dark: Settings → Appearance.",
+  ], mk: [
+    "Барај сè од лупата горе: клиенти, гости, закупци, артикли, понуди, работи, фактури, полиси, задачи.",
+    "Ѕвончето горе ги покажува известувањата што стигнале на овој телефон.",
+    "Поставки → Известувања: избери кои видови ги добива овој телефон и тивки часови без звук.",
+    "Формулар во кој пишуваш прашува пред да се затвори, а новата понуда се чува додека не ја зачуваш.",
+    "Секој ред на Дома го отвора она што го кажува.",
+    "Сметките ги покажуваат износите од минатиот месец; бришењето уплата, трошок или резервација има Врати.",
+    "Светла или темна: Поставки → Изглед.",
+  ] },
+];
+function whatsNew(all) {
+  let seen = null;
+  try { seen = localStorage.getItem("centrala_seen_build"); } catch { /* private mode */ }
+  // a phone from before this list sees its first entry once
+  const since = String(seen || "20261106").slice(0, 8);
+  const list = WHATS_NEW.filter((w) => all || w.build > since);
+  try { localStorage.setItem("centrala_seen_build", String(BUILD).slice(0, 8)); } catch { /* shown again next time */ }
+  if (!list.length) return;
+  openSheet(`<h2>${T("What's new", "Што е ново")}</h2>
+    ${list.map((w) => `<ul class="whatsnew">${(langMk() ? w.mk : w.en).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}
+    <button class="btn" onclick="closeSheet()">${T("Got it", "Во ред")}</button>`);
+}
+
+/* ---------- one search for everything ----------
+   From the magnifier at the top of every screen: a client, a guest, a tenant,
+   an article, an offer, a job, an invoice, a purchase, a supplier, a policy,
+   a document, a flat or a task — by name, phone, number, code or plate.
+   Cyrillic and Latin find each other: "petrov" finds Петров. Only what this
+   person can see is searched. */
+const foldText = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[а-џ]/g, (ch) => LAT[ch] ?? ch);
+function openSearch() {
+  openSheet(`<h2>${T("Search", "Пребарај")}</h2>
+    <input class="search" id="gs-q" autocomplete="off" enterkeyhint="search"
+      placeholder="${T("Name, phone, number, code, plate…", "Име, телефон, број, шифра, регистрација…")}" oninput="renderSearch()">
+    <div id="gs-res"><p class="muted">${T("Clients, guests, tenants, articles, offers, jobs, invoices, purchases, policies, documents, flats and tasks.",
+      "Клиенти, гости, закупци, артикли, понуди, работи, фактури, набавки, полиси, документи, станови и задачи.")}</p></div>`);
+  setTimeout(() => { const q = $("gs-q"); if (q) q.focus(); }, 60);
+}
+function searchGroups() {
+  const cn = (id) => (state.clients.find((c) => c.id === id) || {}).name || "";
+  const an = (id) => (state.apartments.find((a) => a.id === id) || {}).name || "";
+  const g = [];
+  const add = (label, list, hay, title, sub, go) => g.push({ label, list: list || [], hay, title, sub, go });
+  add(T("Tasks", "Задачи"), state.tasks.filter((t) => !t.done || t.recurrence), (t) => [t.title, t.notes],
+    (t) => t.title, (t) => [t.due_date ? dmy(t.due_date) : T("no date", "без датум"), t.due_time ? t.due_time.slice(0, 5) : ""].filter(Boolean).join(" "),
+    (t) => `tab('today');openTaskSheet('${t.id}')`);
+  if (state.perm.elaks) {
+    add(T("Clients", "Клиенти"), state.clients, (c) => [c.name, c.phone, c.email, c.address, c.contact], (c) => c.name,
+      (c) => [c.phone, c.address].filter(Boolean).join(" · "), (c) => `state.elaksView='cli';tab('elaks');openClientCard('${c.id}')`);
+    add(T("Offers", "Понуди"), state.offers, (o) => [o.number, o.title, cn(o.client_id), o.clients && o.clients.name], (o) => o.title,
+      (o) => [o.number, cn(o.client_id) || (o.clients && o.clients.name), STATUS[o.status]].filter(Boolean).join(" · "), (o) => `state.elaksView='off';tab('elaks');openOfferSheet('${o.id}')`);
+    add(T("Jobs", "Работи"), state.jobs, (j) => [j.title, cn(j.client_id)], (j) => j.title,
+      (j) => [cn(j.client_id), j.scheduled_on ? dmy(j.scheduled_on) : ""].filter(Boolean).join(" · "), (j) => `state.elaksView='job';tab('elaks');openJobSheet('${j.id}')`);
+    add(T("Invoices", "Фактури"), state.invoices, (i) => [i.number, cn(i.client_id)], (i) => T("Invoice ", "Фактура ") + i.number,
+      (i) => [cn(i.client_id), fmt(i.total) + " ден."].filter(Boolean).join(" · "), (i) => `state.elaksView='invoice';tab('elaks');openInvoiceSheet('${i.id}')`);
+    add(T("Articles", "Артикли"), state.stock.filter((a) => a.active !== false), (a) => [a.name, a.code, a.supplier_code, a.supplier, camTag(a)], (a) => a.name,
+      (a) => [a.code, `${fmt(a.stock)} ${unitLbl(a.unit)}`].filter(Boolean).join(" · "), (a) => `state.elaksView='inv';tab('elaks');openArticleDetail('${a.id}')`);
+    if (seesCosts()) {
+      add(T("Purchases", "Набавки"), state.purchases, (p) => [p.supplier, p.doc_no], (p) => p.supplier || T("Purchase", "Набавка"),
+        (p) => [p.doc_no, p.doc_date ? dmy(p.doc_date) : "", fmt(p.total) + " ден."].filter(Boolean).join(" · "), (p) => `state.elaksView='pur';tab('elaks');openPurchaseSheet('${p.id}')`);
+      add(T("Suppliers", "Добавувачи"), state.suppliers, (x) => [x.name, x.phone], (x) => x.name, (x) => x.phone || "",
+        (x) => `state.elaksView='sup';tab('elaks');openSupplierSheet('${x.id}')`);
+    }
+    add(T("Documents", "Документи"), state.docs, (d) => [d.kind, d.doc_no, d.supplier, cn(d.client_id), d.note], (d) => [d.kind, d.doc_no].filter(Boolean).join(" "),
+      (d) => [d.supplier || cn(d.client_id), d.doc_date ? dmy(d.doc_date) : ""].filter(Boolean).join(" · "), (d) => `state.elaksView='doc';tab('elaks');openDocSheet('${d.id}')`);
+  }
+  if (state.perm.apts) {
+    add(T("Apartments", "Станови"), state.apartments, (a) => [a.name, a.address], (a) => a.name, (a) => a.address || "",
+      (a) => `keepAptFilter('${a.id}');state.aptView='stays';tab('apt')`);
+    add(T("Guests", "Гости"), state.stays, (x) => [x.guest_name, x.guest_phone, x.source], (x) => x.guest_name || T("Guest", "Гостин"),
+      (x) => [an(x.apartment_id), `${dmy(x.check_in)} → ${dmy(x.check_out)}`].filter(Boolean).join(" · "),
+      (x) => `keepAptFilter('${x.apartment_id}');state.aptView='stays';tab('apt');openStaySheet('${x.id}')`);
+    add(T("Tenants", "Закупци"), state.leases, (l) => [l.tenant_name, l.tenant_phone], (l) => l.tenant_name,
+      (l) => [an(l.apartment_id), l.tenant_phone].filter(Boolean).join(" · "), (l) => `keepAptFilter('${l.apartment_id}');state.aptView='rent';tab('apt');openLeaseSheet('${l.id}')`);
+  }
+  if (state.perm.ins) {
+    add(T("Policies", "Полиси"), state.policies, (x) => [x.holder_name, x.policy_no, x.plate, x.phone, x.kind, x.green_card_no], (x) => x.holder_name,
+      (x) => [x.kind, x.plate, x.policy_no, x.end_date ? dmy(x.end_date) : ""].filter(Boolean).join(" · "), (x) => `tab('ins');openPolicySheet('${x.id}')`);
+  }
+  return g;
+}
+function renderSearch() {
+  const el = $("gs-res");
+  if (!el) return;
+  const raw = $("gs-q").value.trim();
+  const words = foldText(raw).split(/\s+/).filter(Boolean);
+  const digits = raw.replace(/\D/g, "");
+  if (!words.length || raw.length < 2) { el.innerHTML = `<p class="muted">${T("Type at least two letters.", "Внеси барем две букви.")}</p>`; return; }
+  const html = searchGroups().map((gr) => {
+    const hits = gr.list.filter((x) => {
+      const parts = gr.hay(x).filter(Boolean).map(String);
+      const hay = foldText(parts.join(" "));
+      if (words.every((w) => hay.includes(w))) return true;
+      // a phone typed with or without its spaces and leading zero
+      return digits.length >= 4 && parts.some((p) => p.replace(/\D/g, "").includes(digits));
+    });
+    if (!hits.length) return "";
+    return `<div class="sec">${esc(gr.label)} · ${hits.length}</div>` + hits.slice(0, 6).map((x) => `
+      <div class="card row tapp" role="button" tabindex="0" onclick="searchGo(${JSON.stringify(gr.go(x)).replace(/"/g, "&quot;")})">
+        <div style="flex:1;min-width:0"><b>${esc(gr.title(x) || "—")}</b><div class="muted" style="font-size:12.5px">${esc(gr.sub(x) || "")}</div></div>
+        <span class="chev">›</span></div>`).join("") + (hits.length > 6 ? `<p class="muted" style="font-size:12.5px;margin:-2px 0 8px">${T(`and ${hits.length - 6} more — type a little more`, `и уште ${hits.length - 6} — внеси уште малку`)}</p>` : "");
+  }).join("");
+  el.innerHTML = html || `<p class="muted">${T("Nothing found for", "Ништо не е најдено за")} “${esc(raw)}”.</p>`;
+}
+// the search closes, then the place opens, as if it had been tapped there
+function searchGo(js) {
+  closeSheet();
+  setTimeout(() => { try { (new Function(js))(); } catch (e) { console.error("search open", e); } }, 240);
+}
 
 /* ============================================================
    TASKS
@@ -2056,8 +2475,8 @@ function renderTaskBar() {
   const el = $("bar-acts");
   if (!el || state.tab !== "today") return;
   el.innerHTML = (state.tasks.some((t) => isHabit(t) && taskInScope(t, state.ctxFilter))
-    ? `<button onclick="openHabits()" aria-label="${T("Habits", "Навики")}">${ICON.flame}${T("Habits", "Навики")}</button>` : "")
-    + `<button onclick="openHistory()" aria-label="${T("Completed", "Завршени")}">${ICON.check}${T("Completed", "Завршени")}</button>`;
+    ? `<button onclick="openHabits()" aria-label="${T("Habits", "Навики")}">${ICON.flame}<span class="bl">${T("Habits", "Навики")}</span></button>` : "")
+    + `<button onclick="openHistory()" aria-label="${T("Completed", "Завршени")}">${ICON.check}<span class="bl">${T("Completed", "Завршени")}</span></button>`;
 }
 function renderTaskStrip() {
   const el = $("tk-strip");
@@ -3027,7 +3446,7 @@ async function saveTask(id) {
 }
 async function delTask(id) {
   const row = state.tasks.find((x) => x.id === id);
-  if (!row || !await ask("Delete this task?")) return;
+  if (!row) return;
   const copy = { ...row }, days = state.completions.filter((c) => c.task_id === id)
     .map((c) => ({ task_id: id, done_on: c.done_on, skipped: !!c.skipped }));
   ["clients", "apartments"].forEach((k) => delete copy[k]);
@@ -3163,7 +3582,7 @@ function camGroups(list) {
 
 function renderInv() {
   $("cat-filter").innerHTML = ["all", ...CATS].map((c) =>
-    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? "All" : c}</button>`).join("");
+    `<button class="chip ${state.catFilter === c ? "on" : ""}" onclick="state.catFilter='${c}';renderInv()">${c === "all" ? T("All", "Сите") : catLbl(c)}</button>`).join("");
   const q = ($("inv-search").value || "").trim().toLowerCase();
   // you may remember the supplier's code, or a line from the specs, rather
   // than the name — so match against all of it, the IP / Turbo HD / MP tag
@@ -3595,7 +4014,8 @@ async function saveCashEntry(id) {
 async function delCashEntry(id, linked) {
   const row = state.cash.find((x) => x.id === id);
   const extra = linked ? "\n\nThe stock movement it came from will stay — remove that separately if it was also wrong." : "";
-  if (!await ask("Delete this cash entry?" + extra)) return;
+  // one tied to a stock movement asks, as undoing it here would not undo that
+  if ((linked || !row) && !await ask("Delete this cash entry?" + extra)) return;
   if (row) return void await deleteUndoable("elaks_cash", row, T("Entry deleted", "Ставката е избришана"), ["cash", "cashTotal"]);
   try { await dbq(db.from("elaks_cash").delete().eq("id", id), "Not deleted"); } catch { return; }
   closeSheet(); await refreshAll(["cash", "cashTotal"]); render();
@@ -3623,7 +4043,7 @@ function openArticleSheet(id, preset) {
     <label>Name</label><input id="ar-name" value="${esc(a.name || "")}" placeholder="e.g. 5MP Hikvision DS-2CE17K0T-LFS">
     <div class="grid2">
       <div><label>Code</label><input id="ar-code" value="${esc(a.code || "")}"></div>
-      <div><label>Category</label><select id="ar-cat">${CATS.map((c) => `<option ${a.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+      <div><label>Category</label><select id="ar-cat">${CATS.map((c) => `<option value="${c}" ${a.category === c ? "selected" : ""}>${catLbl(c)}</option>`).join("")}</select></div>
     </div>
     <div class="grid2">
       <div><label>Unit</label><select id="ar-unit"><option value="ком" ${a.unit === "ком" ? "selected" : ""}>${T("pcs", "ком")}</option><option ${a.unit === "m" ? "selected" : ""}>m</option></select></div>
@@ -4165,6 +4585,7 @@ const ELAKS_SECTIONS = () => [["work", T("Work", "Работа")], ["off", T("Of
   ["doc", T("Documents", "Документи")]].filter(([v]) => seesCosts() || (v !== "pur" && v !== "sup"));
 function renderElaks() {
   if (!ELAKS_SECTIONS().some(([v]) => v === state.elaksView)) state.elaksView = "work";
+  try { localStorage.setItem("centrala_elaks_view", state.elaksView); } catch { /* opens on Work next time */ }
   const bar = $("elaks-tabs");
   // replacing the buttons resets the strip to the start; keep where it was
   const kept = bar.scrollLeft;
@@ -4210,7 +4631,7 @@ function renderOffers() {
       <span class="led ${o.status}"></span>
       <div style="flex:1;min-width:0">
         <b>${esc(o.title)}</b>
-        <div class="o-num">${o.number} · ${esc(o.clients?.name || "no client")} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ' · <span style="color:var(--personal)">paid</span>' : ' · <span style="color:var(--amber)">part paid</span>') : ""}${needsDeduct(o) ? ' · <span style="color:var(--danger)">stock not taken out</span>' : ""}${authorTag(o.created_by)}${offerExpired(o) ? ' · <span style="color:var(--danger)">expired</span>' : ""}</div>
+        <div class="o-num">${o.number} · ${esc(o.clients?.name || T("no client", "без клиент"))} · ${STATUS[o.status]}${offerPaid(o) ? (offerSettled(o) ? ` · <span style="color:var(--personal)">${T("paid", "платена")}</span>` : ` · <span style="color:var(--amber)">${T("part paid", "делумно платена")}</span>`) : ""}${needsDeduct(o) ? ` · <span style="color:var(--danger)">${T("stock not taken out", "не е разнижено од магацин")}</span>` : ""}${authorTag(o.created_by)}${offerExpired(o) ? ` · <span style="color:var(--danger)">${T("expired", "истечена")}</span>` : ""}</div>
       </div>
       <span class="o-total mono">${fmt(o.grand_total)}</span>
     </div>`).join("") + olderButton("offers", T("Show older offers", "Прикажи постари понуди"))
@@ -4228,6 +4649,30 @@ async function nextOfferNumber() {
     return `${y}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
   }
 }
+// A new offer being written is kept on the phone as it grows, so a phone call,
+// a closed app or a slip of the finger does not lose it. Saving it, or
+// choosing to close without saving, lets it go.
+const OFFER_DRAFT = "centrala_offer_draft";
+let offerDraftOn = false;
+const offerDraft = () => { try { return JSON.parse(localStorage.getItem(OFFER_DRAFT) || "null"); } catch { return null; } };
+function clearOfferDraft() { try { localStorage.removeItem(OFFER_DRAFT); } catch { /* nothing kept */ } }
+function keepOfferDraft() {
+  if (!offerDraftOn || !$("of-title")) return;
+  const d = { at: Date.now(), title: $("of-title").value, system: $("of-system").value, client_id: $("of-client").value,
+    validity: parseInt($("of-val").value) || 7, items: offerItems, show_total: offerShowsTotal() };
+  if (!d.title.trim() && !d.items.length) return clearOfferDraft();
+  try { localStorage.setItem(OFFER_DRAFT, JSON.stringify(d)); } catch { /* no room: the sheet still has it */ }
+}
+function resumeOfferDraft() {
+  const d = offerDraft();
+  if (!d) return;
+  openOfferSheet(null, d.client_id || "", { title: d.title, system: d.system, validity: d.validity, items: d.items || [], show_total: d.show_total, draft: true });
+}
+function dropOfferDraft() {
+  clearOfferDraft();
+  const el = $("of-draft"); if (el) el.remove();
+  offerDraftOn = true;
+}
 async function openOfferSheet(id, forClient, preset) {
   if (id && !await ensureLoaded("offers", id)) return toast(T("That offer could not be loaded", "Понудата не може да се вчита"));
   if (id) await ensurePaymentsOf(id);
@@ -4242,23 +4687,28 @@ async function openOfferSheet(id, forClient, preset) {
     const a = state.stock.find((x) => x.id === aid);
     if (a) offerItems.push(articleItem(a));
   }
+  const draft = !id && !preset && !forClient ? offerDraft() : null;
   openSheet(`
     <h2>${id ? T("Offer ", "Понуда ") + o.number : T("New offer ", "Нова понуда ") + o.number}</h2>
+    ${draft ? `<div class="card" id="of-draft" style="border-color:var(--amber)">
+      <b>${T("An offer you did not save", "Понуда што не ја зачува")}</b>
+      <div class="muted" style="margin:2px 0 8px">${new Date(draft.at).toLocaleString("en-GB", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${
+        draft.title ? " · " + esc(draft.title) : ""} · ${(draft.items || []).length} ${T("items", "ставки")}</div>
+      <div class="grid2"><button class="btn sm amber" style="width:100%;margin:0" onclick="resumeOfferDraft()">${T("Carry on with it", "Продолжи ја")}</button>
+        <button class="btn sm ghost" style="width:100%;margin:0" onclick="dropOfferDraft()">${T("Start a new one", "Започни нова")}</button></div></div>` : ""}
     <label>System title</label><input id="of-title" value="${esc(o.title)}" placeholder="e.g. 2 Камери + Аларм Систем">
     <label>Description (Систем:)</label><input id="of-system" value="${esc(o.system || "")}" placeholder="e.g. 2 IP камери + DVR + Централа">
+    <label>Client</label>
+    <input type="hidden" id="of-client" value="${esc(o.client_id || "")}">
+    <input id="of-client-name" autocomplete="off" value="${esc((state.clients.find((c) => c.id === o.client_id) || {}).name || "")}"
+      placeholder="${T("Type a name or phone…", "Внеси име или телефон…")}" oninput="offerClientSuggest()" onfocus="offerClientSuggest(true)">
+    <div id="of-client-list"></div>
     <div class="grid2">
-      <div><label>Client</label><select id="of-client">
-        <option value="">${T("— select —", "— избери —")}</option>
-        ${state.clients.filter((c) => c.active !== false || o.client_id === c.id)
-        .map((c) => `<option value="${c.id}" ${o.client_id === c.id ? "selected" : ""}>${esc(c.name)}${c.active === false ? " · " + T("hidden", "скриен") : ""}</option>`).join("")}
-      </select></div>
       <div><label>Date</label><input id="of-date" type="date" value="${o.offer_date}"></div>
-    </div>
-    <div class="grid2">
       <div><label>Validity (days)</label><input id="of-val" type="number" value="${o.validity}"></div>
-      <div><label>Status</label><select id="of-status">${Object.keys(STATUS).map((s) =>
-        `<option value="${s}" ${o.status === s ? "selected" : ""}>${STATUS[s]}</option>`).join("")}</select></div>
     </div>
+    <label>Status</label><select id="of-status">${Object.keys(STATUS).map((s) =>
+      `<option value="${s}" ${o.status === s ? "selected" : ""}>${STATUS[s]}</option>`).join("")}</select>
     <div class="sec">Items</div>
     <input id="of-search" placeholder="Search article to add…" oninput="renderPicker()">
     <div id="of-picker"></div>
@@ -4316,6 +4766,40 @@ async function openOfferSheet(id, forClient, preset) {
     ${id ? `<button class="btn danger" onclick="delOffer('${id}')">Delete</button>` : ""}
   `);
   renderOfferItems();
+  // a new one is kept as it is written — once an older draft has been taken up or let go
+  offerDraftOn = !id && !draft;
+  if (preset && preset.draft) sheetDirty = true;
+}
+// The client, by typing: a name or a phone finds them; a name nobody has yet
+// adds them on the spot, without leaving the offer.
+function offerClientSuggest(focusing) {
+  const box = $("of-client-name"), el = $("of-client-list");
+  if (!box || !el) return;
+  const q = box.value.trim(), n = normName(q), digits = q.replace(/\D/g, "");
+  const live = state.clients.filter((c) => c.active !== false);
+  const exact = live.find((c) => normName(c.name) === n) || null;
+  if (!focusing) $("of-client").value = exact ? exact.id : "";
+  if (!q || (focusing && exact && $("of-client").value === exact.id)) { el.innerHTML = ""; return; }
+  const hits = live.filter((c) => normName(c.name).includes(n) || (digits.length >= 3 && String(c.phone || "").replace(/\D/g, "").includes(digits))).slice(0, 6);
+  el.innerHTML = `<div class="pick">${hits.map((c) => `<button class="pickrow" onclick="pickOfferClient('${c.id}')"><b>${esc(c.name)}</b>${
+      c.phone ? `<span class="muted">${esc(c.phone)}</span>` : ""}</button>`).join("")}${exact ? ""
+      : `<button class="pickrow add" onclick="addOfferClient()">+ ${T("New client", "Нов клиент")} “${esc(q)}”</button>`}</div>`;
+}
+function pickOfferClient(id) {
+  const c = state.clients.find((x) => x.id === id);
+  if (!c) return;
+  $("of-client").value = c.id; $("of-client-name").value = c.name; $("of-client-list").innerHTML = "";
+  sheetDirty = true; keepOfferDraft();
+}
+async function addOfferClient() {
+  const name = $("of-client-name").value.trim();
+  if (!name) return;
+  let made;
+  try { made = await dbq(db.from("clients").insert({ name }).select().single(), T("Client not saved", "Клиентот не е зачуван")); } catch { return; }
+  state.clients.push(made);
+  state.clients.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  pickOfferClient(made.id);
+  toast(T(`${name} added to clients — their phone and address can go on their card`, `${name} е додаден во клиенти — телефонот и адресата на неговата картичка`));
 }
 function renderPicker() {
   const q = ($("of-search").value || "").toLowerCase();
@@ -4491,6 +4975,7 @@ function offerMarkupAll() {
   toast(T(`${n} item${n > 1 ? "s" : ""} at +${pct}%`, `${n} ставки на +${pct}%`));
 }
 function updateTotal() {
+  if (offerDraftOn) setTimeout(keepOfferDraft, 0);
   let sum = 0;
   offerItems.forEach((it, i) => {
     const t = itemTotal(it);
@@ -4571,8 +5056,9 @@ async function saveOffer(id, generate, pdf, share, send) {
         row.number = await nextOfferNumber();
         ins = await db.from("offers").insert(row).select().single();
       }
-      if (ins.error) { toast("Offer not saved — " + ins.error.message); return; }
+      if (ins.error) { toast(T("Offer not saved", "Понудата не е зачувана") + " — " + plainError(ins.error)); return; }
       saved = ins.data;
+      clearOfferDraft();
     }
   } catch { return; }
   await refreshAll(["offers", "stock"]);
@@ -6728,7 +7214,7 @@ async function saveDoc(id) {
 
 async function delDoc(id) {
   const d = state.docs.find((x) => x.id === id);
-  if (!await ask(T("Remove this document?", "Отстрани го документот?"))) return;
+  if (!d) return;
   await deleteUndoable("documents", d, T("Document removed", "Документот е отстранет"), ["docs"]);
 }
 
@@ -7358,7 +7844,7 @@ async function testPush() {
     r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/push?test=1", { method: "POST",
       headers: { Authorization: "Bearer " + session.access_token, apikey: CONFIG.SUPABASE_ANON_KEY } });
     j = await r.json().catch(() => ({}));
-  } catch (e) { return say(T("Could not reach the server: ", "Серверот не е достапен: ") + e.message); }
+  } catch (e) { return say(T("Could not reach the server: ", "Серверот не е достапен: ") + plainError(e)); }
   if (!r.ok) return say(T(`The server did not send it (${r.status}).`, `Серверот не го испрати (${r.status}).`));
   if (!j.sent) {
     state.pushSaved = false; updatePushState();
@@ -7386,30 +7872,32 @@ function renderSettings() {
     `<div class="setrow" role="button" tabindex="0" onclick="${action}"><span class="ico">${icon}</span>
       <span class="txt"><b>${title}</b><span>${sub}</span></span><span class="chev">›</span></div>`;
 
-  const pushSub = state.pushOn === true ? `On · daily summary ${setting("digest_hour", "07:30")}`
-    : state.pushOn === false ? "Off — tap to turn on" : "Daily summary " + setting("digest_hour", "07:30");
+  const pushSub = state.pushOn === true ? `${T("On · daily summary", "Вклучени · дневен преглед")} ${setting("digest_hour", "07:30")}`
+    : state.pushOn === false ? T("Off — tap to turn on", "Исклучени — допри за да ги вклучиш") : T("Daily summary ", "Дневен преглед ") + setting("digest_hour", "07:30");
   let html = '<div class="setgrp" style="margin-top:2px">You</div>'
     + row("&#128276;", "Notifications", pushSub, "openSetSheet('push')")
     + row("&#10003;", "Checklist templates",
-        state.templates.length ? `${state.templates.length} saved` : "None yet", "openSetSheet('templates')");
+        state.templates.length ? `${state.templates.length} ${T("saved", "зачувани")}` : T("None yet", "Сè уште нема"), "openSetSheet('templates')");
 
   if (state.perm.elaks || state.perm.apts) html += '<div class="setgrp">Business</div>';
-  if (state.perm.elaks) html += row("&#128230;", "Elaks", "Export articles, movements and offers", "openSetSheet('elaks')");
+  if (state.perm.elaks) html += row("&#128230;", "Elaks", T("Company details, export articles, movements and offers", "Податоци за фирма, извоз на артикли, движења и понуди"), "openSetSheet('elaks')");
   if (state.perm.apts) html += row("&#127968;", "Apartments",
-    `Check-out ${setting("checkout_time", "11:00")} · arrivals ${setting("stay_remind_time", "09:00")} · bills from day ${setting("bills_day", "5")}`,
+    T(`Check-out ${setting("checkout_time", "11:00")} · arrivals ${setting("stay_remind_time", "09:00")} · bills from day ${setting("bills_day", "5")}`,
+      `Заминување ${setting("checkout_time", "11:00")} · доаѓања ${setting("stay_remind_time", "09:00")} · сметки од ${setting("bills_day", "5")}-ти`),
     "openSetSheet('apts')");
 
   if (state.perm.owner) html += '<div class="setgrp">Administration</div>'
     + row("&#128274;", "Document reading",
-        setting("ai_key_set", "") === "yes" ? "Key saved · reading notes is on" : "Not set up — add your API key",
+        setting("ai_key_set", "") === "yes" ? T("Key saved · reading notes and pictures is on", "Клучот е зачуван · читањето е вклучено") : T("Not set up — add your API key", "Не е поставено — додај API клуч"),
         "openSetSheet('aikey')")
-    + row("&#128220;", "Activity", "Who added what, across the app", "openSetSheet('activity')")
-    + row("&#128101;", "Team", `${(state.team || []).length} ${(state.team || []).length === 1 ? "person" : "people"} with access`, "openSetSheet('team')")
-    + row("&#128190;", "Backup", "Download everything as one file", "openSetSheet('backup')");
+    + row("&#128220;", "Activity", T("Who added what, across the app", "Кој што додал, низ целата апликација"), "openSetSheet('activity')")
+    + row("&#128101;", "Team", `${(state.team || []).length} ${T((state.team || []).length === 1 ? "person" : "people", (state.team || []).length === 1 ? "лице" : "лица")} ${T("with access", "со пристап")}`, "openSetSheet('team')")
+    + row("&#128190;", "Backup", T("Download everything as one file", "Преземи сè во една датотека"), "openSetSheet('backup')");
 
   html += '<div class="setgrp">App</div>'
     + row("&#127760;", "Language / Јазик", langMk() ? "Македонски" : "English", "openSetSheet('lang')")
-    + row("&#8505;", "About Centrala", "Version " + String(BUILD).slice(0, 8), "openSetSheet('about')")
+    + row("&#127763;", T("Appearance", "Изглед"), themeLbl(themeNow()), "openSetSheet('theme')")
+    + row("&#8505;", "About Centrala", T("Version ", "Верзија ") + String(BUILD).slice(0, 8), "openSetSheet('about')")
     + `<div class="setrow" role="button" tabindex="0" onclick="logout()" style="border-color:var(--danger)">
         <span class="ico" style="background:var(--danger-bg)">&#9211;</span>
         <span class="txt"><b style="color:var(--danger)">Sign out</b><span>${esc(state.email || "")}</span></span></div>`;
@@ -7426,8 +7914,11 @@ function openSetSheet(kind) {
       <label>Daily summary at</label>
       <div class="row"><input id="digest-hour" type="time" value="${setting("digest_hour", "07:30")}" style="flex:1">
         <button class="btn sm" onclick="saveDigestHour()">Save</button></div>
-      <p class="muted" style="font-size:12.5px">One message each morning with what is due — plus reminders for tasks with a time, guest arrivals the day before, and unpaid bills.</p>`);
+      <p class="muted" style="font-size:12.5px">One message each morning with what is due — plus reminders for tasks with a time, guest arrivals the day before, and unpaid bills.</p>
+      <div class="sec">${T("What this phone gets", "Што добива овој телефон")}</div>
+      <div id="push-kinds"><p class="muted">…</p></div>`);
     updatePushState();
+    loadPushPrefs();
     keepPushAlive();
   } else if (kind === "templates") {
     openSheet(`<h2>Checklist templates</h2><div id="tpl-list"></div>
@@ -7488,7 +7979,8 @@ function openSetSheet(kind) {
     loadActivity();
   } else if (kind === "team") {
     openSheet(`<h2>Team</h2><div id="team-list"></div>
-      <p class="muted" style="font-size:12.5px">Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.</p>`);
+      <p class="muted" style="font-size:12.5px">${T("Create logins in Supabase → Authentication. A person appears here after their first sign-in — then grant what they can see.",
+        "Најавите се создаваат во Supabase → Authentication. Лицето се појавува тука по првата најава — потоа дозволи што да гледа.")}</p>`);
     loadTeam();
   } else if (kind === "backup") {
     openSheet(`<h2>Backup</h2>
@@ -7517,6 +8009,14 @@ function openSetSheet(kind) {
       <button class="btn" onclick="saveAiKey()">${on ? "Replace key" : "Save key"}</button>
       ${on ? '<button class="btn danger" onclick="removeAiKey()">Remove key</button>' : ""}
       <p class="muted" style="font-size:12.5px">Create one at console.anthropic.com → API keys. Reading a note costs a fraction of a denar; you are billed by Anthropic, not through Centrala.</p>`);
+  } else if (kind === "theme") {
+    openSheet(`<h2>${T("Appearance", "Изглед")}</h2>
+      <div class="chips" id="theme-chips">
+        <button class="chip ${themeNow() === "auto" ? "on" : ""}" onclick="setTheme('auto')">${themeLbl("auto")}</button>
+        <button class="chip ${themeNow() === "light" ? "on" : ""}" onclick="setTheme('light')">${themeLbl("light")}</button>
+        <button class="chip ${themeNow() === "dark" ? "on" : ""}" onclick="setTheme('dark')">${themeLbl("dark")}</button>
+      </div>
+      <p class="muted" style="font-size:12.5px">${T("As the phone: light by day, dark when the phone is set to dark.", "Како телефонот: светла или темна, според поставката на телефонот.")}</p>`);
   } else if (kind === "lang") {
     openSheet(`<h2>Language / Јазик</h2>
       <div class="chips">
@@ -7529,7 +8029,8 @@ function openSetSheet(kind) {
       <div class="hrow"><span class="muted">Version</span><b class="mono">${BUILD}</b></div>
       <div class="hrow"><span class="muted">Signed in as</span><b>${esc(state.email || "")}</b></div>
       <div class="hrow"><span class="muted">Access</span><b>${[state.perm.elaks ? "Elaks" : "", state.perm.apts ? "Apartments" : ""].filter(Boolean).join(" · ") || "Tasks only"}</b></div>
-      <button class="btn ghost" style="margin-top:14px" onclick="lastBuildCheck=0;checkForUpdate();toast('Checking…')">Check for updates</button>`);
+      <button class="btn ghost" style="margin-top:14px" onclick="lastBuildCheck=0;checkForUpdate();toast('Checking…')">Check for updates</button>
+      <button class="btn ghost" onclick="whatsNew(true)">${T("What's new", "Што е ново")}</button>`);
   }
 }
 
@@ -7685,9 +8186,10 @@ function renderTemplates() {
     : '<p class="muted">No templates yet.</p>';
 }
 async function delTemplate(id) {
-  if (!await ask("Delete this template?")) return;
-  try { await dbq(db.from("task_templates").delete().eq("id", id), "Not deleted"); } catch { return; }
-  await refreshAll(["templates"]); renderTemplates();
+  const row = state.templates.find((x) => x.id === id);
+  if (!row) return;
+  if (await deleteUndoable("task_templates", row, T("Template deleted", "Шаблонот е избришан"), ["templates"]))
+    setTimeout(() => openSetSheet("templates"), 240);
 }
 async function saveCheckoutTime() {
   const t = $("apt-checkout").value || "11:00";
@@ -7742,6 +8244,10 @@ async function saveDigestHour() {
 ============================================================ */
 const BILL_TYPES = ["electricity", "water", "internet", "building", "heating", "booking"];
 const BILL_LBL = { electricity: "Electricity", water: "Water", internet: "Internet", building: "Building", heating: "Heating", booking: "Booking" };
+const BILL_LBL_MK = { electricity: "Струја", water: "Вода", internet: "Интернет", building: "Зграда", heating: "Греење", booking: "Booking" };
+const billLbl = (t) => (langMk() ? BILL_LBL_MK[t] : BILL_LBL[t]) || t;
+// "November 2026" / "Ноември 2026"
+const monthYear = (ym) => { const n = monthName(ym); return n.charAt(0).toUpperCase() + n.slice(1) + " " + String(ym).slice(0, 4); };
 const sumBy = (arr, f) => arr.reduce((a, x) => a + (parseFloat(f(x)) || 0), 0);
 
 // one row of the apartments bank: net on the right, the arithmetic beneath it
@@ -8025,6 +8531,13 @@ function keepAptFilter(v) {
 }
 function setAptFilter(v) { keepAptFilter(v); renderApt(); }
 
+// The money card on top of Apartments: one line, opened by a tap — and it
+// stays the way it was left on this phone.
+const aptCardOpen = () => { try { return localStorage.getItem("centrala_aptcard") === "open"; } catch { return false; } };
+function aptCardToggle() {
+  try { localStorage.setItem("centrala_aptcard", aptCardOpen() ? "shut" : "open"); } catch { /* this time only */ }
+  renderApt();
+}
 function renderApt() {
   // always one flat: the one chosen before, else the first — also when the
   // one chosen before has since been put away or taken off
@@ -8075,10 +8588,13 @@ function renderApt() {
   const accts = flat && aptsOwnOnly() ? state.accounts.filter((a) => Math.round(bal[a.id] || 0) !== 0) : state.accounts;
   const who = one && one.managed_by && one.managed_by !== state.uid ? personName(one.managed_by) : "";
   const arg = flat ? `'${flat}'` : "";
-  $("apt-bank").innerHTML = `<div class="card">
-    <div class="row" style="justify-content:space-between;align-items:flex-start">
+  const shut = !aptCardOpen();
+  $("apt-bank").innerHTML = `<div class="card aptcard${shut ? " shut" : ""}">
+    <div class="row aptcard-top" role="button" tabindex="0" onclick="aptCardToggle()" style="justify-content:space-between;align-items:flex-start">
       <div>
         <div class="bank-big">${fmt(total)} <span style="font-size:16px">ден.</span></div>
+        <div class="shut-only muted" style="font-size:13px">${T("To collect", "За наплата")} <b class="mono" style="color:${soon ? "var(--danger)" : "inherit"}">${fmt(soon)}</b>${
+          noPrice.length ? ` · <span style="color:var(--amber)">${noPrice.length} ${T("without a price", "без цена")}</span>` : ""}</div>
         <div class="bank-lbl">${flat
           // not money in hand: what the accounts really hold is only known for all of them together
           ? T("received from this apartment, less its costs", "примено од овој стан, минус трошоците")
@@ -8087,7 +8603,7 @@ function renderApt() {
       </div>
       <span class="muted nw">${flat
         ? (occ.has(flat) ? T("occupied tonight", "зафатен вечерва") : T("free tonight", "слободен вечерва"))
-        : `${occ.size}/${state.apartments.length} ${T("tonight", "вечерва")}`}</span>
+        : `${occ.size}/${state.apartments.length} ${T("tonight", "вечерва")}`} <span class="aptcard-chev">${shut ? "▾" : "▴"}</span></span>
     </div>
 
     ${accts.length ? `<div class="acct-grid">
@@ -8178,7 +8694,7 @@ function renderCalendar() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
   const [y, m] = state.aptMonth.split("-").map(Number);
   const days = new Date(y, m, 0).getDate();
-  const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const label = monthYear(state.aptMonth);
   const today = todayStr();
   let html = `<div class="row" style="justify-content:center;gap:18px;margin-bottom:6px">
     <button class="chip" onclick="shiftAptMonth(-1)">‹</button><b>${label}</b>
@@ -8356,10 +8872,9 @@ async function saveStayPayment(stayId) {
 
 async function delStayPayment(id) {
   const r = state.stayPays.find((x) => x.id === id);
-  if (!r || !await ask(T("Remove this payment of " + fmt(r.amount) + " ден.?", "Отстрани го плаќањето од " + fmt(r.amount) + " ден.?"))) return;
-  try { await dbq(db.from("stay_payments").delete().eq("id", id), T("Not removed", "Не е отстрането")); } catch { return; }
-  closeSheet(); await refreshAll(["stayPays", "aptCash"]); render();
-  setTimeout(() => openStaySheet(r.stay_id), 240);
+  if (!r) return;
+  if (await deleteUndoable("stay_payments", r, T("Payment removed", "Плаќањето е отстрането"), ["stayPays", "aptCash"]))
+    setTimeout(() => openStaySheet(r.stay_id), 240);
 }
 
 // who still owes something, so it can be chased
@@ -8512,7 +9027,7 @@ function openStaySheet(id, pre) {
     "Сите станови се под месечна кирија. Гостите се за станови што се издаваат на ноќ."));
   const chosen = flats.find((a) => a.id === state.aptFilter);
   const s = id ? state.stays.find((x) => x.id === id)
-              : { check_in: (pre && pre.check_in) || todayStr(), check_out: "", amount: "",
+              : { check_in: (pre && pre.check_in) || todayStr(), check_out: plusDays((pre && pre.check_in) || todayStr(), 1), amount: "",
                   apartment_id: (pre && pre.apartment_id) || (chosen && chosen.id) || flats[0].id };
   openSheet(`
     <h2>${id ? "Edit stay" : "New guest"}</h2>
@@ -8522,8 +9037,14 @@ function openStaySheet(id, pre) {
     ${state.stayPhoneCol ? `<label>${T("Guest phone (opt.)", "Телефон на гостинот (опц.)")}</label>
       <input id="st-phone" type="tel" inputmode="tel" value="${esc(s.guest_phone || "")}">` : ""}
     <div class="grid2">
-      <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}" onchange="stayCalc()"></div>
+      <div><label>Check-in</label><input id="st-in" type="date" value="${s.check_in || ""}" data-was="${s.check_in || ""}" onchange="stayInMoved()"></div>
       <div><label>Check-out</label><input id="st-out" type="date" value="${s.check_out || ""}" onchange="stayCalc()"></div>
+    </div>
+    <div class="row" style="gap:10px;margin-top:8px;align-items:center">
+      <span class="muted nw">${T("Nights", "Ноќи")}</span>
+      <button class="btn sm ghost" style="width:46px;margin:0" onclick="stayNights(-1)" aria-label="${T("One night less", "Една ноќ помалку")}">−</button>
+      <b class="mono" id="st-n" style="min-width:24px;text-align:center">${nightsBetween(s.check_in, s.check_out) || "–"}</b>
+      <button class="btn sm ghost" style="width:46px;margin:0" onclick="stayNights(1)" aria-label="${T("One night more", "Една ноќ повеќе")}">+</button>
     </div>
     <div class="grid2">
       <div><label>Booked via</label><select id="st-src" onchange="stayAcct()">
@@ -8561,10 +9082,10 @@ function openStaySheet(id, pre) {
     <div class="row" style="margin-top:12px">
       <button class="clbox ${stayHasTask(id) ? "on" : ""}" id="st-task"
         onclick="this.classList.toggle('on');this.textContent=this.classList.contains('on')?'\u2713':''">${stayHasTask(id) ? "\u2713" : ""}</button>
-      <span>Reminder task the day before they arrive${(() => {
+      <span>${T("Reminder task the day before they arrive", "Задача-потсетник ден пред доаѓањето")}${(() => {
         const ex = id ? state.tasks.find((t) => t.stay_id === id) : null;
         return ex && ex.due_date
-          ? ` <span class="muted">· set for ${dmy(ex.due_date)}</span>`
+          ? ` <span class="muted">· ${T("set for", "за")} ${dmy(ex.due_date)}</span>`
           : "";
       })()}</span>
     </div>
@@ -8615,11 +9136,31 @@ function stayNetHint() {
     : "";
 }
 
+// the day so many days after another, "2026-11-16" + 3 → "2026-11-19"
+const plusDays = (ds, n) => { const d = new Date(ds + "T12:00"); d.setDate(d.getDate() + n); return d.toLocaleDateString("sv-SE"); };
+// − / + on the nights move the check-out; moving the check-in keeps the nights
+function stayNights(d) {
+  const i = $("st-in").value;
+  if (!i) return;
+  const n = Math.max(1, (nightsBetween(i, $("st-out").value) || 0) + d);
+  $("st-out").value = plusDays(i, n);
+  sheetDirty = true;
+  stayCalc();
+}
+function stayInMoved() {
+  const inEl = $("st-in"), was = inEl.dataset.was, out = $("st-out").value;
+  const n = was && out ? nightsBetween(was, out) : 0;
+  if (inEl.value && (n > 0 || !out || out <= inEl.value)) $("st-out").value = plusDays(inEl.value, Math.max(1, n));
+  inEl.dataset.was = inEl.value;
+  stayCalc();
+}
 function stayCalc() {
   const n = nightsBetween($("st-in").value, $("st-out").value);
   const a = state.apartments.find((x) => x.id === $("st-apt").value);
   const amt = $("st-amt");
-  if (n > 0 && a && a.nightly_rate && !amt.dataset.touched && !amt.value) amt.value = n * a.nightly_rate;
+  // a figure the app filled in follows the nights; one typed stays as typed
+  if (n > 0 && a && a.nightly_rate && !amt.dataset.touched && (!amt.value || amt.dataset.auto)) { amt.value = n * a.nightly_rate; amt.dataset.auto = "1"; }
+  if ($("st-n")) $("st-n").textContent = n > 0 ? n : "–";
   $("st-nights").textContent = n > 0
     ? `${n} night${n > 1 ? "s" : ""}${a && a.nightly_rate ? ` · rate ${fmt(a.nightly_rate)} ден./night` : ""}`
     : "";
@@ -8699,8 +9240,10 @@ async function saveStay(id) {
 }
 async function delStay(id) {
   const row = state.stays.find((x) => x.id === id);
-  if (!row || !await ask("Delete this stay?")) return;
-  await deleteUndoable("stays", row, T("Booking deleted", "Резервацијата е избришана"), ["stays", "tasks", "aptCash"]);
+  if (!row) return;
+  // its payments and its reminder go with it in the database, so they come back with it
+  await deleteUndoable("stays", row, T("Booking deleted", "Резервацијата е избришана"), ["stays", "stayPays", "tasks", "aptCash"],
+    [{ table: "stay_payments", rows: state.stayPays.filter((p) => p.stay_id === id) }, { table: "tasks", rows: state.tasks.filter((t) => t.stay_id === id) }]);
 }
 
 function shiftAptMonth(dir) {
@@ -8711,6 +9254,26 @@ function shiftAptMonth(dir) {
 }
 function billOf(aptId, type) {
   return state.bills.find((b) => b.apartment_id === aptId && (b.month || "").slice(0, 7) === state.aptMonth && b.type === type);
+}
+// what the same bill came to the month before — most are the same or close,
+// so it is offered rather than typed again
+function billLast(aptId, type) {
+  const prev = shiftYm(state.aptMonth, -1);
+  const b = state.bills.find((x) => x.apartment_id === aptId && (x.month || "").slice(0, 7) === prev && x.type === type);
+  return b && parseFloat(b.amount) > 0 ? parseFloat(b.amount) : 0;
+}
+// "Same as last month": every bill of this flat still empty this month takes last month's figure
+async function billsAsLast(aptId) {
+  const a = state.apartments.find((x) => x.id === aptId);
+  if (!a) return;
+  const rows = billTypesFor(a).map((tp) => ({ tp, b: billOf(aptId, tp), last: billLast(aptId, tp) }))
+    .filter((r) => r.last && !(r.b && parseFloat(r.b.amount) > 0))
+    .map((r) => ({ apartment_id: aptId, month: state.aptMonth + "-01", type: r.tp, amount: r.last, paid: r.b ? !!r.b.paid : false,
+      account_id: (r.b && r.b.account_id) || state.billAccount || accountFor({}), paid_on: r.b ? r.b.paid_on || null : null }));
+  if (!rows.length) return;
+  try { await dbq(db.from("bills").upsert(rows, { onConflict: "apartment_id,month,type" }), T("Bills not saved", "Сметките не се зачувани")); } catch { return; }
+  await refreshAll(["bills", "aptCash"]); renderApt();
+  toast(T(`${rows.length} filled in from last month — change any that differ`, `${rows.length} пополнети од минатиот месец — смени ги различните`));
 }
 const EXP_CATS = [["repair", "поправка"], ["furniture", "опрема"], ["supplies", "потрошни"],
                   ["cleaning", "чистење"], ["platform", "платформа"], ["other", "друго"]];
@@ -8816,13 +9379,13 @@ async function saveExpense(id) {
 
 async function delExpense(id) {
   const e = (state.expenses || []).find((x) => x.id === id);
-  if (!await ask(T("Remove this expense?", "Отстрани го трошокот?"))) return;
+  if (!e) return;
   await deleteUndoable("apt_expenses", e, T("Expense removed", "Трошокот е отстранет"), ["expenses", "aptCash"]);
 }
 
 function renderBills() {
   if (!state.apartments.length) { $("apt-body").innerHTML = '<div class="empty">Add an apartment first.</div>'; return; }
-  const label = new Date(state.aptMonth + "-02").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const label = monthYear(state.aptMonth);
   let grand = 0;
   const payFrom = state.billAccount || accountFor({});
   let html = `<div class="row" style="justify-content:center;gap:18px;margin-bottom:10px">
@@ -8843,32 +9406,36 @@ function renderBills() {
         <span class="muted">${T("the tenant pays the bills", "закупецот ги плаќа сметките")}</span></div>`;
       continue;
     }
-    const rows = types.map((tp) => ({ tp, b: billOf(a.id, tp) }));
+    const rows = types.map((tp) => ({ tp, b: billOf(a.id, tp), last: billLast(a.id, tp) }));
+    const fromLast = rows.filter((r) => r.last && !(r.b && parseFloat(r.b.amount) > 0)).length;
     const total = sumBy(rows, (r) => r.b?.amount);
     const paidN = rows.filter((r) => r.b && r.b.paid).length;
     grand += total;
     html += `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
-        <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? "✓ PAID" : paidN + "/" + types.length + " paid"}</span></div>
+        <span style="font-weight:600;color:${paidN === types.length ? "var(--personal)" : "var(--amber)"}">${paidN === types.length ? T("✓ PAID", "✓ ПЛАТЕНО") : paidN + "/" + types.length + " " + T("paid", "платени")}</span></div>
       ${billsBackOn(a, shiftYm(state.aptMonth, 1)) && isMonthly(a)
         && (state.leases || []).some((l) => l.apartment_id === a.id && leaseInMonth(l, shiftYm(state.aptMonth, 1)))
         ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${T(
         `The tenant pays these back with ${monthName(shiftYm(state.aptMonth, 1))}'s rent.`,
         `Закупецот ги враќа со киријата за ${monthName(shiftYm(state.aptMonth, 1))}.`)}</div>` : ""}
-      ${rows.map(({ tp, b }) => `
+      ${rows.map(({ tp, b, last }) => `
         <div class="row" style="margin-top:7px">
           <button class="clbox ${b && b.paid ? "on" : ""}" onclick="setBill('${a.id}','${tp}','paid',${!(b && b.paid)})">${b && b.paid ? "✓" : ""}</button>
-          <span style="flex:1">${BILL_LBL[tp]}</span>
-          <input class="mono" type="number" inputmode="decimal" value="${b ? b.amount : ""}" placeholder="0"
+          <span style="flex:1">${billLbl(tp)}</span>
+          <input class="mono" type="number" inputmode="decimal" value="${b && parseFloat(b.amount) ? b.amount : ""}" placeholder="${last ? last : 0}"
             style="width:96px;text-align:right;padding:7px 8px"
             onchange="setBill('${a.id}','${tp}','amount',parseFloat(this.value)||0)">
         </div>`).join("")}
+      ${fromLast ? `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;margin-top:10px">
+        <span class="muted" style="font-size:12.5px">${T("Grey figures are last month's. Ticking one pays that.", "Сивите износи се од минатиот месец. Штиклирањето го плаќа тој износ.")}</span>
+        <button class="btn sm ghost" style="flex:none" onclick="billsAsLast('${a.id}')">${T("Same as last month", "Исто како минатиот")}</button></div>` : ""}
       ${shown.length > 1 ? `<div class="row" style="justify-content:space-between;margin-top:8px">
         <span class="muted">${T("Total", "Вкупно")}</span>
         <b class="mono">${fmt(total)} ден.</b></div>` : ""}
     </div>`;
   }
-  html += `<div class="totalbar"><span>All bills · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
+  html += `<div class="totalbar"><span>${T("All bills", "Сите сметки")} · ${label}</span><span class="mono">${fmt(grand)} ден.</span></div>`;
   html += expensesBlock(state.aptMonth);
   $("apt-body").innerHTML = html;
 }
@@ -8882,6 +9449,7 @@ async function setBill(aptId, type, field, value) {
   };
   row[field] = value;
   if (field === "paid") row.paid_on = value ? todayStr() : null;
+  if (field === "paid" && value && !(parseFloat(row.amount) > 0)) row.amount = billLast(aptId, type);
   try { await dbq(db.from("bills").upsert(row, { onConflict: "apartment_id,month,type" }), "Bill not saved"); } catch { return; }
   await refreshAll(["bills", "aptCash"]); renderApt();
 }
@@ -8921,7 +9489,7 @@ function openAptStatement(id, year) {
       .reduce((n, s) => n + nightsBetween(s.check_in, s.check_out), 0);
     ti += inc; tb += bil; te += exp; tn += nights;
     if (!inc && !bil && !exp) continue;
-    rows += `<div class="mov"><span>${new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
+    rows += `<div class="mov"><span>${langMk() ? monthName(key).slice(0, 3) : new Date(key + "-02").toLocaleDateString("en-GB", { month: "short" })}
       <span class="muted">${nights ? nights + "n" : ""}</span></span>
       <span class="mono">${fmt(inc)} − ${fmt(bil)}${exp ? ` − <span style="color:var(--amber)">${fmt(exp)}</span>` : ""} = <b>${fmt(inc - bil - exp)}</b></span></div>`;
   }
@@ -8981,7 +9549,7 @@ function openAptSheet(id) {
     <input id="ap-access" value="${esc(a.access_note || "")}" placeholder="bins on Tuesday · parking spot 4">
     <label>${T("Cleaning normally costs (ден.)", "Чистењето обично чини (ден.)")}</label>
     <input id="ap-clean" type="number" inputmode="decimal" step="any" value="${a.cleaning_cost ?? 0}">
-    <label>Check-out time (empty = house default ${setting("checkout_time", "11:00")})</label>
+    <label>${T("Check-out time", "Време на заминување")} (${T("empty", "празно")} = ${setting("checkout_time", "11:00")})</label>
     <input id="ap-checkout" type="time" value="${a.checkout_time ? String(a.checkout_time).slice(0, 5) : ""}">
     <label>Starting amount — cash earned before Centrala (ден.)</label><input id="ap-open" type="number" inputmode="decimal" value="${a.opening_balance ?? 0}">
     ${state.rentCol ? `<label>${T("How it is let", "Како се издава")}</label>
@@ -9031,8 +9599,8 @@ function aptModeChanged() {
 // The other direction: what Centrala publishes, so a booking taken here
 // closes the same nights on the platforms.
 function outFeedBlock(a) {
-  if (!a.feed_token) return `<div class="sec">Your calendar</div>
-    <p class="muted" style="font-size:12.5px">Run feeds-audit-migration.sql to switch this on.</p>`;
+  if (!a.feed_token) return `<div class="sec">${T("Your calendar", "Твојот календар")}</div>
+    <p class="muted" style="font-size:12.5px">${T("Not switched on yet — it needs the database update (feeds-audit-migration.sql).", "Сè уште не е вклучено — потребно е ажурирање на базата (feeds-audit-migration.sql).")}</p>`;
   const base = CONFIG.SUPABASE_URL + "/functions/v1/ical?apt=" + a.feed_token;
   const link = (label, url, why) => `<div class="card">
     <div class="row" style="justify-content:space-between"><b>${label}</b>
@@ -9351,7 +9919,7 @@ async function saveRentPay(leaseId) {
 }
 async function delRentPay(id) {
   const row = (state.rentPays || []).find((x) => x.id === id);
-  if (!row || !await ask(T("Delete this payment?", "Да се избрише уплатата?"))) return;
+  if (!row) return;
   await deleteUndoable("rent_payments", row, T("Payment deleted", "Уплатата е избришана"), ["rentPays"]);
 }
 
@@ -9750,14 +10318,14 @@ function messageGuest(id) {
 function feedBlock(aptId) {
   const mine = state.feeds.filter((f) => f.apartment_id === aptId);
   return `<div class="sec">Calendar sync</div>
-    <p class="muted" style="font-size:12.5px">Paste the calendar link from each platform and bookings arrive here by themselves, once an hour.</p>
+    <p class="muted" style="font-size:12.5px">${T("Paste the calendar link from each platform and bookings arrive here by themselves, once an hour.", "Залепи ја врската до календарот од секоја платформа и резервациите ќе доаѓаат тука сами, еднаш на час.")}</p>
     ${mine.map((f) => `<div class="card">
       <div class="row" style="justify-content:space-between"><b>${esc(f.source)}</b>
         <button class="chip" onclick="delFeed('${f.id}')">Remove</button></div>
       <div class="muted" style="word-break:break-all;font-size:11.5px">${esc((f.url || "").slice(0, 60))}…</div>
       <div class="muted">${f.last_sync
         ? "Last checked " + dmyTime(f.last_sync) + (f.last_status ? " · " + esc(f.last_status) : "")
-        : "Not checked yet — the first sync runs within the hour"}</div>
+        : T("Not checked yet — the first sync runs within the hour", "Сè уште не е проверено — првото синхронизирање е во текот на часот")}</div>
     </div>`).join("")}
     <div class="card">
       <label>Add a calendar</label>
@@ -10215,15 +10783,15 @@ function renderHome() {
     || (a.due_time || "99:99").localeCompare(b.due_time || "99:99"));
   const areas = myCtx().filter((c) => byCtx(c) > 0);
   let html = pushWarning() + `<div class="hcard" role="button" tabindex="0" onclick="tab('today')">
-    <h3>Today${state.mineOnly ? ' <span class="muted" style="font-weight:400;font-size:12.5px">· mine only</span>' : ""}</h3>
+    <h3>${T("Today", "Денес")}${state.mineOnly ? ` <span class="muted" style="font-weight:400;font-size:12.5px">· ${T("mine only", "само мои")}</span>` : ""}</h3>
     <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
       <span class="hbig">${B.todays.length}</span>
-      <span style="white-space:nowrap">${B.late ? `<span class="hflag">${B.late} overdue</span>` : '<span class="hok">nothing late</span>'}</span>
+      <span style="white-space:nowrap">${B.late ? `<span class="hflag">${B.late} ${T("overdue", "задоцнети")}</span>` : `<span class="hok">${T("nothing late", "ништо не доцни")}</span>`}</span>
     </div>
     <div class="hsub">${areas.length
-      ? areas.map((c) => `${CTX[c]} <b>${byCtx(c)}</b>`).join(" · ")
-      : (B.todays.length ? "" : "nothing scheduled today")}${
-      B.undated.length ? `${areas.length ? " · " : ""}no date <b>${B.undated.length}</b>` : ""}</div>
+      ? areas.map((c) => `${ctxLbl(c)} <b>${byCtx(c)}</b>`).join(" · ")
+      : (B.todays.length ? "" : T("nothing scheduled today", "ништо закажано денес"))}${
+      B.undated.length ? `${areas.length ? " · " : ""}${T("no date", "без датум")} <b>${B.undated.length}</b>` : ""}</div>
     ${upNext.slice(0, 3).map((t) => `<div class="hrow">
       <span style="display:flex;align-items:center;gap:9px;min-width:0">
         <button class="tick sm" onclick="event.stopPropagation();toggleTask('${t.id}',null,this)" aria-label="done"></button>
@@ -10232,7 +10800,7 @@ function renderHome() {
       <span class="muted mono" style="display:flex;align-items:center;gap:7px;flex:none">
         ${t.assigned_to && t.assigned_to !== state.uid ? `<span class="who">${initials(personName(t.assigned_to))}</span>` : ""}
         ${t.due_time ? t.due_time.slice(0, 5) : ""}</span></div>`).join("")}
-    ${B.todays.length > 3 ? `<div class="hrow"><span class="muted">+ ${B.todays.length - 3} more</span><span class="muted">›</span></div>` : ""}
+    ${B.todays.length > 3 ? `<div class="hrow"><span class="muted">+ ${B.todays.length - 3} ${T("more", "уште")}</span><span class="muted">›</span></div>` : ""}
   </div>`;
   // Work given to other people, one line each: what they have open, what is
   // for today, what is late. Tap a line for their list.
@@ -10263,26 +10831,26 @@ function renderHome() {
     const waiting = state.purchases.filter((p) => (p.items || []).length && !purFullyArrived(p));
     html += `<div class="hcard" role="button" tabindex="0" onclick="state.elaksView='inv';tab('elaks')">
       <h3>Elaks</h3>
-      ${seesCosts() ? `<div class="hrow"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>` : ""}
-      <div class="hrow"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " articles" : "all ok"}</b></div>
+      ${seesCosts() ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openCashSheet()"><span>Cash register</span><b>${fmt(cashBal())} ден.</b></div>` : ""}
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openOrderSheet()"><span>Low stock</span><b class="${low.length ? "hflag" : "hok"}">${low.length ? low.length + " " + T(low.length === 1 ? "article" : "articles", low.length === 1 ? "артикл" : "артикли") : T("all ok", "сè е во ред")}</b></div>
       ${(() => {
         const t = todayStr();
         const todays = state.jobs.filter((j) => j.scheduled_on === t && j.status !== "done" && j.status !== "cancelled");
         const late = state.jobs.filter((j) => j.scheduled_on && j.scheduled_on < t && j.status !== "done" && j.status !== "cancelled");
         if (!todays.length && !late.length) return "";
-        return `<div class="hrow"><span>${T("Work today", "Работа денес")}</span>
+        return `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='job';state.jobFilter='${todays.length ? "today" : "upcoming"}';tab('elaks')"><span>${T("Work today", "Работа денес")}</span>
           <b>${todays.length}${late.length ? ` <span class="hflag">+${late.length} ${T("late", "задоцнети")}</span>` : ""}</b></div>`;
       })()}
-      <div class="hrow"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
-      ${expired.length ? `<div class="hnote warn">${expired.length} expired</div>` : ""}
-      ${seesCosts() ? `<div class="hrow"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>` : ""}
-      ${owed.length ? `<div class="hrow"><span>Accepted, not paid yet</span><b class="hflag">${fmt(owedSum)} ден.</b></div>
-      <div class="hnote">${owed.length} offer${owed.length > 1 ? "s" : ""}</div>` : ""}
-      ${waiting.length ? `<div class="hrow"><span>Waiting to arrive</span>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='sent';tab('elaks')"><span>Offers awaiting reply</span><b>${sent.length}</b></div>
+      ${expired.length ? `<div class="hnote warn">${expired.length} ${T("expired", expired.length === 1 ? "истечена" : "истечени")}</div>` : ""}
+      ${seesCosts() ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='inv';tab('elaks');openReportSheet()"><span>Profit paid this month</span><b>${fmt(monthProfit)} ден.</b></div>` : ""}
+      ${owed.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='accepted';tab('elaks')"><span>Accepted, not paid yet</span><b class="hflag">${fmt(owedSum)} ден.</b></div>
+      <div class="hnote">${owed.length} ${T(owed.length > 1 ? "offers" : "offer", owed.length > 1 ? "понуди" : "понуда")}</div>` : ""}
+      ${waiting.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='pur';tab('elaks')"><span>Waiting to arrive</span>
         <b style="color:var(--amber)">${waiting.length}</b></div>` : ""}
-      ${pendingStock.length ? `<div class="hrow"><span>Stock not taken out</span>
+      ${pendingStock.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.elaksView='off';state.offStatus='accepted';tab('elaks')"><span>Stock not taken out</span>
         <b class="hflag">${pendingStock.length}</b></div>` : ""}
-      ${billsOpen.length ? `<div class="hrow"><span>Owed to suppliers</span>
+      ${billsOpen.length ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();runGo('bills')"><span>Owed to suppliers</span>
         <b class="${billsLate.length ? "hflag" : ""}">${fmt(billsSum)} ден.</b></div>
       <div class="hnote ${billsLate.length ? "warn" : ""}">${billsOpen.length} ${T(billsOpen.length > 1 ? "bills" : "bill", "фактури")}${billsLate.length ? ` · ${billsLate.length} ${T("overdue", "задоцнети")}` : ""}</div>` : ""}
     </div>`;
@@ -10305,18 +10873,46 @@ function renderHome() {
     const inn = state.stays.filter((s) => s.check_in === today && !s.arrived_at).length;
     html += `<div class="hcard" role="button" tabindex="0" onclick="state.aptView='stays';tab('apt')">
       <h3>Apartments</h3>
-      <div class="hrow"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
-      ${(inn || out) ? `<div class="hrow"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
-      <div class="hrow"><span>${T("Bills", "Сметки")} · ${monthName(billM)}</span>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='stays';tab('apt')"><span>Occupied tonight</span><b>${occ}/${state.apartments.length}</b></div>
+      ${(inn || out) ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='stays';tab('apt')"><span>Today</span><b>${inn ? inn + " " + T("in", "доаѓаат") : ""}${inn && out ? " · " : ""}${out ? out + " " + T("out", "заминуваат") : ""}</b></div>` : ""}
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();homeAptGo('bills','${billM}')"><span>${T("Bills", "Сметки")} · ${monthName(billM)}</span>
         <b class="${unpaid ? "hflag" : "hok"}">${unpaid ? unpaid + " " + T("unpaid", "неплатени") : T("all paid", "сите платени")}</b></div>
-      ${rentLateN ? `<div class="hrow"><span>${T("Rent", "Кирија")} · ${monthName(curM)}</span>
+      ${rentLateN ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();homeAptGo('rent')"><span>${T("Rent", "Кирија")} · ${monthName(curM)}</span>
         <b class="hflag">${rentLateN} ${T("late", "доцни")}</b></div>` : ""}
-      <div class="hrow"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.aptView='apartments';tab('apt')"><span>Net this month</span><b>${fmt(inc - bil)} ден.</b></div>
+    </div>`;
+  }
+  if (state.perm.ins && (state.policies || []).length) {
+    const live = state.policies;
+    const ending = live.filter((p) => { const d = polDaysLeft(p); return d !== null && d >= 0 && d <= 30; });
+    const owe = live.filter((p) => !polSettled(p)), oweSum = sumBy(owe, polBalance);
+    const remit = sumBy(live.filter((p) => !polRemitted(p)), policyDue);
+    html += `<div class="hcard" role="button" tabindex="0" onclick="tab('ins')">
+      <h3>${T("Insurance", "Осигурување")}</h3>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.insView='policies';state.polFilter='expiring';tab('ins')">
+        <span>${T("Ending in 30 days", "Истекуваат за 30 дена")}</span><b class="${ending.length ? "hflag" : "hok"}" style="${ending.length ? "color:var(--amber)" : ""}">${ending.length}</b></div>
+      <div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.insView='policies';state.polFilter='open';tab('ins')">
+        <span>${T("Clients still owe", "Клиентите должат")}</span><b class="${oweSum ? "hflag" : "hok"}">${fmt(oweSum)} ден.</b></div>
+      ${owe.length ? `<div class="hnote">${owe.length} ${T(owe.length === 1 ? "policy" : "policies", owe.length === 1 ? "полиса" : "полиси")}</div>` : ""}
+      ${remit ? `<div class="hrow tapp hgo" role="button" tabindex="0" onclick="event.stopPropagation();state.insView='statements';tab('ins')">
+        <span>${T("Premiums to settle", "Премии за порамнување")}</span><b>${fmt(remit)} ден.</b></div>` : ""}
     </div>`;
   }
   $("home-body").innerHTML = html;
 }
 
+// The Bills or Rent row on Home: the flat that has them, on that month.
+function homeAptGo(view, month) {
+  const curM = todayStr().slice(0, 7);
+  const want = view === "bills"
+    ? (a) => billTypesFor(a).some((t) => !state.bills.some((b) => b.apartment_id === a.id && (b.month || "").slice(0, 7) === month && b.type === t && b.paid))
+    : (a) => (state.leases || []).some((l) => l.apartment_id === a.id && rentLate(l, curM));
+  const flat = state.apartments.find(want);
+  if (flat) keepAptFilter(flat.id);
+  state.aptView = view;
+  if (month) state.aptMonth = month;
+  tab("apt");
+}
 const paymentsOf = (offerId) => state.payments.filter((p) => p.offer_id === offerId);
 // The payments loaded are the latest few hundred, so an older offer may have
 // only some of its own among them. Its kept total (paid_amount, written by
@@ -11233,6 +11829,12 @@ function renderPurchases() {
    not in the list simply stays in English.
 ============================================================ */
 const MK = {
+  "Forgot password?": "Ја заборави лозинката?",
+  "New guest": "Нов гостин", "Edit stay": "Измени престој", "New article": "Нов артикл",
+  "Search supplier or document…": "Барај добавувач или документ…", "Search clients…": "Барај клиенти…",
+  "Search number, client or note…": "Барај број, клиент или белешка…", "Search name, policy number or phone…": "Барај име, број на полиса или телефон…",
+  "e.g. Standup · Order cameras": "пр. Состанок · Нарачај камери", "e.g. 5MP Hikvision DS-2CE17K0T-LFS": "пр. 5MP Hikvision DS-2CE17K0T-LFS",
+  "e.g. Apartment Center 1": "пр. Стан Центар 1", "bins on Tuesday · parking spot 4": "ѓубре во вторник · паркинг место 4",
   "Search work…": "Барај работа…", "Search jobs…": "Барај работи…", "Search invoices…": "Барај фактури…",
   "Search name, code, supplier or specs…": "Барај име, шифра, добавувач или опис…", "Search offers…": "Барај понуди…",
   // Elaks, whole labels
@@ -12743,7 +13345,7 @@ async function saveInstall(id) {
 }
 async function delInstall(id) {
   const row = state.installs.find((x) => x.id === id);
-  if (!row || !await ask("Remove this equipment record?")) return;
+  if (!row) return;
   const copy = { ...row }; delete copy.warranty_until;   // worked out by the database
   await deleteUndoable("installations", copy, T("Equipment removed", "Опремата е отстранета"), ["installs"]);
 }

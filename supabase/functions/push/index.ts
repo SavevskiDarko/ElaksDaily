@@ -57,19 +57,45 @@ const ownerSees = (r: any, t: any) => r.role === "owner" && !(t.apartment_id && 
 // and how many failed otherwise — those are logged, as they used to vanish.
 // go: where the app opens when it is tapped — "order", "unpaid", "bills",
 // "invoice:<id>", "purchase:<id>" (a task or a job has taskId / jobId)
+// The kinds a phone can turn off in Settings → Notifications
+// (push_subscriptions.prefs.off, migration 0011), by the tag a message carries.
+// A test always goes through.
+export function kindOf(tag: string): string | null {
+  if (/^(task-|assign-|done-)/.test(tag) || tag === "overdue") return "tasks";
+  if (tag === "digest") return "digest";
+  if (/^(job-|eve-)/.test(tag)) return "jobs";
+  if (tag === "low-stock") return "stock";
+  if (/^(inv-|bill-|off-)/.test(tag) || tag === "money-week") return "money";
+  if (/^ical-/.test(tag)) return "bookings";
+  if (tag === "bills") return "bills";
+  if (/^rent-/.test(tag)) return "rent";
+  if (/^(policy-|gc-)/.test(tag)) return "insurance";
+  return null;
+}
+// a phone's quiet hours ({ from: "22:00", to: "07:00" }, over midnight or not):
+// what arrives then comes without a sound
+export function quietNow(q: any, hhmm: string): boolean {
+  if (!q || typeof q.from !== "string" || typeof q.to !== "string" || q.from === q.to) return false;
+  return q.from < q.to ? hhmm >= q.from && hhmm < q.to : hhmm >= q.from || hhmm < q.to;
+}
+
 async function sendToAll(title: string, body: string, tag: string, allow: ((r: any) => boolean) | null = null, taskId: string | null = null, jobId: string | null = null, go: string | null = null) {
   const { data: subs } = await db.from("push_subscriptions").select("*");
   const { data: rr } = await db.from("user_roles").select("*");
   const rowOf = new Map((rr ?? []).map((r) => [r.user_id, r]));
-  const out = { sent: 0, gone: 0, failed: 0 };
+  const out = { sent: 0, gone: 0, failed: 0, muted: 0 };
+  const kind = kindOf(tag), n = nowLocal(), at = `${pad(n.getHours())}:${pad(n.getMinutes())}`;
   for (const s of subs ?? []) {
     if (allow) {
       const r = s.user_id ? rowOf.get(s.user_id) : null;
       if (!r || !allow(r)) continue;
     }
+    const prefs = s.prefs ?? {};
+    if (kind && Array.isArray(prefs.off) && prefs.off.includes(kind)) { out.muted++; continue; }
+    const quiet = quietNow(prefs.quiet, at);
     try {
       // 12h so a phone that is off or out of signal still receives it
-      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId, jobId, go }), { urgency: "high", TTL: 43200 });
+      await webpush.sendNotification(s.sub, JSON.stringify({ title, body, tag, taskId, jobId, go, quiet }), { urgency: quiet ? "normal" : "high", TTL: 43200 });
       out.sent++;
     } catch (e: any) {
       if (e.statusCode === 404 || e.statusCode === 410) {
