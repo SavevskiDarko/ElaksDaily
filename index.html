@@ -1638,7 +1638,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-235000";
+const BUILD = "20261122-235500";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2451,6 +2451,13 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122-235500", en: [
+    "3D looks like the real thing: cameras as bullets or turrets, detectors with their lens, the keypad with its keys, the siren with its light, the panel — instead of boxes.",
+    "Give a camera or a device its product from the stock (Product, in its panel): in 3D it then stands as that product's photo, and its name goes on the client's page.",
+  ], mk: [
+    "3D изгледа како вистинско: камерите како булет или турет, детекторите со леќа, тастатурата со копчиња, сирената со светло, централата — наместо коцки.",
+    "Додели ѝ на камера или уред производ од магацинот (Производ, во панелот): во 3D тогаш стои како слика на тој производ, а името оди на страницата за клиентот.",
+  ] },
   { build: "20261122-235000", en: [
     "Alarm devices are bigger and easier to tell apart: each has its own sign — motion, contact, siren, keypad, panel, glass-break, smoke — and a detector's badge points where it looks, with its zone number beside it. They stay the same size on screen as you zoom.",
     "Windows: + Window next to + Door puts a window in a wall of the house or a room. A contact placed by it goes on it.",
@@ -6820,6 +6827,7 @@ function planPanel(st) {
     const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${T("Camera", "Камера")} ${c.n}${c.model ? ` <span class="muted" style="font-weight:400">· ${esc(c.model)}</span>` : ""}</b>${rm}</div>
       <label>${T("Where", "Каде")}</label><input id="pl-cname" value="${esc(c.name || "")}" oninput="planSet('name',this.value)" placeholder="${T("e.g. Gate, Parking", "пр. Порта, Паркинг")}">
+      ${planProductPick(c.article_id, "cam")}
       <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="planSetNum('lens',${l})">${l} mm</button>`).join("")}</div>
       <label>${T("Resolution", "Резолуција")}</label><div class="chips">${Object.keys(PLAN_HPX).map((m) => `<button class="chip ${Number(m) === c.mp ? "on" : ""}" onclick="planSetNum('mp',${m})">${m} MP</button>`).join("")}</div>
       <div class="pl-reads">
@@ -6881,6 +6889,7 @@ function planPanel(st) {
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${alarmName(d.type)}${zoned ? ` · ${T("zone", "зона")} ${d.n ?? "–"}` : ""}${d.model ? ` <span class="muted" style="font-weight:400">· ${esc(d.model)}</span>` : ""}</b>${rm}</div>
       <div class="chips wrap" style="margin-top:6px">${ALARM_PICK.map((ty) => `<button class="chip sm ${d.type === ty ? "on" : ""}" onclick="planAlarmSet('type','${ty}')">${alarmIcon(ty)}${alarmName(ty)}</button>`).join("")}</div>
       <label>${T("Where", "Каде")}</label><input id="pl-aname" value="${esc(d.name || "")}" oninput="planAlarmSet('name',this.value)" placeholder="${T("e.g. Hall, Front door", "пр. Ходник, Влезна врата")}">
+      ${planProductPick(d.article_id, "al")}
       ${zoned ? `<div class="grid2"><div><label>${T("Zone number", "Број на зона")}</label><input type="number" inputmode="numeric" min="1" max="999" value="${d.n ?? ""}" oninput="planAlarmNum('n',parseInt(this.value,10))"></div>
         <div><label>${T("Partition (opt.)", "Партиција (опц.)")}</label><input value="${esc(d.part || "")}" oninput="planAlarmSet('part',this.value)" placeholder="${T("e.g. House", "пр. Куќа")}"></div></div>
         <label>${T("Zone type", "Тип на зона")}</label><div class="chips wrap">${Object.keys(ALARM_ZONES).map((z) => `<button class="chip ${d.zone === z ? "on" : ""}" onclick="planAlarmSet('zone','${z}')">${T(ALARM_ZONES[z][0], ALARM_ZONES[z][1])}</button>`).join("")}</div>` : ""}
@@ -6985,18 +6994,45 @@ function planAlarmSet(k, v) {
   if (!d) return;
   const typing = planIsTyping();
   if (typing) planTyping(pe.sel + k); else planRemember();
-  if (k === "type") {
-    const ty = ALARM_TYPES[v];
-    if (!ty) return;
-    // a new type starts with its own reach and zone; a zone number is kept, or given
-    delete d.range; delete d.angle;
-    d.type = v;
-    // a contact keeps the zone type it had (Entry delay stays); others take their own
-    d.zone = ty.zone ? (v === "contact" && ALARM_ZONES[d.zone] ? d.zone : ty.zone) : null;
-    d.n = ty.zone ? (d.n ?? alarmNext(pe.p)) : null;
-    if (v === "contact") [d.x, d.y, d.h] = alarmOnDoor(pe.p, d.x, d.y);
-  } else d[k] = v;
+  if (k === "type") { if (!ALARM_TYPES[v]) return; alarmRetype(d, v); } else d[k] = v;
   planRender(typing);
+}
+// a new type starts with its own reach and zone; a zone number is kept, or given
+function alarmRetype(d, v) {
+  const ty = ALARM_TYPES[v];
+  delete d.range; delete d.angle;
+  d.type = v;
+  // a contact keeps the zone type it had (Entry delay stays); others take their own
+  d.zone = ty.zone ? (v === "contact" && ALARM_ZONES[d.zone] ? d.zone : ty.zone) : null;
+  d.n = ty.zone ? (d.n ?? alarmNext(pe.p)) : null;
+  if (v === "contact") [d.x, d.y, d.h] = alarmOnDoor(pe.p, d.x, d.y);
+}
+// The product a camera or device is: its name on the client's page, its photo in 3D.
+// Cameras from the cameras in stock, devices from the alarm ones.
+function planProductPick(cur, kind) {
+  const list = (state.stock || []).filter((a) => (kind === "cam" ? camOf(a).kind === "camera" : alarmArticle(a)) || a.id === cur)
+    .slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  if (!list.length) return "";
+  return `<label>${T("Product", "Производ")}</label>
+    <select id="pl-product" onchange="planPickProduct(this.value)">
+      <option value="">${T("— not chosen —", "— не е избран —")}</option>
+      ${list.map((a) => `<option value="${a.id}" ${a.id === cur ? "selected" : ""}>${esc(a.name)}${a.code ? " · " + esc(a.code) : ""}</option>`).join("")}
+    </select>`;
+}
+function planPickProduct(id) {
+  const [kind, sid] = String(pe.sel || "").split(":"), a = id ? state.stock.find((x) => x.id === id) : null;
+  const t = kind === "cam" ? planCam(sid) : kind === "al" ? planAlarm(sid) : null;
+  if (!t) return;
+  planRemember();
+  t.article_id = a ? a.id : null; t.model = a ? a.name : "";
+  if (a && kind === "cam") {
+    // its lens and resolution, where its name or specs say them
+    const src = [a.name, a.code, a.specs].filter(Boolean).join(" ");
+    if (/\d\s*mm\b/i.test(src)) t.lens = planLensOf(src);
+    if (camOf(a).mp != null) t.mp = planMpOf(camOf(a).mp);
+  }
+  if (a && kind === "al") { const ty = alarmTypeOf(a); if (ty && ty !== t.type) alarmRetype(t, ty); }
+  planRender();
 }
 function planAlarmNum(k, v) {
   const d = planAlarm(String(pe.sel).split(":")[1]);
@@ -7525,6 +7561,7 @@ async function planOpen3d(mode) {
   if (!$("p3-wrap") || !pe) return;            // closed while it loaded
   if (!p3Start()) return;
   p3Mode(typeof mode === "string" && planCam(mode) ? mode : "orbit");
+  p3LoadPhotos();
 }
 function p3Start() {
   const THREE = window.THREE, wrap = $("p3-wrap");
@@ -7574,6 +7611,179 @@ function p3Label(text, bg, fg, h = 0.8) {
   s.renderOrder = 10;
   return s;
 }
+// ---------- what the devices look like in 3D ----------
+// Each camera and alarm device is built to look like the thing — a bullet or a turret, a
+// detector with its lens, a keypad with its keys, a siren with its light — drawn
+// four times its size, or it would be a speck beside a house. A device whose stock article has
+// a photo can stand as that photo instead, its white background taken away.
+const P3_BIG = 4;
+// a camera's shape: from its article's name, else a bullet outside and a turret inside
+function p3CamForm(c) {
+  const a = c.article_id && state.stock.find((x) => x.id === c.article_id);
+  const hay = [c.model, a && a.name, a && a.specs].filter(Boolean).join(" ");
+  if (/bullet|булет|цевк/i.test(hay)) return "bullet";
+  if (/dome|turret|eyeball|купол|турет|турел/i.test(hay)) return "turret";
+  return planWhere(pe.p, c.x, c.y) === "yard" && !planInside(pe.p) ? "bullet" : "turret";
+}
+// small pictures, drawn once: a detector's lens, a keypad's keys, a siren's grille
+const P3_CANVAS = {};
+function p3Canvas(name) {
+  if (P3_CANVAS[name]) return P3_CANVAS[name];
+  const c = document.createElement("canvas"), g = c.getContext("2d");
+  const rr = (x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); g.fill(); };
+  if (name === "lens") {
+    c.width = 64; c.height = 64;
+    g.fillStyle = "#1B1F26"; g.fillRect(0, 0, 64, 64);
+    g.strokeStyle = "rgba(255,255,255,.18)"; g.lineWidth = 2;
+    for (let y = 6; y < 64; y += 7) { g.beginPath(); g.moveTo(3, y); g.lineTo(61, y); g.stroke(); }
+  } else if (name === "keys") {
+    c.width = 96; c.height = 128;
+    g.fillStyle = "#F4F4F2"; g.fillRect(0, 0, 96, 128);
+    g.fillStyle = "#2B313B"; rr(14, 7, 68, 15, 3);
+    g.font = "700 14px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    "123456789*0#".split("").forEach((k, i) => {
+      const x = 18 + (i % 3) * 30, y = 38 + Math.floor(i / 3) * 22;
+      g.fillStyle = "#D3D8DE"; rr(x - 11, y - 8, 22, 16, 4);
+      g.fillStyle = "#2B313B"; g.fillText(k, x, y + 1);
+    });
+  } else {          // grille
+    c.width = 64; c.height = 64;
+    g.fillStyle = "#E9EBEE"; g.fillRect(0, 0, 64, 64);
+    g.fillStyle = "#7D8590";
+    for (let y = 5; y < 64; y += 7) for (let x = 5; x < 64; x += 7) if ((x - 32) ** 2 + (y - 32) ** 2 < 27 * 27) { g.beginPath(); g.arc(x, y, 1.8, 0, 7); g.fill(); }
+  }
+  P3_CANVAS[name] = c;
+  return c;
+}
+// the materials the models share, fresh for each build so they go with it
+function p3Mats() {
+  const THREE = p3.THREE, tex = (n) => new THREE.CanvasTexture(p3Canvas(n));
+  // the white plastic a little self-lit, so a device stands out from the wall it is on
+  return { white: new THREE.MeshPhongMaterial({ color: 0xF4F4F1, emissive: 0x4A4A47, shininess: 40 }), dark: new THREE.MeshPhongMaterial({ color: 0x16191F, shininess: 90 }),
+    grey: new THREE.MeshLambertMaterial({ color: 0x9AA0A8, emissive: 0x22252A }), red: new THREE.MeshBasicMaterial({ color: 0xE03131 }), green: new THREE.MeshBasicMaterial({ color: 0x2FB36B }),
+    lens: new THREE.MeshPhongMaterial({ map: tex("lens"), shininess: 80 }), keys: new THREE.MeshLambertMaterial({ map: tex("keys") }),
+    grille: new THREE.MeshLambertMaterial({ map: tex("grille") }) };
+}
+// A model looks along +x from its back, which goes on the wall; sizes are a real device's, in metres.
+function p3Model(kind, M) {
+  const THREE = p3.THREE, g = new THREE.Group();
+  const add = (geo, mat, x, y, z, rot) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); if (rot) m.rotation.set(...rot); g.add(m); return m; };
+  const box = (d, h, w, mat, x, y = 0, z = 0) => add(new THREE.BoxGeometry(d, h, w), mat, x, y, z);
+  const cylX = (r, len, mat, x, y = 0, z = 0) => add(new THREE.CylinderGeometry(r, r, len, 24), mat, x, y, z, [0, 0, Math.PI / 2]);
+  const cylY = (r, len, mat, x, y = 0, z = 0) => add(new THREE.CylinderGeometry(r, r, len, 24), mat, x, y, z);
+  const face = (w, h, mat, x, y = 0, z = 0) => add(new THREE.PlaneGeometry(w, h), mat, x, y, z, [0, Math.PI / 2, 0]);
+  const disc = (r, mat, x, y = 0, z = 0) => add(new THREE.CircleGeometry(r, 24), mat, x, y, z, [0, Math.PI / 2, 0]);
+  const dot = (r, mat, x, y, z) => add(new THREE.SphereGeometry(r, 12, 8), mat, x, y, z);
+  switch (kind) {
+    case "bullet":                                   // plate, arm, body, sun shield, glass
+      cylX(0.035, 0.012, M.white, 0.006); cylX(0.011, 0.05, M.white, 0.035);
+      cylX(0.036, 0.17, M.white, 0.145); box(0.19, 0.008, 0.08, M.white, 0.15, 0.042); cylX(0.03, 0.004, M.dark, 0.232);
+      break;
+    case "turret":                                   // base, ball, lens
+      cylX(0.06, 0.022, M.white, 0.011); dot(0.047, M.white, 0.06, 0, 0); cylX(0.02, 0.012, M.dark, 0.103);
+      break;
+    case "pir": box(0.045, 0.105, 0.06, M.white, 0.0225); face(0.046, 0.04, M.lens, 0.0455, 0.012); dot(0.004, M.red, 0.046, -0.03, 0.017); break;
+    case "curtain": box(0.035, 0.12, 0.032, M.white, 0.0175); face(0.014, 0.085, M.lens, 0.0355, 0.005); break;
+    case "outpir":
+      box(0.07, 0.19, 0.09, M.white, 0.035); box(0.095, 0.012, 0.1, M.white, 0.047, 0.1);
+      face(0.06, 0.045, M.lens, 0.0705, 0.045); face(0.06, 0.045, M.lens, 0.0705, -0.03);
+      break;
+    case "beam": box(0.07, 0.17, 0.07, M.grey, 0.035); face(0.055, 0.12, M.lens, 0.0705); break;
+    case "contact": box(0.08, 0.022, 0.02, M.white, -0.035); box(0.05, 0.018, 0.016, M.white, 0.04); break;
+    case "glass": cylX(0.04, 0.022, M.white, 0.011); disc(0.03, M.grille, 0.0225); break;
+    case "smoke": cylY(0.06, 0.035, M.white, 0, -0.0175); cylY(0.042, 0.004, M.grey, 0, -0.037); dot(0.005, M.red, 0.03, -0.036, 0); break;
+    case "panic": box(0.016, 0.065, 0.042, M.white, 0.008); cylX(0.013, 0.008, M.red, 0.019); break;
+    case "flood": cylY(0.035, 0.016, M.white, 0, 0.008); dot(0.004, M.green, 0.02, 0.017, 0); break;
+    case "siren_in": box(0.035, 0.11, 0.11, M.white, 0.0175); disc(0.035, M.grille, 0.0355); break;
+    case "siren_out":
+      box(0.06, 0.2, 0.15, M.white, 0.03); box(0.008, 0.018, 0.15, M.red, 0.062, 0.086); box(0.008, 0.018, 0.15, M.red, 0.062, -0.086);
+      disc(0.04, M.grille, 0.0605);
+      break;
+    case "keypad": box(0.018, 0.15, 0.11, M.white, 0.009); face(0.1, 0.133, M.keys, 0.0185); break;
+    case "panel": box(0.035, 0.16, 0.16, M.white, 0.0175); disc(0.024, M.dark, 0.0355, 0.02); dot(0.005, M.green, 0.036, -0.05, 0); break;
+    default: box(0.05, 0.08, 0.08, M.white, 0.025);
+  }
+  g.scale.setScalar(P3_BIG);
+  return g;
+}
+// a product photo on white, as a cut-out: the white that touches the edges goes
+function p3CutOut(dataUrl) {
+  return new Promise((ok) => {
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 256 / Math.max(im.naturalWidth, im.naturalHeight)), w = Math.max(1, Math.round(im.naturalWidth * k)), h = Math.max(1, Math.round(im.naturalHeight * k));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const g = c.getContext("2d");
+      g.drawImage(im, 0, 0, w, h);
+      let d;
+      try { d = g.getImageData(0, 0, w, h); } catch { return ok(c); }
+      const px = d.data, seen = new Uint8Array(w * h), stack = [];
+      const bg = (i) => { const r = px[i * 4], gg = px[i * 4 + 1], b = px[i * 4 + 2]; return Math.min(r, gg, b) > 226 && Math.max(r, gg, b) - Math.min(r, gg, b) < 20; };
+      for (let x = 0; x < w; x++) stack.push(x, x + (h - 1) * w);
+      for (let y = 0; y < h; y++) stack.push(y * w, y * w + w - 1);
+      let gone = 0;
+      while (stack.length) {
+        const i = stack.pop();
+        if (seen[i]) continue;
+        seen[i] = 1;
+        if (!bg(i)) continue;
+        px[i * 4 + 3] = 0; gone++;
+        const x = i % w;
+        if (x > 0) stack.push(i - 1);
+        if (x < w - 1) stack.push(i + 1);
+        if (i >= w) stack.push(i - w);
+        if (i < w * (h - 1)) stack.push(i + w);
+      }
+      // nothing would be left: keep the photo whole
+      if (gone < w * h * 0.95) g.putImageData(d, 0, 0); else g.drawImage(im, 0, 0, w, h);
+      ok(c);
+    };
+    im.onerror = () => ok(null);
+    im.src = dataUrl;
+  });
+}
+// the photos of the articles on the plan, from the stock, once the 3D view is open
+async function p3LoadPhotos() {
+  if (!p3) return;
+  p3.photos = p3.photos || new Map();
+  const ids = [...new Set([...(pe.p.cams || []), ...(pe.p.alarm || [])].map((d) => d.article_id).filter(Boolean))].filter((id) => !p3.photos.has(id));
+  if (!ids.length || offlineNow()) return;
+  const r = await within(15000, db.from("article_images").select("article_id, data").in("article_id", ids), { data: null });
+  for (const row of (r && r.data) || []) {
+    const c = await p3CutOut(row.data);
+    if (!p3) return;
+    if (c) p3.photos.set(row.article_id, c);
+  }
+  if (p3 && p3.photos.size) { p3Dyn(); p3Own(); p3Panel(); p3Draw(); }
+}
+function p3Photos() { p3.showPhotos = p3.showPhotos === false; p3Dyn(); p3Own(); p3Panel(); p3Draw(); }
+// a device as its product photo, if it has one and photos are on; else null
+function p3PhotoOf(d) {
+  const c = p3.showPhotos !== false && p3.photos && d.article_id && p3.photos.get(d.article_id);
+  if (!c) return null;
+  const THREE = p3.THREE, s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  const h = 0.9;
+  s.scale.set((h * c.width) / c.height, h, 1);
+  s.userData.photo = true;
+  return s;
+}
+// A device on a wall: its back on the wall it faces away from. In a corner it stays where it
+// is, off both walls, or it would go into them.
+function p3OnWall(p, S, x, y, deg) {
+  const dirs = [];
+  for (const g of planSegsTagged({ ...p, doors: [] })) {
+    const [ax, ay] = g.s, [bx, by] = g.e, l2 = (bx - ax) ** 2 + (by - ay) ** 2;
+    if (l2 < 1e-6) continue;
+    const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / l2));
+    if (Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay))) > 0.6) continue;
+    const ang = ((Math.atan2(by - ay, bx - ax) * 180 / Math.PI) % 180 + 180) % 180;
+    if (!dirs.some((d) => Math.min(Math.abs(d - ang), 180 - Math.abs(d - ang)) < 20)) dirs.push(ang);
+  }
+  if (dirs.length !== 1) return [x, y];
+  const a = deg * Math.PI / 180, bx = -Math.cos(a), by = -Math.sin(a), hit = planHit(x, y, bx, by, S);
+  return hit <= 0.6 ? [x + bx * Math.max(0, hit - 0.07), y + by * Math.max(0, hit - 0.07)] : [x, y];
+}
 // what does not move while aiming: the ground, the houses, the walls
 function p3Scene() {
   const { THREE } = p3, p = pe.p, night = !!p.night, inside = planInside(p);
@@ -7586,9 +7796,11 @@ function p3Scene() {
   const sky = night ? 0x1B2433 : 0xDCE8F5;
   scene.background = new THREE.Color(sky);
   scene.fog = new THREE.Fog(sky, 70, 320);
-  // light that adds up to about one on the ground, so colours show as they are
-  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0x8A9A80, night ? 0.35 : 0.62));
-  const sun = new THREE.DirectionalLight(0xFFFFFF, night ? 0.12 : 0.42);
+  // light that adds up to about one on the ground, so colours show as they are, and
+  // enough of it all round that walls, and the white devices on them, are not grey
+  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0x8A9A80, night ? 0.3 : 0.48));
+  scene.add(new THREE.AmbientLight(0xFFFFFF, night ? 0.12 : 0.3));
+  const sun = new THREE.DirectionalLight(0xFFFFFF, night ? 0.1 : 0.34);
   sun.position.set(-20, 40, -10); scene.add(sun);
   const lam = (color, extra) => new THREE.MeshLambertMaterial({ color, ...extra });
   const flat = (x, y, w, h, mat, lift) => {
@@ -7650,6 +7862,8 @@ function p3Scene() {
     box.position.set(r.x + r.w / 2, H / 2, r.y + r.h / 2); scene.add(box);
     const ed = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), edge); ed.position.copy(box.position); scene.add(ed);
   }
+  // the roof off, the house's walls end at room height: devices on them hang just under the top
+  p3.wallTop = !roof ? (p.roomH ?? 2.7) - 0.2 : null;
   p3.scene = scene; p3.dyn = null;
   p3Dyn();
 }
@@ -7657,7 +7871,7 @@ function p3Scene() {
 function p3Dyn() {
   const { THREE, scene } = p3, p = pe.p, S = planSegs(p), lv = (p.marks || []).map((m) => ({ m, l: planLevel(p, m.x, m.y, S) }));
   if (p3.dyn) { scene.remove(p3.dyn); p3Dispose(p3.dyn); }
-  const dyn = new THREE.Group();
+  const dyn = new THREE.Group(), mats = p3Mats();
   const alarm = pe.layer === "alarm";
   if (alarm) for (const d of p.alarm || []) {
     const t = alarmT(d), poly = alarmPoly(d, S);
@@ -7666,10 +7880,24 @@ function p3Dyn() {
         new THREE.MeshBasicMaterial({ color: t.col, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }));
       m.rotation.x = Math.PI / 2; m.position.y = 0.08; m.renderOrder = 2; dyn.add(m);
     }
-    const y = d.mh ?? t.mh, box = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.22), new THREE.MeshLambertMaterial({ color: t.col }));
-    box.position.set(d.x, y, d.y); dyn.add(box);
-    const lab = p3Label(alarmZoned(d) ? String(d.n ?? "") : t.code, t.col, "#FFFFFF", 0.7);
-    lab.position.set(d.x, y + 0.6, d.y); dyn.add(lab);
+    // where it sits: a smoke detector on the ceiling, a water sensor on the floor, the rest on their wall
+    let x = d.x, z = d.y, y = d.mh ?? t.mh, h = d.h ?? 90;
+    const onWall = ["glass", "siren_in", "siren_out", "keypad", "panel", "panic"].includes(d.type), fan = t.cov === "fan";
+    if (d.type === "smoke") y = planWhere(p, d.x, d.y) === "yard" && !planInside(p) ? y : (p.roomH ?? 2.7);
+    if (d.type === "flood") y = 0.02;
+    if (d.type !== "smoke" && p3.wallTop) y = Math.min(y, p3.wallTop);
+    if (onWall) h = alarmFacing(p, d.x, d.y, h);
+    if (onWall || fan) [x, z] = p3OnWall(p, S, d.x, d.y, h);
+    const node = p3PhotoOf(d) || p3Model(d.type, mats);
+    node.position.set(x, y, z);
+    if (node.userData.photo && (onWall || fan)) { const a = h * Math.PI / 180, out = node.scale.x / 2 + 0.08; node.position.set(d.x + Math.cos(a) * out, y, d.y + Math.sin(a) * out); }
+    if (!node.userData.photo && d.type !== "smoke" && d.type !== "flood") {
+      node.rotation.order = "YZX";
+      node.rotation.set(0, -h * Math.PI / 180, (d.type === "pir" || d.type === "curtain" ? -8 : 0) * Math.PI / 180);
+    }
+    dyn.add(node);
+    const lab = p3Label(alarmZoned(d) ? String(d.n ?? "") : t.code, t.col, "#FFFFFF", 0.42);
+    lab.position.set(x, y + (node.userData.photo ? 0.62 : 0.5), z); dyn.add(lab);
   }
   if (!alarm) for (const c of p.cams || []) {
     const polys = planCone(c, S, p.night);
@@ -7680,15 +7908,15 @@ function p3Dyn() {
       m.rotation.x = Math.PI / 2; m.position.y = 0.08 + (2 - z) * 0.006; m.renderOrder = 2;
       dyn.add(m);
     });
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.2), new THREE.MeshLambertMaterial({ color: 0x1E3A5F }));
-    body.position.x = 0.21; g.add(body);
-    g.position.set(c.x, c.mh || 2.7, c.y);
-    g.rotation.order = "YZX"; g.rotation.set(0, -c.h * Math.PI / 180, -(c.tilt ?? PLAN_TILT) * Math.PI / 180);
+    // the camera as it looks: its product photo, or a bullet or a turret aimed as it is
+    const g = p3PhotoOf(c) || p3Model(p3CamForm(c), mats), cy = p3.wallTop ? Math.min(c.mh || 2.7, p3.wallTop) : c.mh || 2.7;
+    g.position.set(c.x, cy, c.y);
+    if (g.userData.photo) { const a = c.h * Math.PI / 180, out = g.scale.x / 2 + 0.08; g.position.set(c.x + Math.cos(a) * out, cy, c.y + Math.sin(a) * out); }
+    if (!g.userData.photo) { g.rotation.order = "YZX"; g.rotation.set(0, -c.h * Math.PI / 180, -(c.tilt ?? PLAN_TILT) * Math.PI / 180); }
     g.userData.cam = c.id;
     dyn.add(g);
-    const lab = p3Label(String(c.n), "#1E3A5F", "#FFFFFF", 1.1);
-    lab.position.set(c.x, (c.mh || 2.7) + 1, c.y); lab.userData.cam = c.id;
+    const lab = p3Label(String(c.n), "#1E3A5F", "#FFFFFF", 0.6);
+    lab.position.set(c.x, cy + (g.userData.photo ? 0.62 : 0.6), c.y); lab.userData.cam = c.id;
     dyn.add(lab);
   }
   const col = ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"];
@@ -7740,6 +7968,7 @@ function p3Panel() {
   el.innerHTML = `${fields.length ? `<div class="grid2">${fields.join("")}</div>` : ""}
     <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
       ${houses ? `<button class="chip ${p3.roof ? "on" : ""}" onclick="p3Roof()">${T("Roof", "Покрив")} ${p3.roof ? T("on", "вклучен") : T("off", "исклучен")}</button>` : ""}
+      ${p3.photos && p3.photos.size ? `<button class="chip ${p3.showPhotos !== false ? "on" : ""}" onclick="p3Photos()">${T("Product photos", "Слики од производите")}</button>` : ""}
       <button class="btn sm ghost" style="flex:1" onclick="p3Snap()">${ICON.share}${T("Send picture", "Испрати слика")}</button></div>
     <p class="muted" style="font-size:12.5px;margin-top:8px">${houses ? T("A house's height is set on the plan: tap the house. ", "Висината на куќата се поставува на планот: допри ја куќата. ") : ""}${
       (p.cams || []).length ? T("Tap a camera above to look through it and aim it.", "Допри камера горе за да гледаш низ неа и да ја насочиш.") : ""}</p>
