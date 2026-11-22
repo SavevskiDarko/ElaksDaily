@@ -19,6 +19,7 @@
   --work:#4C6EF5; --elaks:#E0782A; --personal:#2F9E68; --apts:#7E5BC0; --danger:#D6455D; --danger-bg:#FBE9EC;
   --net-bg:#FFF4D6; --net-ink:#7A5500;
   --surface:#FFFFFF; --on-dark:#FFFFFF;
+  --plan-lot:#EEF3EA; --plan-street:#DCDFE4; --plan-area:#E6E2DA; --plan-house:#D5DBE4; --plan-line:#3B4452;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
   --cond:'IBM Plex Sans Condensed',var(--sans);
@@ -555,6 +556,28 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .cal-d.now{box-shadow:inset 0 0 0 2px var(--amber)}
 .cal-d small{font-size:9.5px;font-weight:700;opacity:.95}
 
+/* ---- camera plan ---- */
+.sheet.full{max-height:none;height:100vh;height:100dvh;border-radius:0}
+.sheet.full .sheet-top{border-radius:0}
+.pl-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.pl-head h2{margin:0}
+.pl-tools{display:flex;flex-direction:column;gap:6px}
+.pl-tools .chip:disabled{opacity:.45}
+.pl-hint{font-size:12.5px;color:var(--muted);margin:6px 0;min-height:18px}
+.pl-canvas{position:relative;height:58vh;min-height:300px;max-height:620px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--plan-lot)}
+#pl-svg{width:100%;height:100%;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
+.pl-zoom{position:absolute;right:8px;bottom:8px;display:flex;gap:6px}
+.pl-zoom button{min-width:38px;height:38px;padding:0 10px;border-radius:10px;background:var(--card);border:1px solid var(--line);font-weight:700;font-size:15px}
+.pl-stats{margin:10px 0 0}
+.pl-trayrow{display:flex;gap:8px;align-items:center;overflow-x:auto;padding:6px 0 0}
+.pl-panel{margin-top:6px}
+.pl-panel .chips{margin-top:2px}
+.pl-reads{display:grid;grid-template-columns:14px 1fr auto;gap:6px 8px;align-items:center;margin:12px 0 8px;font-size:13.5px}
+.pl-reads b{font-family:var(--mono)}
+.pl-sw{width:14px;height:14px;border-radius:3px;background:var(--work)}
+.pl-lv0{color:var(--danger);font-weight:600}.pl-lv1{color:#B57F00;font-weight:600}.pl-lv2{color:var(--work);font-weight:600}.pl-lv3{color:var(--personal);font-weight:600}
+@media (min-width:900px){.sheet.full{max-width:1100px}}
+
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
 @media print{
@@ -598,18 +621,25 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .rp-tbl th{text-align:left;border-bottom:1px solid #8a8a8a;padding:1.8mm 1mm;font-weight:700}
 .rp-tbl td{border-bottom:1px solid #dcdcdc;padding:1.8mm 1mm}
 .rp-tbl th.r,.rp-tbl td.r{text-align:right}
+.pv-break{break-before:page;page-break-before:always;height:0}
+.pv-planimg{display:block;max-width:100%;max-height:165mm;width:auto;height:auto;margin:0 auto 3mm;border:1px solid #CCCCCC}
+.pv-legend{font-size:9pt;color:#232323;margin:0 0 5mm;text-align:center}
+.pv-keys{font-size:9.5pt;margin:0 0 4mm;line-height:1.5}
+.pv-small{font-size:8.5pt;color:#555;line-height:1.4}
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
 /* dark as the phone is, unless light was chosen in Settings → Appearance; or dark chosen */
 @media (prefers-color-scheme: dark){
   /* Elaks's orange a shade lighter, to stand out on a dark card */
   :root:not([data-theme="light"]){--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;color-scheme:dark}
+    --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;
+    --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;color-scheme:dark}
   :root:not([data-theme="light"]) .btn.ghost{background:var(--card);color:var(--ink)}
   :root:not([data-theme="light"]) .tick{border-color:#39424F}
 }
 :root[data-theme="dark"]{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
-  --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;color-scheme:dark}
+  --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;
+    --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;color-scheme:dark}
 :root[data-theme="dark"] .btn.ghost{background:var(--card);color:var(--ink)}
 :root[data-theme="dark"] .tick{border-color:#39424F}
 :root[data-theme="light"]{color-scheme:light}
@@ -1437,6 +1467,9 @@ const LOADERS = {
   purchases:  { need: () => state.perm.elaks && seesCosts(), q: () => recentAndOpen("purchases") },
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   sites:      { need: () => state.perm.elaks,   q: () => db.from("sites").select("*").eq("active", true).order("name") },
+  // camera plans: the list only — a plan's drawing and picture come when it is opened (migration 0013)
+  plans:      { need: () => state.perm.elaks,   optional: true, q: () => db.from("coverage_plans")
+    .select("id, client_id, offer_id, job_id, title, cams, in_offer, created_at, updated_at").order("updated_at", { ascending: false }) },
   // the last half year, and any job still to do however old — or with no date at all
   jobs:       { need: () => state.perm.elaks,   q: () => db.from("jobs").select("*")
     .or(`scheduled_on.gte.${backDays(180)},scheduled_on.is.null,status.in.(scheduled,started)`).order("scheduled_on") },
@@ -1574,7 +1607,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261117-100000";
+const BUILD = "20261122-090000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1882,6 +1915,7 @@ function openSheet(html) {
     + '<div class="grab"></div>'
     + '<button class="sheet-x" onclick="closeSheetAsked()" aria-label="Close">\u2715</button></div>' + html;
   sheetDirty = false; offerDraftOn = false;
+  $("sheet").classList.remove("full");
   $("overlay").classList.add("on");
   requestAnimationFrame(() => $("sheet").classList.add("on"));
   $("sheet").style.display = "block";
@@ -2385,6 +2419,13 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122", en: [
+    "Camera plans: draw the house and the yard, place the 2.8 or 3.6 mm cameras and see what each one covers — face, person, activity — with walls cutting the view.",
+    "Show the client: the plan is a page in the offer's PDF, or a picture to send. It stays on the client's card, so years later you still know where every camera went.",
+  ], mk: [
+    "Планови на камери: нацртај ја куќата и дворот, постави ги камерите со 2.8 или 3.6 mm и види што покрива секоја — лице, личност, движење — а ѕидовите го сечат погледот.",
+    "Покажи му на клиентот: планот е страница во PDF-от на понудата или слика за праќање. Останува на картичката на клиентот, па и по години знаеш каде е секоја камера.",
+  ] },
   { build: "20261117", en: [
     "Money: a tab of your own for what comes in and what goes out each month — only you see it.",
     "Give each category a monthly budget and watch how much is left; salary, rent and other monthly items wait to be ticked off.",
@@ -5131,6 +5172,12 @@ async function openOfferSheet(id, forClient, preset) {
         : `<button class="btn ghost" onclick="closeSheet();setTimeout(()=>newInvoiceFromOffer('${id}'),240)">${T("Make the invoice", "Направи фактура")}</button>`;
     })() : ""}
     ${id ? paymentsBlock(o) : ""}
+    ${id && plansReady() ? (() => {
+      const pl = plansOf("offer_id", id)[0];
+      return `<button class="btn ghost" onclick="planForOffer('${id}')">${ICON.camera}${pl
+        ? T("Camera plan", "План на камери") + ` · ${planCamsN(pl.cams || 0)}${pl.in_offer !== false ? " · " + T("in the PDF", "во PDF") : ""}`
+        : T("Draw where the cameras go", "Нацртај каде одат камерите")}</button>`;
+    })() : ""}
     ${id ? `<button class="btn ghost" onclick="duplicateOffer('${id}')">Duplicate as new offer</button>` : ""}
     ${id && o.status === "accepted" && metersOpenOf(o.items).length ? `<button class="btn ghost" onclick="closeJobSheet('${id}')">${T("Close job — enter meters", "Затвори работа — внеси метри")}</button>` : ""}
     ${id && needsDeduct(o) ? `<button class="btn amber" onclick="deductStock('${id}')">Take items out of stock</button>` : ""}
@@ -5513,6 +5560,7 @@ async function offerSheetHtml(o) {
       ${foot ? `<div class="pv-note">${esc(foot)}</div>` : ""}
       <div class="pv-valid">Понудата важи ${o.validity} дена.</div>
       <img class="pv-footer" src="brand-footer.png" alt="ELAKS">
+      ${o.id ? await offerPlanPage(o) : ""}
     </div>`;
 }
 const imagesLoaded = (root) => Promise.all([...root.querySelectorAll("img")]
@@ -5648,6 +5696,8 @@ async function htmlPdfFile(html, name) {
     const top = host.getBoundingClientRect().top;
     const cuts = [...host.querySelectorAll(".pv > *, .pv-items tr, .rp-tbl tr")]
       .map((el) => Math.round((el.getBoundingClientRect().bottom - top) * scale)).sort((a, b) => a - b);
+    // a page break asked for (the camera plan's page): the page ends there
+    const breaks = [...host.querySelectorAll(".pv-break")].map((el) => Math.round((el.getBoundingClientRect().top - top) * scale));
     // where the column headings and the item rows sit, so a page that opens
     // in the middle of the list can carry the headings again, as print does
     const at = (sel) => { const el = host.querySelector(sel); if (!el) return null;
@@ -5659,7 +5709,9 @@ async function htmlPdfFile(html, name) {
       const repeat = page > 0 && headH > 0 && rows && y > rows.top && y < rows.bottom;
       const lift = repeat ? headH : 0;
       let end = Math.min(canvas.height, y + pageH - lift);
-      if (end < canvas.height) {
+      const brk = breaks.find((b) => b > y + 40 && b < end);
+      if (brk) end = brk;
+      else if (end < canvas.height) {
         const fit = cuts.filter((c) => c > y + 40 && c <= end);
         if (fit.length) end = fit[fit.length - 1];   // else one row is taller than a page: cut it
       }
@@ -5676,6 +5728,720 @@ async function htmlPdfFile(html, name) {
     return new File([pdf.output("blob")], name, { type: "application/pdf" });
   } finally { host.remove(); }
 }
+/* ============================================================
+   CAMERA PLANS — draw the property, place the cameras, see what they cover
+   A plan is in metres: the plot, rectangles (the house blocks the view;
+   porch, parking and garden do not), walls, the places that matter (gate,
+   doors) and the cameras. Each camera's cone is drawn in three shades from
+   its lens and resolution, by EN 62676-4: face readable (250 px/m), person
+   recognised (125 px/m), activity seen (63 px/m); walls and the house cut
+   it. A plan belongs to the client (coverage_plans, migration 0013), and
+   remembers the offer and job it was drawn for.
+============================================================ */
+const PLAN_LENS = { 2.8: 103, 3.6: 83, 4: 78, 6: 54 };        // typical horizontal angle, degrees
+const PLAN_MAIN_LENSES = [2.8, 3.6];
+const PLAN_HPX = { 2: 1920, 4: 2560, 5: 2592, 8: 3840 };       // horizontal pixels
+const PLAN_PPM = [250, 125, 63];
+const PLAN_OP = [0.6, 0.34, 0.15];
+const PLAN_LV_MK = ["не се гледа", "се гледа што се случува", "се препознава кој е", "лицето се распознава"];
+const planLvEn = (l) => [T("not seen", "не се гледа"), T("activity seen", "се гледа што се случува"),
+  T("person recognised", "се препознава кој е"), T("face readable", "лицето се распознава")][l];
+const PLAN_KINDS = { house: ["House", "Куќа"], porch: ["Porch", "Трем"], parking: ["Parking", "Паркинг"], garden: ["Garden", "Двор"], other: ["Area", "Простор"] };
+const PLAN_MARKS = [["Gate", "Порта"], ["Front door", "Влезна врата"], ["Back door", "Задна врата"], ["Parking", "Паркинг"], ["Garage", "Гаража"], ["Window", "Прозорец"]];
+const planLensOf = (s) => { const m = String(s || "").match(/(\d{1,2}(?:[.,]\d)?)\s*mm\b/i); const v = m ? parseFloat(m[1].replace(",", ".")) : null; return v && PLAN_LENS[v] ? v : 2.8; };
+const planMpOf = (m) => m >= 7 ? 8 : m >= 5 ? 5 : m >= 3 ? 4 : m ? 2 : 4;
+const planReach = (c, night) => PLAN_PPM.map((p) => {
+  const d = PLAN_HPX[c.mp || 4] / (p * 2 * Math.tan((PLAN_LENS[c.lens] || 103) * Math.PI / 360));
+  return night ? Math.min(d, parseFloat(c.ir) || 30) : d;
+});
+const planCamsN = (n, mk) => `${n} ${n === 1 ? (mk ? "камера" : T("camera", "камера")) : (mk ? "камери" : T("cameras", "камери"))}`;
+const planM = (d) => (Math.round(d * 10) / 10).toLocaleString("en-US");
+function planBlank() {
+  return { v: 1, w: 24, h: 18, street: "bottom", night: false,
+    shapes: [{ id: "s1", kind: "house", x: 7, y: 5, w: 10, h: 8, label: "" }], walls: [], marks: [], cams: [], bg: null };
+}
+// what blocks the view: the walls drawn, and the outline of every house rectangle
+function planSegs(p) {
+  const s = (p.walls || []).slice();
+  for (const r of p.shapes || []) if (r.kind === "house") {
+    const a = [r.x, r.y], b = [r.x + r.w, r.y], c = [r.x + r.w, r.y + r.h], d = [r.x, r.y + r.h];
+    s.push([a, b], [b, c], [c, d], [d, a]);
+  }
+  return s;
+}
+function planHit(px, py, dx, dy, S) {
+  let best = Infinity;
+  for (const [[ax, ay], [bx, by]] of S) {
+    const ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((ax - px) * ey - (ay - py) * ex) / den, u = ((ax - px) * dy - (ay - py) * dx) / den;
+    if (t > 0.05 && u >= 0 && u <= 1 && t < best) best = t;
+  }
+  return best;
+}
+// how well a point is seen: 3 face, 2 recognised, 1 activity, 0 not
+function planLevel(p, x, y, S) {
+  let best = 0;
+  for (const c of p.cams || []) {
+    const dx = x - c.x, dy = y - c.y, d = Math.hypot(dx, dy);
+    if (d < 0.01) continue;
+    const a = (((Math.atan2(dy, dx) * 180 / Math.PI - c.h) % 360) + 540) % 360 - 180;
+    if (Math.abs(a) > (PLAN_LENS[c.lens] || 103) / 2) continue;
+    if (planHit(c.x, c.y, dx / d, dy / d, S) < d - 0.02) continue;
+    const r = planReach(c, p.night);
+    const l = d <= r[0] ? 3 : d <= r[1] ? 2 : d <= r[2] ? 1 : 0;
+    if (l > best) best = l;
+  }
+  return best;
+}
+const planInHouse = (p, x, y) => (p.shapes || []).some((r) => r.kind === "house" && x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h);
+// the yard seen, and where faces are readable: a grid of at most ~2,500 points
+function planStats(p) {
+  const S = planSegs(p), step = Math.max(0.5, Math.sqrt((p.w * p.h) / 2500));
+  let n = 0, seen = 0, face = 0;
+  for (let x = step / 2; x < p.w; x += step) for (let y = step / 2; y < p.h; y += step) {
+    if (planInHouse(p, x, y)) continue;
+    n++;
+    const l = planLevel(p, x, y, S);
+    if (l >= 1) seen++;
+    if (l === 3) face++;
+  }
+  return { seen: n ? Math.round((seen / n) * 100) : 0, face: n ? Math.round((face / n) * 100) : 0,
+    marks: (p.marks || []).map((m) => ({ m, l: planLevel(p, m.x, m.y, S) })) };
+}
+// the colours: the app's own on screen, paper ones for the client's page
+function planPal(paper) {
+  if (paper) return { lot: "#EEF3EA", street: "#DCDFE4", area: "#E6E2DA", house: "#D5DBE4", line: "#3B4452", grid: "#D8DEE4", text: "#5B6472",
+    cov: "#4C6EF5", cam: "#1E3A5F", sel: "#F5B301", card: "#FFFFFF", lv: ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"] };
+  const v = (k) => window.getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+  return { lot: v("--plan-lot"), street: v("--plan-street"), area: v("--plan-area"), house: v("--plan-house"), line: v("--plan-line"), grid: v("--line"),
+    text: v("--muted"), cov: v("--work"), cam: v("--navy"), sel: v("--amber"), card: v("--card"), lv: [v("--danger"), v("--amber"), v("--work"), v("--personal")] };
+}
+// the drawing as SVG markup; o: { paper, clean, sel, wallStart, temp, bgUrl, mk }
+function planSvgInner(p, o) {
+  const P = planPal(o.paper), mk = o.mk, clean = o.paper || o.clean;
+  const out = [], S = planSegs(p), f = (n) => Math.round(n * 1000) / 1000;
+  const pts = (a) => a.map(([x, y]) => f(x) + "," + f(y)).join(" ");
+  const txt = (x, y, s, size, extra) => `<text x="${f(x)}" y="${f(y)}" font-size="${size}" text-anchor="middle" fill="${P.text}" font-family="IBM Plex Sans Condensed, Arial, sans-serif" font-weight="600" ${extra || ""}>${esc(s)}</text>`;
+  const st = p.street, sw = 3;
+  out.push(`<rect x="-30" y="-30" width="${p.w + 60}" height="${p.h + 60}" fill="${P.lot}"/>`);
+  if (st && st !== "none") {
+    const r = st === "bottom" ? [-30, p.h, p.w + 60, sw] : st === "top" ? [-30, -sw, p.w + 60, sw] : st === "left" ? [-sw, -30, sw, p.h + 60] : [p.w, -30, sw, p.h + 60];
+    out.push(`<rect x="${r[0]}" y="${r[1]}" width="${r[2]}" height="${r[3]}" fill="${P.street}"/>`);
+    const c = st === "bottom" ? [p.w / 2, p.h + 1.9] : st === "top" ? [p.w / 2, -1.1] : st === "left" ? [-1.5, p.h / 2] : [p.w + 1.5, p.h / 2];
+    out.push(txt(c[0], c[1], mk ? "Улица" : T("Street", "Улица"), 0.8, st === "left" || st === "right" ? `transform="rotate(-90 ${f(c[0])} ${f(c[1])})"` : ""));
+  }
+  if (o.bgUrl && p.bg) out.push(`<image href="${o.bgUrl}" x="${f(p.bg.x)}" y="${f(p.bg.y)}" width="${f(p.bg.w)}" height="${f(p.bg.h)}" preserveAspectRatio="none" opacity="${p.bg.opacity ?? 0.6}"/>`);
+  if (!clean) {
+    const g = [];
+    for (let x = 0; x <= p.w + 0.001; x += 1) g.push(`<line x1="${x}" y1="0" x2="${x}" y2="${p.h}" stroke-width="${x % 5 ? 0.025 : 0.06}"/>`);
+    for (let y = 0; y <= p.h + 0.001; y += 1) g.push(`<line x1="0" y1="${y}" x2="${p.w}" y2="${y}" stroke-width="${y % 5 ? 0.025 : 0.06}"/>`);
+    out.push(`<g stroke="${P.grid}">${g.join("")}</g>`);
+  }
+  if (p.night) out.push(`<rect x="-30" y="-30" width="${p.w + 60}" height="${p.h + 60}" fill="#0B1530" fill-opacity="0.38" pointer-events="none"/>`);
+  for (const r of p.shapes || []) if (r.kind !== "house")
+    out.push(`<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="${P.area}" fill-opacity="0.75" stroke="${o.sel === "rect:" + r.id ? P.sel : P.line}" stroke-width="${o.sel === "rect:" + r.id ? 0.14 : 0.06}" stroke-dasharray="0.3 0.2"/>`);
+  // the cones, three shades each, cut by what blocks the view
+  for (const c of p.cams || []) {
+    const r = planReach(c, p.night), fov = PLAN_LENS[c.lens] || 103, n = Math.ceil(fov), rays = [];
+    for (let i = 0; i <= n; i++) {
+      const a = (c.h - fov / 2 + (fov * i) / n) * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
+      rays.push([dx, dy, planHit(c.x, c.y, dx, dy, S)]);
+    }
+    for (let z = 2; z >= 0; z--)
+      out.push(`<polygon points="${pts([[c.x, c.y]].concat(rays.map(([dx, dy, h]) => { const d = Math.min(r[z], h); return [c.x + dx * d, c.y + dy * d]; })))}" fill="${P.cov}" fill-opacity="${PLAN_OP[z] * (clean ? 0.95 : 0.8)}"/>`);
+  }
+  for (const r of p.shapes || []) if (r.kind === "house")
+    out.push(`<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="${P.house}" stroke="${o.sel === "rect:" + r.id ? P.sel : P.line}" stroke-width="${o.sel === "rect:" + r.id ? 0.22 : 0.14}"/>`);
+  for (const r of p.shapes || []) {
+    const name = r.label || (PLAN_KINDS[r.kind] || PLAN_KINDS.other)[mk || langMk() ? 1 : 0];
+    if (r.w >= 1.5 && r.h >= 1) out.push(txt(r.x + r.w / 2, r.y + r.h / 2 + 0.25, name, Math.min(0.85, r.h * 0.45, r.w / Math.max(3, name.length * 0.55)), 'pointer-events="none"'));
+  }
+  (p.walls || []).forEach(([[ax, ay], [bx, by]], i) => {
+    const on = o.sel === "wall:" + i;
+    out.push(`<line x1="${f(ax)}" y1="${f(ay)}" x2="${f(bx)}" y2="${f(by)}" stroke="transparent" stroke-width="0.9" data-k="wall:${i}"/>`);
+    out.push(`<line x1="${f(ax)}" y1="${f(ay)}" x2="${f(bx)}" y2="${f(by)}" stroke="${on ? P.sel : P.line}" stroke-width="${on ? 0.3 : 0.18}" stroke-linecap="round" pointer-events="none"/>`);
+  });
+  out.push(`<rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" stroke="${P.text}" stroke-width="0.07" stroke-dasharray="0.4 0.25" pointer-events="none"/>`);
+  if (o.temp) out.push(`<rect x="${f(o.temp.x)}" y="${f(o.temp.y)}" width="${f(o.temp.w)}" height="${f(o.temp.h)}" fill="${P.sel}" fill-opacity="0.2" stroke="${P.sel}" stroke-width="0.1"/>`);
+  // the places that matter, ringed in the colour of how well they are seen
+  const lv = o.marks || [];
+  for (const m of p.marks || []) {
+    const l = (lv.find((x) => x.m.id === m.id) || {}).l ?? 0, on = o.sel === "mark:" + m.id;
+    out.push(`<g data-k="mark:${m.id}"><circle cx="${f(m.x)}" cy="${f(m.y)}" r="${on ? 0.42 : 0.32}" fill="${P.card}" stroke="${on ? P.sel : P.lv[l]}" stroke-width="0.12"/></g>`);
+    out.push(txt(m.x, m.y - 0.6, m.label || "", 0.5, 'pointer-events="none"'));
+  }
+  for (const c of p.cams || []) {
+    const on = !clean && o.sel === "cam:" + c.id, a = c.h * Math.PI / 180, hx = Math.cos(a), hy = Math.sin(a);
+    out.push(`<g data-k="cam:${c.id}"><polygon points="${pts([[c.x + hx * 0.75, c.y + hy * 0.75], [c.x - hy * 0.32, c.y + hx * 0.32], [c.x + hy * 0.32, c.y - hx * 0.32]])}" fill="${P.cam}" stroke="#fff" stroke-width="0.06"/>
+      <circle cx="${f(c.x)}" cy="${f(c.y)}" r="0.5" fill="${on ? P.sel : P.cam}" stroke="#fff" stroke-width="0.09"/>
+      <text x="${f(c.x)}" y="${f(c.y + 0.2)}" font-size="0.56" text-anchor="middle" fill="${on ? "#152A46" : "#fff"}" font-family="IBM Plex Mono, monospace" font-weight="600" pointer-events="none">${c.n}</text></g>`);
+    if (on) out.push(`<line x1="${f(c.x)}" y1="${f(c.y)}" x2="${f(c.x + hx * 2.2)}" y2="${f(c.y + hy * 2.2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
+      <circle data-k="rot:${c.id}" cx="${f(c.x + hx * 2.2)}" cy="${f(c.y + hy * 2.2)}" r="0.45" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/>`);
+  }
+  if (!clean && o.sel && o.sel.startsWith("rect:")) {
+    const r = (p.shapes || []).find((x) => "rect:" + x.id === o.sel);
+    if (r) out.push(`<circle data-k="rsz:${r.id}" cx="${f(r.x + r.w)}" cy="${f(r.y + r.h)}" r="0.42" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/>`);
+  }
+  if (!clean && o.sel && o.sel.startsWith("wall:")) {
+    const i = Number(o.sel.slice(5)), w = (p.walls || [])[i];
+    if (w) w.forEach(([x, y], e) => out.push(`<circle data-k="wend:${i}:${e}" cx="${f(x)}" cy="${f(y)}" r="0.38" fill="${P.sel}" stroke="${P.card}" stroke-width="0.07"/>`));
+  }
+  if (o.wallStart) out.push(`<circle cx="${f(o.wallStart[0])}" cy="${f(o.wallStart[1])}" r="0.25" fill="${P.sel}"/>`);
+  if (o.scalePts) for (const [x, y] of o.scalePts) out.push(`<circle cx="${f(x)}" cy="${f(y)}" r="0.25" fill="${P.sel}" stroke="${P.card}" stroke-width="0.06"/>`);
+  return out.join("");
+}
+// the whole plot with its street, for the client's page and a fresh editor
+function planBounds(p) {
+  const m = 1, st = p.street;
+  return { x: -m - (st === "left" ? 3 : 0), y: -m - (st === "top" ? 3 : 0),
+    w: p.w + 2 * m + (st === "left" || st === "right" ? 3 : 0), h: p.h + 2 * m + (st === "top" || st === "bottom" ? 3 : 0) };
+}
+// the plan as a picture (PNG data URL), on paper colours, for the offer and to send
+function planPng(p, bgUrl, px = 1400) {
+  const b = planBounds(p), hpx = Math.round((px * b.h) / b.w);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${hpx}" viewBox="${b.x} ${b.y} ${b.w} ${b.h}">${
+    planSvgInner(p, { paper: true, mk: true, bgUrl, marks: planStats(p).marks })}</svg>`;
+  return new Promise((ok, no) => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = px; c.height = hpx;
+      const x = c.getContext("2d");
+      x.fillStyle = "#ffffff"; x.fillRect(0, 0, px, hpx);
+      x.drawImage(im, 0, 0, px, hpx);
+      try { ok(c.toDataURL("image/png")); } catch (e) { no(e); }
+    };
+    im.onerror = () => no(new Error("plan picture"));
+    im.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  });
+}
+
+// ---------- the client's page, in Macedonian ----------
+async function planClientHtml(row, bgUrl) {
+  const p = { ...(row.plan || planBlank()), night: false }, png = await planPng(p, bgUrl), s = planStats(p);
+  const c = state.clients.find((x) => x.id === row.client_id), o = state.offers.find((x) => x.id === row.offer_id);
+  const sw = (op) => `<span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#4C6EF5;opacity:${op};vertical-align:-1px;margin-right:5px"></span>`;
+  const col = ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"];
+  return `<div class="pv-plain"><b>План на камери${row.title ? " — " + esc(row.title) : ""}</b>
+      <span>${[c ? esc(c.name) : "", o ? "Понуда " + esc(o.number) : "", dmy(todayStr())].filter(Boolean).join(" · ")}</span></div>
+    <img class="pv-planimg" src="${png}" alt="План на камерите">
+    <div class="pv-legend">${sw(0.6)}Лицето се распознава &nbsp; ${sw(0.34)}Се препознава кој е &nbsp; ${sw(0.15)}Се гледа што се случува</div>
+    <table class="rp-tbl"><thead><tr><th>#</th><th>Каде</th><th>Камера</th><th class="r">Лице до</th><th class="r">Личност до</th><th class="r">Гледа до</th><th class="r">Ноќе до</th></tr></thead>
+      <tbody>${(p.cams || []).map((cm) => { const r = planReach(cm, false), nr = planReach(cm, true);
+        return `<tr><td>${cm.n}</td><td>${esc(cm.name || "Камера " + cm.n)}</td><td>${cm.lens} mm · ${cm.mp} MP</td><td class="r">${planM(r[0])} m</td><td class="r">${planM(r[1])} m</td><td class="r">${planM(r[2])} m</td><td class="r">${planM(nr[2])} m</td></tr>`; }).join("")}</tbody></table>
+    ${s.marks.length ? `<div class="pv-keys"><b>Што се гледа на важните места:</b> ${s.marks.map(({ m, l }) =>
+      `${esc(m.label || "")} — <span style="color:${col[l]};font-weight:700">${PLAN_LV_MK[l]}</span>`).join(" · ")}</div>` : ""}
+    <div class="pv-small">${planCamsN((p.cams || []).length, true)} · се гледа ${s.seen}% од дворот · лицето се распознава на ${s.face}%. Проценка според објективот и резолуцијата на камерата (EN 62676-4); светлото, времето и висината на монтажа ја менуваат.</div>`;
+}
+
+// ---------- the list of plans, and opening one ----------
+const plansOf = (key, id) => (state.plans || []).filter((x) => x[key] === id);
+function plansBlock(clientId) {
+  if (!plansReady()) return "";
+  const list = plansOf("client_id", clientId).slice().sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+  return `<div class="sec">${T("Camera plans", "Планови на камери")}</div>
+    ${list.map((pl) => `<div class="card row tapp" role="button" tabindex="0" onclick="closeSheet();setTimeout(()=>openPlan('${pl.id}'),240)">
+      <div style="flex:1;min-width:0"><b>${esc(pl.title || T("Camera plan", "План на камери"))}</b>
+        <div class="muted">${planCamsN(pl.cams || 0)} · ${dmy(String(pl.updated_at || pl.created_at || "").slice(0, 10))}${
+          pl.offer_id ? " · " + esc((state.offers.find((o) => o.id === pl.offer_id) || {}).number || T("offer", "понуда")) : ""}</div></div><span class="muted">›</span></div>`).join("")
+      || `<p class="muted">${T("No camera plan yet.", "Сè уште нема план на камери.")}</p>`}
+    <button class="btn sm ghost" onclick="closeSheet();setTimeout(()=>newPlan({ client_id: '${clientId}' }),240)">+ ${T("Draw a camera plan", "Нацртај план на камери")}</button>`;
+}
+const plansReady = () => !(state.noTable && state.noTable.has("plans"));
+// a plan for an offer: the one it has, or a new one with the offer's cameras waiting
+async function planForOffer(offerId) {
+  if (!plansReady()) return say(T("Camera plans need the database update (0013_camera_plans.sql) first.", "За плановите е потребно ажурирање на базата (0013_camera_plans.sql)."));
+  const have = plansOf("offer_id", offerId)[0];
+  if (!await closeSheetAsked()) return;   // the offer's own changes are not lost without asking
+  setTimeout(() => {
+    if (have) return openPlan(have.id);
+    const o = state.offers.find((x) => x.id === offerId) || {};
+    newPlan({ client_id: o.client_id || null, offer_id: offerId, title: o.title || "" });
+  }, 240);
+}
+function planForJob(jobId) {
+  const j = state.jobs.find((x) => x.id === jobId);
+  if (!j) return;
+  const have = plansOf("job_id", jobId)[0] || (j.offer_id && plansOf("offer_id", j.offer_id)[0]);
+  closeSheet();
+  setTimeout(() => have ? openPlan(have.id) : newPlan({ client_id: j.client_id || null, offer_id: j.offer_id || null, job_id: jobId, title: j.title || "" }), 240);
+}
+
+// ---------- the editor ----------
+let pe = null;   // { id, row, p, bgUrl, bgDirty, sel, tool, view, hist, client, wallStart, scalePts, trayArticle }
+function newPlan(link) {
+  if (!plansReady()) return say(T("Camera plans need the database update (0013_camera_plans.sql) first.", "За плановите е потребно ажурирање на базата (0013_camera_plans.sql)."));
+  const row = { id: null, client_id: link.client_id || null, offer_id: link.offer_id || null, job_id: link.job_id || null,
+    title: link.title || "", in_offer: true, plan: planBlank() };
+  startPlanner(row, null);
+}
+async function openPlan(id) {
+  if (offlineNow()) return toast(T("No signal — the plan opens when there is one", "Нема сигнал — планот се отвора кога ќе има"));
+  const none = { data: null, error: { message: T("no answer", "нема одговор") } };
+  const r = await within(20000, db.from("coverage_plans").select("*").eq("id", id).maybeSingle(), none);
+  if (r.error || !r.data) return toast(T("That plan could not be opened", "Планот не може да се отвори") + (r.error ? " — " + plainError(r.error) : ""));
+  const img = await within(20000, db.from("coverage_plan_images").select("data").eq("plan_id", id).maybeSingle(), { data: null });
+  startPlanner(r.data, img.data ? img.data.data : null);
+}
+function startPlanner(row, bgUrl) {
+  const p = JSON.parse(JSON.stringify(row.plan && row.plan.w ? row.plan : planBlank()));
+  for (const k of ["shapes", "walls", "marks", "cams"]) p[k] = p[k] || [];
+  pe = { id: row.id, row, p, bgUrl, bgDirty: false, sel: null, tool: "move", hist: [], client: false, wallStart: null, scalePts: null,
+    trayArticle: null, view: null, drag: null, ptrs: new Map(), typing: null };
+  pe.saved = JSON.stringify(p);
+  const c = state.clients.find((x) => x.id === row.client_id), o = state.offers.find((x) => x.id === row.offer_id);
+  openSheet(`<div class="pl-head"><h2>${T("Camera plan", "План на камери")}</h2>
+      <span class="muted">${[c ? esc(c.name) : "", o ? esc(o.number) : ""].filter(Boolean).join(" · ") || T("not linked to a client yet", "сè уште не е врзан за клиент")}</span></div>
+    <div class="pl-tools">
+      <div class="chips wrap" id="pl-tool">
+        <button class="chip on" data-t="move" onclick="planTool('move')">${T("Move", "Помести")}</button>
+        <button class="chip" data-t="camera" onclick="planTool('camera')">+ ${T("Camera", "Камера")}</button>
+        <button class="chip" data-t="house" onclick="planTool('house')">+ ${T("House", "Куќа")}</button>
+        <button class="chip" data-t="wall" onclick="planTool('wall')">+ ${T("Wall", "Ѕид")}</button>
+        <button class="chip" data-t="area" onclick="planTool('area')">+ ${T("Area", "Простор")}</button>
+        <button class="chip" data-t="mark" onclick="planTool('mark')">+ ${T("Place", "Место")}</button>
+      </div>
+      <div class="chips">
+        <button class="chip" id="pl-undo" onclick="planUndo()" disabled>↶ ${T("Undo", "Врати")}</button>
+        <button class="chip" id="pl-night" onclick="planNight()">${T("Night", "Ноќ")}</button>
+        <button class="chip" id="pl-clientv" onclick="planClientView()">${T("Client view", "Како клиентот")}</button>
+      </div>
+    </div>
+    <div id="pl-tray"></div>
+    <div class="pl-hint" id="pl-hint"></div>
+    <div class="pl-canvas"><svg id="pl-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${T("Plan of the property", "План на имотот")}"></svg>
+      <div class="pl-zoom"><button onclick="planZoom(0.8)" aria-label="${T("Zoom in", "Зумирај")}">+</button><button onclick="planZoom(1.25)" aria-label="${T("Zoom out", "Одзумирај")}">−</button><button onclick="planFit()">${T("Fit", "Цело")}</button></div></div>
+    <div class="card pl-stats"><div class="stat-row top">
+      <div class="stat"><span>${T("Yard seen", "Се гледа од дворот")}</span><b id="pl-seen">–</b></div>
+      <div class="stat"><span>${T("Faces readable", "Лицата се распознаваат")}</span><b id="pl-face">–</b></div>
+      <div class="stat"><span>${T("Cameras", "Камери")}</span><b id="pl-cams">–</b></div>
+    </div></div>
+    <div id="pl-panel" class="pl-panel"></div>
+    <div class="grid2">
+      <button class="btn" style="width:100%" onclick="savePlan()">${T("Save", "Зачувај")}</button>
+      <button class="btn ghost" style="width:100%" onclick="sharePlan()">${ICON.share}${T("Send picture", "Испрати слика")}</button>
+    </div>
+    ${row.id ? `<button class="btn ghost" onclick="delPlan()">${T("Delete this plan", "Избриши го планот")}</button>` : ""}
+    <input type="file" accept="image/*" id="pl-bgfile" style="display:none" onchange="planBgPick(this)">`);
+  $("sheet").classList.add("full");
+  const svg = $("pl-svg");
+  svg.addEventListener("pointerdown", planDown);
+  svg.addEventListener("pointermove", planMove);
+  svg.addEventListener("pointerup", planUp);
+  svg.addEventListener("pointercancel", planUp);
+  svg.addEventListener("wheel", (e) => { e.preventDefault(); planZoom(e.deltaY > 0 ? 1.12 : 0.89, planPt(e)); }, { passive: false });
+  planFit();
+  planTool("move");
+}
+const planCam = (id) => pe.p.cams.find((c) => String(c.id) === String(id));
+const planShape = (id) => pe.p.shapes.find((r) => String(r.id) === String(id));
+const planMark = (id) => pe.p.marks.find((m) => String(m.id) === String(id));
+const planNewId = (pre) => pre + Date.now().toString(36) + Math.floor(Math.random() * 1000);
+function planRemember() {
+  pe.hist.push(JSON.stringify({ p: pe.p, sel: pe.sel }));
+  if (pe.hist.length > 80) pe.hist.shift();
+  pe.typing = null;
+  const u = $("pl-undo"); if (u) u.disabled = false;
+}
+function planUndo() {
+  if (!pe || !pe.hist.length) return;
+  const s = JSON.parse(pe.hist.pop());
+  pe.p = s.p; pe.sel = s.sel; pe.wallStart = null;
+  $("pl-undo").disabled = !pe.hist.length;
+  planRender();
+}
+function planTool(t) {
+  if (!pe) return;
+  pe.tool = t; pe.wallStart = null; pe.scalePts = t === "scale" ? [] : null;
+  if (t !== "camera") pe.trayArticle = null;
+  document.querySelectorAll("#pl-tool .chip").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+  $("pl-hint").textContent = {
+    move: T("Drag a camera to move it, its yellow dot to turn it · tap anything to change or remove it · drag the empty plan to pan", "Повлечи камера за да ја поместиш, жолтата точка за да ја свртиш · допри нешто за да го смениш или отстраниш · повлечи празно за да го поместиш планот"),
+    house: T("Drag across the plan to draw the house (it blocks the view)", "Повлечи преку планот за да нацрташ куќа (ја попречува видливоста)"),
+    area: T("Drag across the plan to draw a porch, parking or garden", "Повлечи преку планот за трем, паркинг или двор"),
+    wall: T("Tap where the wall starts, then where it ends", "Допри каде почнува ѕидот, па каде завршува"),
+    camera: T("Tap where the camera hangs", "Допри каде виси камерата"),
+    mark: T("Tap a place that matters: the gate, a door", "Допри важно место: порта, врата"),
+    scale: T("Tap two points whose distance you know", "Допри две точки чие растојание го знаеш"),
+  }[t] || "";
+  planRender();
+}
+function planClientView() { pe.client = !pe.client; $("pl-clientv").classList.toggle("on", pe.client); planRender(); }
+function planNight() { planRemember(); pe.p.night = !pe.p.night; planRender(); }
+
+// ---- the view: pan and zoom ----
+function planFit() {
+  if (!pe) return;
+  const b = planBounds(pe.p), box = document.querySelector(".pl-canvas");
+  if (box && box.clientWidth) box.style.height = Math.round(Math.max(260, Math.min(window.innerHeight * 0.62, (box.clientWidth * b.h) / b.w))) + "px";
+  pe.view = { ...b };
+  planRender();
+}
+function planZoom(k, at) {
+  if (!pe || !pe.view) return;
+  const v = pe.view, c = at || [v.x + v.w / 2, v.y + v.h / 2];
+  const w = Math.max(3, Math.min(400, v.w * k)), h = v.h * (w / v.w);
+  pe.view = { x: c[0] - (c[0] - v.x) * (w / v.w), y: c[1] - (c[1] - v.y) * (h / v.h), w, h };
+  planRender();
+}
+function planPt(e) {
+  const svg = $("pl-svg"), pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+  return [q.x, q.y];
+}
+const planSnap = (v) => Math.round(v * 4) / 4;
+
+// ---- touching the plan ----
+function planDown(e) {
+  if (!pe || pe.client) return;
+  const svg = $("pl-svg");
+  pe.ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  try { svg.setPointerCapture(e.pointerId); } catch { /* not every pointer */ }
+  if (pe.ptrs.size === 2) {                     // two fingers: zoom, not draw
+    const [a, b] = [...pe.ptrs.values()];
+    pe.drag = { mode: "pinch", d0: Math.hypot(a[0] - b[0], a[1] - b[1]), v0: { ...pe.view } };
+    return;
+  }
+  const [x, y] = planPt(e), k = (e.target.closest && e.target.closest("[data-k]")) ? e.target.closest("[data-k]").dataset.k : "";
+  const t = pe.tool, p = pe.p;
+  if (t === "house" || t === "area") { pe.drag = { mode: "draw", x0: planSnap(x), y0: planSnap(y), kind: t === "house" ? "house" : "porch" }; return; }
+  if (t === "wall") {
+    const q = [planSnap(x), planSnap(y)];
+    if (!pe.wallStart) { pe.wallStart = q; $("pl-hint").textContent = T("Now tap where it ends · tap + Wall again to cancel", "Сега допри каде завршува · допри + Ѕид пак за откажи"); }
+    else if (Math.hypot(q[0] - pe.wallStart[0], q[1] - pe.wallStart[1]) >= 0.25) { planRemember(); p.walls.push([pe.wallStart, q]); pe.sel = "wall:" + (p.walls.length - 1); pe.wallStart = null; planTool("move"); return; }
+    planRender(); return;
+  }
+  if (t === "camera") {
+    planRemember();
+    const a = pe.trayArticle ? state.stock.find((s) => s.id === pe.trayArticle) : null;
+    const n = Math.max(0, ...p.cams.map((c) => c.n || 0)) + 1;
+    const src = a ? [a.name, a.code, a.specs].join(" ") : "";
+    const c = { id: planNewId("c"), n, name: "", x: planSnap(x), y: planSnap(y), h: 90,
+      lens: a ? planLensOf(src) : 2.8, mp: a ? planMpOf(camOf(a).mp) : 4, ir: 30, article_id: a ? a.id : null, model: a ? a.name : "" };
+    p.cams.push(c); pe.sel = "cam:" + c.id; planTool("move"); return;
+  }
+  if (t === "mark") {
+    planRemember();
+    const m = { id: planNewId("m"), label: p.marks.length ? "" : "Порта", x: planSnap(x), y: planSnap(y) };
+    p.marks.push(m); pe.sel = "mark:" + m.id; planTool("move"); return;
+  }
+  if (t === "scale") {
+    pe.scalePts.push([x, y]);
+    if (pe.scalePts.length === 2) planScaleAsk(); else planRender();
+    return;
+  }
+  // moving things
+  const [kind, id, end] = k.split(":");
+  if (kind === "cam") { planRemember(); pe.sel = "cam:" + id; pe.drag = { mode: "cam", id }; }
+  else if (kind === "rot") { planRemember(); pe.drag = { mode: "rot", id }; }
+  else if (kind === "rect") { planRemember(); const r = planShape(id); pe.sel = "rect:" + id; pe.drag = { mode: "rect", id, dx: x - r.x, dy: y - r.y }; }
+  else if (kind === "rsz") { planRemember(); pe.drag = { mode: "rsz", id }; }
+  else if (kind === "wall") { pe.sel = "wall:" + id; }
+  else if (kind === "wend") { planRemember(); pe.drag = { mode: "wend", i: Number(id), e: Number(end) }; }
+  else if (kind === "mark") { planRemember(); pe.sel = "mark:" + id; pe.drag = { mode: "mark", id }; }
+  else { pe.sel = null; pe.drag = { mode: "pan", sx: e.clientX, sy: e.clientY, v0: { ...pe.view } }; }
+  planRender();
+}
+let planRaf = 0;
+function planMove(e) {
+  if (!pe || !pe.drag) return;
+  if (pe.ptrs.has(e.pointerId)) pe.ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  const d = pe.drag, p = pe.p;
+  if (d.mode === "pinch") {
+    if (pe.ptrs.size < 2) return;
+    const [a, b] = [...pe.ptrs.values()], k = d.d0 / Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1]));
+    const v = d.v0, w = Math.max(3, Math.min(400, v.w * k)), h = v.h * (w / v.w);
+    pe.view = { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
+  } else if (d.mode === "pan") {
+    const svg = $("pl-svg"), r = svg.getBoundingClientRect(), s = Math.max(d.v0.w / r.width, d.v0.h / r.height);
+    pe.view = { ...d.v0, x: d.v0.x - (e.clientX - d.sx) * s, y: d.v0.y - (e.clientY - d.sy) * s };
+  } else {
+    const [x, y] = planPt(e);
+    if (d.mode === "cam") { const c = planCam(d.id); c.x = planSnap(x); c.y = planSnap(y); }
+    else if (d.mode === "rot") { const c = planCam(d.id); c.h = Math.round(Math.atan2(y - c.y, x - c.x) * 180 / Math.PI / 5) * 5; }
+    else if (d.mode === "rect") { const r = planShape(d.id); r.x = planSnap(x - d.dx); r.y = planSnap(y - d.dy); }
+    else if (d.mode === "rsz") { const r = planShape(d.id); r.w = Math.max(0.5, planSnap(x - r.x)); r.h = Math.max(0.5, planSnap(y - r.y)); }
+    else if (d.mode === "wend") { p.walls[d.i][d.e] = [planSnap(x), planSnap(y)]; }
+    else if (d.mode === "mark") { const m = planMark(d.id); m.x = planSnap(x); m.y = planSnap(y); }
+    else if (d.mode === "draw") { d.x1 = planSnap(x); d.y1 = planSnap(y); }
+  }
+  if (!planRaf) planRaf = requestAnimationFrame(() => { planRaf = 0; planRender(true); });
+}
+function planUp(e) {
+  if (!pe) return;
+  pe.ptrs.delete(e.pointerId);
+  const d = pe.drag;
+  if (d && d.mode === "pinch" && pe.ptrs.size) return;
+  pe.drag = null;
+  if (d && /^(cam|rot|rect|rsz|wend|mark)$/.test(d.mode) && pe.hist.length && JSON.stringify(JSON.parse(pe.hist[pe.hist.length - 1]).p) === JSON.stringify(pe.p)) {
+    pe.hist.pop(); $("pl-undo").disabled = !pe.hist.length;
+  }
+  if (d && d.mode === "draw" && d.x1 !== undefined) {
+    const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1), w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+    if (w >= 0.5 && h >= 0.5) {
+      planRemember();
+      const r = { id: planNewId("s"), kind: d.kind, x, y, w, h, label: "" };
+      pe.p.shapes.push(r); pe.sel = "rect:" + r.id;
+      planTool("move"); return;
+    }
+  }
+  planRender();
+}
+
+// ---- drawing it, the figures, the panel ----
+function planRender(light) {
+  if (!pe || !$("pl-svg")) return;
+  const svg = $("pl-svg"), v = pe.view || planBounds(pe.p), st = planStats(pe.p);
+  svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+  const d = pe.drag, temp = d && d.mode === "draw" && d.x1 !== undefined
+    ? { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) } : null;
+  svg.innerHTML = planSvgInner(pe.p, { clean: pe.client, sel: pe.sel, wallStart: pe.wallStart, temp, bgUrl: pe.bgUrl, marks: st.marks, scalePts: pe.scalePts });
+  $("pl-seen").textContent = st.seen + "%";
+  $("pl-face").textContent = st.face + "%";
+  $("pl-cams").textContent = pe.p.cams.length;
+  if (pe.bgDirty || JSON.stringify(pe.p) !== pe.saved) sheetDirty = true;
+  $("pl-night").classList.toggle("on", !!pe.p.night);
+  if (!light) { planTray(); planPanel(st); }
+}
+// the cameras on the offer still waiting for a place
+function planTray() {
+  const el = $("pl-tray");
+  if (!el) return;
+  const o = state.offers.find((x) => x.id === pe.row.offer_id);
+  const want = new Map();
+  for (const it of (o && o.items) || []) {
+    const a = it.article_id && state.stock.find((s) => s.id === it.article_id);
+    if (!a || camOf(a).kind !== "camera") continue;
+    want.set(a.id, (want.get(a.id) || 0) + (parseFloat(it.qty) || 1));
+  }
+  const left = [...want].map(([id, n]) => ({ a: state.stock.find((s) => s.id === id), n: n - pe.p.cams.filter((c) => c.article_id === id).length })).filter((x) => x.n > 0);
+  el.innerHTML = left.length ? `<div class="pl-trayrow"><span class="muted nw">${T("On the offer", "Во понудата")}:</span>${left.map(({ a, n }) =>
+    `<button class="chip ${pe.trayArticle === a.id ? "on" : ""}" onclick="planTrayPick('${a.id}')">${esc(a.name)} × ${n}</button>`).join("")}</div>` : "";
+}
+function planTrayPick(id) { planTool("camera"); pe.trayArticle = id; planTray(); $("pl-hint").textContent = T("Tap where this camera hangs", "Допри каде виси оваа камера"); }
+function planPanel(st) {
+  const el = $("pl-panel"), p = pe.p, [kind, id] = String(pe.sel || "").split(":");
+  if (pe.client) { el.innerHTML = `<p class="muted">${T("This is how the client sees it. Tap Client view again to keep drawing.", "Вака го гледа клиентот. Допри пак за да продолжиш со цртање.")}</p>`; return; }
+  const rm = `<button class="btn sm danger" style="flex:none" onclick="planRemoveSel()">${T("Remove", "Отстрани")}</button>`;
+  if (kind === "cam" && planCam(id)) {
+    const c = planCam(id), r = planReach(c, p.night);
+    const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${T("Camera", "Камера")} ${c.n}${c.model ? ` <span class="muted" style="font-weight:400">· ${esc(c.model)}</span>` : ""}</b>${rm}</div>
+      <label>${T("Where", "Каде")}</label><input id="pl-cname" value="${esc(c.name || "")}" oninput="planSet('name',this.value)" placeholder="${T("e.g. Gate, Parking", "пр. Порта, Паркинг")}">
+      <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="planSetNum('lens',${l})">${l} mm</button>`).join("")}</div>
+      <label>${T("Resolution", "Резолуција")}</label><div class="chips">${Object.keys(PLAN_HPX).map((m) => `<button class="chip ${Number(m) === c.mp ? "on" : ""}" onclick="planSetNum('mp',${m})">${m} MP</button>`).join("")}</div>
+      <div class="pl-reads">
+        <span class="pl-sw" style="opacity:.6"></span><span>${T("Face readable to", "Лицето се распознава до")}</span><b>${planM(r[0])} m</b>
+        <span class="pl-sw" style="opacity:.34"></span><span>${T("Person recognised to", "Се препознава кој е до")}</span><b>${planM(r[1])} m</b>
+        <span class="pl-sw" style="opacity:.15"></span><span>${T("Activity seen to", "Се гледа што се случува до")}</span><b>${planM(r[2])} m</b>
+      </div>
+      <div class="row" style="gap:8px;align-items:center"><label style="margin:0">${T("IR at night", "IR ноќе")}</label>
+        <input id="pl-ir" type="number" inputmode="decimal" min="0" max="200" value="${c.ir ?? 30}" style="width:90px" oninput="planSetNum('ir',parseFloat(this.value)||0)"><span class="muted">m · ${PLAN_LENS[c.lens]}°</span></div>`;
+    return;
+  }
+  if (kind === "rect" && planShape(id)) {
+    const r = planShape(id);
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(r.label || PLAN_KINDS[r.kind][langMk() ? 1 : 0])} · ${planM(r.w)} × ${planM(r.h)} m</b>${rm}</div>
+      <div class="chips">${Object.keys(PLAN_KINDS).map((kk) => `<button class="chip ${r.kind === kk ? "on" : ""}" onclick="planSet('kind','${kk}')">${T(PLAN_KINDS[kk][0], PLAN_KINDS[kk][1])}</button>`).join("")}</div>
+      <p class="muted" style="font-size:12.5px;margin:0">${r.kind === "house" ? T("A house blocks what the cameras see.", "Куќата ја попречува видливоста.") : T("An area is marked on the plan; cameras see across it.", "Просторот е означен; камерите гледаат преку него.")} ${T("Drag the yellow corner to change its size.", "Повлечи го жолтиот агол за големина.")}</p>
+      <label>${T("Name on the plan (opt.)", "Име на планот (опц.)")}</label><input id="pl-rlabel" value="${esc(r.label || "")}" oninput="planSet('label',this.value)">
+      <div class="grid2"><div><label>${T("Width", "Ширина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.w}" oninput="planSetNum('w',Math.max(0.5,parseFloat(this.value)||0.5))"></div>
+        <div><label>${T("Depth", "Длабочина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.h}" oninput="planSetNum('h',Math.max(0.5,parseFloat(this.value)||0.5))"></div></div>`;
+    return;
+  }
+  if (kind === "wall" && p.walls[Number(id)]) {
+    const [[ax, ay], [bx, by]] = p.walls[Number(id)];
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${T("Wall", "Ѕид")} · ${planM(Math.hypot(bx - ax, by - ay))} m</b>${rm}</div>
+      <p class="muted" style="font-size:12.5px;margin:0">${T("The cameras cannot see through it. Drag its yellow ends to move them; drawn by mistake? Remove — Undo brings it back.", "Камерите не гледаат низ него. Повлечи ги жолтите краеви; по грешка? Отстрани — Врати го враќа.")}</p>`;
+    return;
+  }
+  if (kind === "mark" && planMark(id)) {
+    const m = planMark(id), l = (st.marks.find((x) => x.m.id === m.id) || {}).l ?? 0;
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(m.label || T("Place", "Место"))} · <span class="pl-lv${l}">${planLvEn(l)}</span></b>${rm}</div>
+      <div class="chips">${PLAN_MARKS.map(([en, mk]) => `<button class="chip ${m.label === mk ? "on" : ""}" onclick="planSet('label','${mk}')">${T(en, mk)}</button>`).join("")}</div>
+      <label>${T("Name (the client sees it)", "Име (го гледа клиентот)")}</label><input id="pl-mlabel" value="${esc(m.label || "")}" oninput="planSet('label',this.value)">`;
+    return;
+  }
+  // nothing chosen: the plan itself
+  const o = state.offers.find((x) => x.id === pe.row.offer_id);
+  el.innerHTML = `<label>${T("Plan name", "Име на планот")}</label><input id="pl-title" value="${esc(pe.row.title || "")}" oninput="pe.row.title=this.value;sheetDirty=true" placeholder="${T("e.g. House and yard", "пр. Куќа и двор")}">
+    <div class="grid2"><div><label>${T("Plot width", "Ширина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.w}" onchange="planPlot('w',this.value)"></div>
+      <div><label>${T("Plot depth", "Длабочина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.h}" onchange="planPlot('h',this.value)"></div></div>
+    <label>${T("The street is", "Улицата е")}</label>
+    <div class="chips">${[["bottom", T("Below", "Долу")], ["top", T("Above", "Горе")], ["left", T("Left", "Лево")], ["right", T("Right", "Десно")], ["none", T("None", "Нема")]]
+      .map(([v, l]) => `<button class="chip ${(p.street || "none") === v ? "on" : ""}" onclick="planSet0('street','${v}')">${l}</button>`).join("")}</div>
+    <label>${T("Photo or satellite picture under the plan", "Фотографија или сателитска слика под планот")}</label>
+    ${pe.bgUrl ? `<div class="row" style="gap:8px;flex-wrap:wrap">
+        <input type="range" min="0.15" max="1" step="0.05" value="${p.bg ? p.bg.opacity ?? 0.6 : 0.6}" oninput="planBgOpacity(this.value)" style="flex:1;min-width:120px" aria-label="${T("How strong the picture shows", "Колку се гледа сликата")}">
+        <button class="btn sm ghost" style="flex:none" onclick="planTool('scale')">${T("Set the scale", "Постави размер")}</button>
+        <button class="btn sm ghost" style="flex:none" onclick="planBgRemove()">${T("Remove picture", "Отстрани слика")}</button></div>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 0">${T("Set the scale: tap two points on the picture whose distance you know, and type it.", "Размер: допри две точки на сликата чие растојание го знаеш и внеси го.")}</p>`
+      : `<button class="btn sm ghost" onclick="$('pl-bgfile').click()">${ICON.image}${T("Add a picture to draw over", "Додај слика за цртање врз неа")}</button>`}
+    ${o ? `<div class="row" style="margin-top:12px;gap:10px"><button class="clbox ${pe.row.in_offer !== false ? "on" : ""}" onclick="planInOffer()">${pe.row.in_offer !== false ? "✓" : ""}</button>
+      <span>${T(`A page in offer ${esc(o.number)}'s PDF`, `Страница во PDF-от на понуда ${esc(o.number)}`)}</span></div>` : ""}
+    ${st.marks.length ? `<div class="sec">${T("The places that matter", "Важните места")}</div>${st.marks.map(({ m, l }) => `<div class="mov"><span>${esc(m.label || "—")}</span><span class="pl-lv${l}">${planLvEn(l)}</span></div>`).join("")}` : ""}`;
+}
+// typing in a field: one undo step for the whole field, and the panel (with its cursor) stays
+function planTyping(key) { if (pe.typing !== key) { planRemember(); pe.typing = key; } }
+const planIsTyping = () => !!(document.activeElement && document.activeElement.matches && document.activeElement.matches("#pl-panel input"));
+function planSet(k, v) {
+  const [kind, id] = String(pe.sel || "").split(":");
+  const t = kind === "cam" ? planCam(id) : kind === "rect" ? planShape(id) : kind === "mark" ? planMark(id) : null;
+  if (!t) return;
+  const typing = planIsTyping();
+  if (typing) planTyping(pe.sel + k); else planRemember();
+  t[k] = v;
+  planRender(typing);
+}
+function planSetNum(k, v) {
+  const [kind, id] = String(pe.sel || "").split(":");
+  const t = kind === "cam" ? planCam(id) : kind === "rect" ? planShape(id) : null;
+  if (!t || !isFinite(v)) return;
+  const typing = planIsTyping();
+  if (typing) planTyping(pe.sel + k); else planRemember();
+  t[k] = v;
+  planRender(typing);
+}
+function planInOffer() { pe.row.in_offer = pe.row.in_offer === false; sheetDirty = true; planPanel(planStats(pe.p)); }
+function planSet0(k, v) { planRemember(); pe.p[k] = v; planFit(); }
+function planPlot(k, v) {
+  const n = Math.max(4, Math.min(400, parseFloat(v) || 0));
+  if (!n) return;
+  planRemember(); pe.p[k] = n; planFit();
+}
+function planRemoveSel() {
+  const [kind, id] = String(pe.sel || "").split(":"), p = pe.p;
+  planRemember();
+  if (kind === "cam") p.cams = p.cams.filter((c) => String(c.id) !== id);
+  if (kind === "rect") p.shapes = p.shapes.filter((r) => String(r.id) !== id);
+  if (kind === "wall") p.walls.splice(Number(id), 1);
+  if (kind === "mark") p.marks = p.marks.filter((m) => String(m.id) !== id);
+  pe.sel = null;
+  planRender();
+}
+
+// ---- a picture to draw over, and its scale ----
+function planBgPick(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+      planRemember();
+      pe.bgUrl = c.toDataURL("image/jpeg", 0.78); pe.bgDirty = true;
+      // laid over the plot to start with; Set the scale makes it true to size
+      const w = pe.p.w, h = (w * c.height) / c.width;
+      pe.p.bg = { x: 0, y: 0, w, h, opacity: 0.6 };
+      planRender();
+      toast(T("Now set the scale: two points you know the distance between", "Сега постави размер: две точки чие растојание го знаеш"));
+    };
+    im.onerror = () => toast(T("Could not read that picture", "Сликата не може да се прочита"));
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+function planBgOpacity(v) { if (pe.p.bg) { pe.p.bg.opacity = parseFloat(v); sheetDirty = true; planRender(true); } }
+function planBgRemove() { planRemember(); pe.bgUrl = null; pe.bgDirty = true; pe.p.bg = null; planRender(); }
+async function planScaleAsk() {
+  const [[ax, ay], [bx, by]] = pe.scalePts, d = Math.hypot(bx - ax, by - ay);
+  const v = await askText(T("How many metres apart are the two points?", "Колку метри се меѓу двете точки?"), "");
+  const real = parseFloat(String(v || "").replace(",", "."));
+  if (real > 0 && d > 0.05 && pe.p.bg) {
+    planRemember();
+    const k = real / d, b = pe.p.bg;
+    // the first point stays where it is; the picture grows or shrinks around it
+    pe.p.bg = { ...b, x: ax - (ax - b.x) * k, y: ay - (ay - b.y) * k, w: b.w * k, h: b.h * k };
+    toast(T(`Scale set: ${planM(real)} m`, `Размерот е поставен: ${planM(real)} m`));
+  }
+  planTool("move");
+}
+
+// ---- keeping it ----
+async function savePlan() {
+  if (!pe) return;
+  const row = { title: (pe.row.title || "").trim() || null, plan: pe.p, cams: pe.p.cams.length, in_offer: pe.row.in_offer !== false,
+    client_id: pe.row.client_id || null, offer_id: pe.row.offer_id || null, job_id: pe.row.job_id || null, updated_at: new Date().toISOString() };
+  let id = pe.id;
+  try {
+    if (id) await dbq(db.from("coverage_plans").update(row).eq("id", id), T("Plan not saved", "Планот не е зачуван"));
+    else { const made = await dbq(db.from("coverage_plans").insert(row).select().single(), T("Plan not saved", "Планот не е зачуван")); id = made.id; pe.id = id; pe.row.id = id; }
+    if (pe.bgDirty) {
+      if (pe.bgUrl) await dbq(db.from("coverage_plan_images").upsert({ plan_id: id, data: pe.bgUrl }, { onConflict: "plan_id" }), T("Picture not saved", "Сликата не е зачувана"));
+      else await dbq(db.from("coverage_plan_images").delete().eq("plan_id", id), T("Picture not removed", "Сликата не е отстранета"));
+      pe.bgDirty = false;
+    }
+  } catch { return; }
+  pe.saved = JSON.stringify(pe.p);
+  sheetDirty = false;
+  await refreshAll(["plans"]);
+  toast(T("Plan saved", "Планот е зачуван"));
+}
+async function delPlan() {
+  if (!pe || !pe.id) return;
+  if (!await ask(T("Delete this camera plan?", "Да се избрише планот на камери?"), T("Delete", "Избриши"))) return;
+  try { await dbq(db.from("coverage_plans").delete().eq("id", pe.id), T("Not deleted", "Не е избришано")); } catch { return; }
+  pe = null; closeSheet(); await refreshAll(["plans"]); render();
+  toast(T("Plan deleted", "Планот е избришан"));
+}
+// the client's page as a picture to send — two taps, as with the offer: one makes it, one hands it over
+let planFile = null;
+async function sharePlan() {
+  if (!pe) return;
+  toast(T("Preparing the picture…", "Се подготвува сликата…"));
+  try {
+    await scriptOnce("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js");
+    const host = document.createElement("div");
+    host.style.cssText = "position:absolute;left:-10000px;top:0;width:190mm;background:#fff;padding:6mm";
+    host.innerHTML = `<div class="pv">${await planClientHtml({ ...pe.row, plan: pe.p }, pe.bgUrl)}</div>`;
+    document.body.appendChild(host);
+    await imagesLoaded(host);
+    const canvas = await window.html2canvas(host, { scale: 2, backgroundColor: "#ffffff", logging: false });
+    host.remove();
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+    const c = state.clients.find((x) => x.id === pe.row.client_id);
+    planFile = new File([blob], `План на камери${c ? " - " + c.name.replace(/[\\/:*?"<>|]+/g, "-") : ""}.png`, { type: "image/png" });
+  } catch (e) { console.error(e); return say(T("Could not make the picture: ", "Не можев да ја направам сликата: ") + plainError(e)); }
+  const can = !!(navigator.canShare && navigator.canShare({ files: [planFile] }));
+  const tn = $("toast"); clearTimeout(tn._timer); tn.classList.remove("on");
+  $("pl-panel").innerHTML = `<div class="card row" style="gap:10px"><span class="thumb ph">${ICON.image}</span>
+      <div style="flex:1;min-width:0"><b style="overflow-wrap:anywhere">${esc(planFile.name)}</b><div class="muted">${Math.max(1, Math.round(planFile.size / 1024))} KB</div></div></div>
+    ${can ? `<button class="btn amber" onclick="sendPlanFile()">${ICON.share}${T("Share — Viber, WhatsApp…", "Сподели — Viber, WhatsApp…")}</button>` : ""}
+    <button class="btn ghost" onclick="downloadPlanFile()">${T("Download", "Преземи")}</button>`;
+}
+async function sendPlanFile() {
+  if (!planFile) return;
+  try { await navigator.share({ files: [planFile], title: planFile.name.replace(/\.png$/, "") }); }
+  catch (e) { if (e && e.name === "AbortError") return; console.error(e); return say(T("Could not share: ", "Не може да се сподели: ") + plainError(e)); }
+  toast(T("Sent", "Испратено"));
+}
+function downloadPlanFile() {
+  if (!planFile) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(planFile); a.download = planFile.name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+// the page the offer PDF carries, when the offer has a plan meant for it
+async function offerPlanPage(o) {
+  const pl = plansReady() && plansOf("offer_id", o.id).find((x) => x.in_offer !== false);
+  if (!pl || offlineNow()) return "";
+  // a weak signal does not hold the offer up: without the plan it prints as before
+  const none = { data: null, error: { timedOut: true } };
+  const r = await within(12000, db.from("coverage_plans").select("*").eq("id", pl.id).maybeSingle(), none);
+  if (r.error || !r.data) return "";
+  const img = await within(12000, db.from("coverage_plan_images").select("data").eq("plan_id", pl.id).maybeSingle(), none);
+  try { return `<div class="pv-break"></div>${await planClientHtml(r.data, img.data ? img.data.data : null)}`; }
+  catch (e) { console.error("plan page", e); return ""; }
+}
+
 // Puts real pictures where the template left «IMG:n» markers.
 // Done by hand so the document pipeline owns no third-party image library.
 function dataUrlToBytes(dataUrl) {
@@ -7852,6 +8618,7 @@ function openClientCard(id) {
         <span class="mono" style="white-space:nowrap;color:${invPaid(i) ? "var(--personal)" : lateInv.includes(i) ? "var(--danger)" : "var(--amber)"}">${fmt(i.total)} ›</span></div>`).join("")}` : ""}
 
     ${sitesBlock(id)}
+    ${plansBlock(id)}
     ${installsBlock(id)}
     ${docsBlock(id)}
     ${relatedTasks("client_id", id)}
@@ -13223,6 +13990,11 @@ async function openJobCard(id) {
       <button class="btn sm ghost" style="width:100%" onclick="$('jb-cam').click()">${ICON.camera}${T("Photograph", "Сликај")}</button>
       <button class="btn sm ghost" style="width:100%" onclick="$('jb-file').click()">${ICON.image}${T("From gallery", "Од галерија")}</button>
     </div>
+    ${plansReady() ? (() => {
+      const pl = plansOf("job_id", id)[0] || (j.offer_id && plansOf("offer_id", j.offer_id)[0]);
+      return `<button class="btn sm ghost" style="width:100%;margin-top:8px" onclick="planForJob('${id}')">${ICON.camera}${pl
+        ? T("Camera plan", "План на камери") + ` · ${planCamsN(pl.cams || 0)}` : T("Draw a camera plan", "Нацртај план на камери")}</button>`;
+    })() : ""}
 
     ${j.status === "scheduled" ? `<button class="btn" style="margin-top:14px" onclick="startJob('${id}')">${T("On site now", "Сега сум таму")}</button>` : ""}
     ${j.status !== "done" && j.status !== "cancelled" ? `<button class="btn amber" ${j.status === "scheduled" ? "" : 'style="margin-top:14px"'} onclick="finishJob('${id}')">${T("Finished", "Завршена")}</button>`
