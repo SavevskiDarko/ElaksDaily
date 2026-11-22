@@ -104,6 +104,23 @@ CI runs the same two checks on every push. They take a few seconds and catch the
 mistakes this shape of app makes silently — a renamed id that one caller missed,
 a button wired to a function that no longer exists.
 
+### Browser tests
+
+```bash
+npx playwright install chromium   # once, on your own computer
+npm test
+```
+
+`npm test` opens `index.html` in Chromium against an in-memory stand-in for
+Supabase (`tests/stub-supabase.js`), so it needs no project, no login and no
+network. It opens every tab in English and Macedonian and draws a camera plan.
+In a cloud session (claude.ai/code) Chromium and Playwright are already
+installed — skip the `npx playwright install` line there.
+
+- `npm test -- camera` runs only the tests whose name contains "camera".
+- A failure leaves a screenshot in `build/test-failures/`.
+- A new test is a `tests/<name>.test.js` file; `tests/run.js` says what it exports.
+
 ## If something doesn't work
 
 - **Login fails** → check CONFIG values and that the user exists in Authentication.

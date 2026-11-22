@@ -5,9 +5,11 @@
   "description": "Centrala — tasks, stock, offers, jobs, insurance and apartments. One HTML file, no build step.",
   "scripts": {
     "check": "node scripts/check-html.mjs index.html && npm run lint",
-    "lint": "node scripts/extract-script.mjs index.html build/app.js && eslint build/app.js"
+    "lint": "node scripts/extract-script.mjs index.html build/app.js && eslint build/app.js",
+    "test": "node tests/run.js"
   },
   "devDependencies": {
-    "eslint": "^9.13.0"
+    "eslint": "^9.13.0",
+    "playwright": "1.63.0"
   }
 }
