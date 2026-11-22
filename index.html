@@ -1637,7 +1637,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-210000";
+const BUILD = "20261122-230000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2450,6 +2450,13 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122-230000", en: [
+    "Lock drawing: on a camera plan, lock the house and rooms once they are drawn — then a finger moves only cameras and alarm devices, and on the rest it moves the view. Tap Locked to change the rooms again.",
+    "Cameras and devices are easier to grab: a slightly missed tap still takes them.",
+  ], mk: [
+    "Заклучи цртеж: на планот заклучи ги куќата и просториите кога ќе ги нацрташ — тогаш прстот ги движи само камерите и алармните уреди, а на останатото го поместува погледот. Допри Заклучено за повторно да ги менуваш.",
+    "Камерите и уредите полесно се фаќаат: и допир малку покрај нив ги зема.",
+  ] },
   { build: "20261122-210000", en: [
     "Alarm plans: on any camera plan, switch to Alarm and place motion detectors, contacts, sirens, keypad and panel. Detectors show what they cover, cut by the walls.",
     "Each device has its zone number and type, so the plan is the panel's zone list. A check list points out what is missing: a door with no contact, a room no detector covers, an instant zone that sees the keypad.",
@@ -6150,13 +6157,14 @@ function planSvgInner(p, o) {
   }
   // the other layer's devices: faint on screen, left off the client's page
   const camDim = layer !== "cam", alDim = layer !== "alarm";
+  const hitR = o.hitR || 0.8, hit = (x, y) => o.paper ? "" : `<circle cx="${f(x)}" cy="${f(y)}" r="${f(hitR)}" fill="transparent"/>`;
   if (!(camDim && o.paper)) for (const c of p.cams || []) {
     const on = !clean && !camDim && o.sel === "cam:" + c.id, a = c.h * Math.PI / 180, hx = Math.cos(a), hy = Math.sin(a);
-    out.push(`<g ${camDim ? 'opacity="0.3" pointer-events="none"' : `data-k="cam:${c.id}"`}><polygon points="${pts([[c.x + hx * 0.75, c.y + hy * 0.75], [c.x - hy * 0.32, c.y + hx * 0.32], [c.x + hy * 0.32, c.y - hx * 0.32]])}" fill="${P.cam}" stroke="#fff" stroke-width="0.06"/>
+    out.push(`<g ${camDim ? 'opacity="0.3" pointer-events="none"' : `data-k="cam:${c.id}"`}>${camDim ? "" : hit(c.x, c.y)}<polygon points="${pts([[c.x + hx * 0.75, c.y + hy * 0.75], [c.x - hy * 0.32, c.y + hx * 0.32], [c.x + hy * 0.32, c.y - hx * 0.32]])}" fill="${P.cam}" stroke="#fff" stroke-width="0.06"/>
       <circle cx="${f(c.x)}" cy="${f(c.y)}" r="0.5" fill="${on ? P.sel : P.cam}" stroke="#fff" stroke-width="0.09"/>
       <text x="${f(c.x)}" y="${f(c.y + 0.2)}" font-size="0.56" text-anchor="middle" fill="${on ? "#152A46" : "#fff"}" font-family="IBM Plex Mono, monospace" font-weight="600" pointer-events="none">${c.n}</text></g>`);
     if (on) out.push(`<line x1="${f(c.x)}" y1="${f(c.y)}" x2="${f(c.x + hx * 2.2)}" y2="${f(c.y + hy * 2.2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
-      <circle data-k="rot:${c.id}" cx="${f(c.x + hx * 2.2)}" cy="${f(c.y + hy * 2.2)}" r="0.45" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/>`);
+      <g data-k="rot:${c.id}">${hit(c.x + hx * 2.2, c.y + hy * 2.2)}<circle cx="${f(c.x + hx * 2.2)}" cy="${f(c.y + hy * 2.2)}" r="0.45" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/></g>`);
   }
   if (!(alDim && o.paper)) for (const d of p.alarm || []) {
     const t = alarmT(d), on = !clean && !alDim && o.sel === "al:" + d.id, a = (d.h || 0) * Math.PI / 180, hx = Math.cos(a), hy = Math.sin(a);
@@ -6164,15 +6172,15 @@ function planSvgInner(p, o) {
     const g = alDim ? 'opacity="0.3" pointer-events="none"' : `data-k="al:${d.id}"`;
     if (d.type === "contact") {
       const ca = (d.h || 0) % 180;
-      out.push(`<g ${g}><rect x="${f(d.x - 0.32)}" y="${f(d.y - 0.13)}" width="0.64" height="0.26" rx="0.06" fill="${t.col}" stroke="${on ? P.sel : "#fff"}" stroke-width="${on ? 0.1 : 0.05}" transform="rotate(${f(ca)} ${f(d.x)} ${f(d.y)})"/>
+      out.push(`<g ${g}>${alDim ? "" : hit(d.x, d.y)}<rect x="${f(d.x - 0.32)}" y="${f(d.y - 0.13)}" width="0.64" height="0.26" rx="0.06" fill="${t.col}" stroke="${on ? P.sel : "#fff"}" stroke-width="${on ? 0.1 : 0.05}" transform="rotate(${f(ca)} ${f(d.x)} ${f(d.y)})"/>
         <text x="${f(d.x)}" y="${f(d.y - 0.32)}" font-size="0.42" text-anchor="middle" fill="${t.col}" font-family="IBM Plex Mono, monospace" font-weight="700" pointer-events="none">${esc(label)}</text></g>`);
       continue;
     }
-    out.push(`<g ${g}>${t.cov === "fan" ? `<line x1="${f(d.x)}" y1="${f(d.y)}" x2="${f(d.x + hx * 0.6)}" y2="${f(d.y + hy * 0.6)}" stroke="${t.col}" stroke-width="0.12"/>` : ""}
+    out.push(`<g ${g}>${alDim ? "" : hit(d.x, d.y)}${t.cov === "fan" ? `<line x1="${f(d.x)}" y1="${f(d.y)}" x2="${f(d.x + hx * 0.6)}" y2="${f(d.y + hy * 0.6)}" stroke="${t.col}" stroke-width="0.12"/>` : ""}
       <rect x="${f(d.x - 0.34)}" y="${f(d.y - 0.34)}" width="0.68" height="0.68" rx="${t.cov === "circle" ? 0.34 : 0.12}" fill="${on ? P.sel : t.col}" stroke="#fff" stroke-width="0.07"/>
       <text x="${f(d.x)}" y="${f(d.y + (alarmZoned(d) ? 0.15 : 0.1))}" font-size="${alarmZoned(d) ? 0.42 : 0.26}" text-anchor="middle" fill="${on ? "#152A46" : "#fff"}" font-family="IBM Plex Mono, monospace" font-weight="700" pointer-events="none">${esc(label)}</text></g>`);
     if (on && t.cov === "fan") out.push(`<line x1="${f(d.x)}" y1="${f(d.y)}" x2="${f(d.x + hx * 2)}" y2="${f(d.y + hy * 2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
-      <circle data-k="arot:${d.id}" cx="${f(d.x + hx * 2)}" cy="${f(d.y + hy * 2)}" r="0.42" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/>`);
+      <g data-k="arot:${d.id}">${hit(d.x + hx * 2, d.y + hy * 2)}<circle cx="${f(d.x + hx * 2)}" cy="${f(d.y + hy * 2)}" r="0.42" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/></g>`);
   }
   if (!clean && o.sel && o.sel.startsWith("rect:")) {
     const r = (p.shapes || []).find((x) => "rect:" + x.id === o.sel);
@@ -6360,8 +6368,9 @@ function startPlanner(row, bgUrl) {
         <button role="tab" data-l="alarm" onclick="planLayer('alarm')">${T("Alarm", "Аларм")}</button>
       </div>
       <div class="chips wrap" id="pl-tool"></div>
-      <div class="chips">
+      <div class="chips wrap">
         <button class="chip" id="pl-undo" onclick="planUndo()" disabled>↶ ${T("Undo", "Врати")}</button>
+        <button class="chip" id="pl-lock" onclick="planLock()" aria-pressed="false"></button>
         <button class="chip" id="pl-night" onclick="planNight()">${T("Night", "Ноќ")}</button>
         <button class="chip" id="pl-clientv" onclick="planClientView()">${T("Client view", "Како клиентот")}</button>
         <button class="chip" onclick="planOpen3d()">3D</button>
@@ -6393,12 +6402,27 @@ function startPlanner(row, bgUrl) {
 // the tools: a house and a gate outside; rooms, doors and shelves inside
 const planToolList = () => {
   const dev = pe.layer === "alarm" ? ["device", T("Device", "Уред")] : ["camera", T("Camera", "Камера")];
+  if (pe.p.locked) return [["move", T("Move", "Помести")], dev];
   return planInside(pe.p)
     ? [["move", T("Move", "Помести")], dev, ["room", T("Room", "Просторија")], ["wall", T("Wall", "Ѕид")],
        ["door", T("Door", "Врата")], ["shelf", T("Shelf", "Полица")], ["mark", T("Place", "Место")]]
     : [["move", T("Move", "Помести")], dev, ["house", T("House", "Куќа")], ["room", T("Room", "Просторија")],
        ["wall", T("Wall", "Ѕид")], ["door", T("Gate, door", "Порта, врата")], ["area", T("Area", "Простор")], ["mark", T("Place", "Место")]];
 };
+// Locked: the house, rooms, walls, doors, areas, shelves and places stay put — a finger on
+// them moves the view — and only the cameras and the alarm's devices move. Kept with the plan.
+const PLAN_LOCK_SVG = (open) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:5px" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="${open ? "M8 11V7a4 4 0 0 1 7.5-2" : "M8 11V7a4 4 0 0 1 8 0v4"}"/></svg>`;
+const planSelLocked = (sel) => /^(rect|wall|door|mark):/.test(String(sel || ""));
+function planLock() {
+  if (!pe) return;
+  pe.p.locked = !pe.p.locked;
+  if (pe.p.locked && planSelLocked(pe.sel)) pe.sel = null;
+  if (pe.p.locked && !["move", "camera", "device"].includes(pe.tool)) pe.tool = "move";
+  planToolsRender();
+  planTool(pe.tool);
+  toast(pe.p.locked ? T("Drawing locked: only cameras and alarm devices move", "Цртежот е заклучен: се движат само камерите и алармните уреди")
+    : T("Unlocked: the house and rooms can be changed", "Отклучено: куќата и просториите може да се менуваат"));
+}
 // the cameras or the alarm: the same rooms and doors, either one's devices
 function planLayer(l) {
   if (!pe || pe.layer === l) return;
@@ -6460,8 +6484,11 @@ function planRemember() {
 }
 function planUndo() {
   if (!pe || !pe.hist.length) return;
-  const s = JSON.parse(pe.hist.pop());
-  pe.p = s.p; pe.sel = s.sel; pe.wallStart = null;
+  const s = JSON.parse(pe.hist.pop()), locked = !!pe.p.locked;
+  pe.p = s.p; pe.wallStart = null;
+  // the lock is a way of working, not a change to the drawing: Undo leaves it as it is
+  pe.p.locked = locked;
+  pe.sel = locked && planSelLocked(s.sel) ? null : s.sel;
   $("pl-undo").disabled = !pe.hist.length;
   planRender();
 }
@@ -6471,7 +6498,9 @@ function planTool(t) {
   if (t !== "camera" && t !== "device") pe.trayArticle = null;
   document.querySelectorAll("#pl-tool .chip").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
   $("pl-hint").textContent = {
-    move: pe.layer === "alarm"
+    move: pe.p.locked
+      ? T("Drawing locked: drag a camera or device to move it, its yellow dot to turn it · tap Locked to change the rooms", "Цртежот е заклучен: повлечи камера или уред за да го поместиш, жолтата точка за да го свртиш · допри Заклучено за да ги менуваш просториите")
+      : pe.layer === "alarm"
       ? T("Pick a device in the row above and tap where it goes · drag a device to move it, a detector's yellow dot to turn it", "Избери уред во редот горе и допри каде оди · повлечи уред за да го поместиш, жолтата точка за да го свртиш детекторот")
       : T("Drag a camera to move it, its yellow dot to turn it · tap anything to change or remove it · drag the empty plan to pan", "Повлечи камера за да ја поместиш, жолтата точка за да ја свртиш · допри нешто за да го смениш или отстраниш · повлечи празно за да го поместиш планот"),
     house: T("Drag across the plan to draw the house (it blocks the view)", "Повлечи преку планот за да нацрташ куќа (ја попречува видливоста)"),
@@ -6575,8 +6604,9 @@ function planDown(e) {
     if (pe.scalePts.length === 2) planScaleAsk(); else planRender();
     return;
   }
-  // moving things
-  const [kind, id, end] = k.split(":");
+  // moving things — on a locked drawing, only cameras and devices; the rest is like empty plan
+  let [kind, id, end] = k.split(":");
+  if (pe.p.locked && /^(rect|rsz|wall|wend|mark|door)$/.test(kind)) kind = "";
   if (kind === "cam") { planRemember(); pe.sel = "cam:" + id; pe.drag = { mode: "cam", id }; }
   else if (kind === "rot") { planRemember(); pe.drag = { mode: "rot", id }; }
   else if (kind === "rect") { planRemember(); const r = planShape(id); pe.sel = "rect:" + id; pe.drag = { mode: "rect", id, dx: x - r.x, dy: y - r.y }; }
@@ -6654,7 +6684,9 @@ function planRender(light) {
   svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
   const d = pe.drag, temp = d && d.mode === "draw" && d.x1 !== undefined
     ? { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) } : null;
-  svg.innerHTML = planSvgInner(pe.p, { clean: pe.client, sel: pe.sel, wallStart: pe.wallStart, temp, bgUrl: pe.bgUrl, marks: st.marks, scalePts: pe.scalePts, layer: pe.layer });
+  // about 18 pixels of finger around a camera or a device, however far in or out the plan is zoomed
+  const mpp = Math.max(v.w / (svg.clientWidth || 360), v.h / (svg.clientHeight || 300)), hitR = Math.max(0.55, Math.min(4, 18 * mpp));
+  svg.innerHTML = planSvgInner(pe.p, { clean: pe.client, sel: pe.sel, wallStart: pe.wallStart, temp, bgUrl: pe.bgUrl, marks: st.marks, scalePts: pe.scalePts, layer: pe.layer, hitR });
   const al = pe.layer === "alarm" ? alarmChecks(pe.p) : null, alRooms = al ? al.filter((c) => /%/.test(c.text)) : [];
   const tiles = al ? [[T("Zones", "Зони"), pe.p.alarm.filter(alarmZoned).length, "pl-zones"], [T("Devices", "Уреди"), pe.p.alarm.length, "pl-devs"],
     alRooms.length ? [T("Rooms covered", "Покриени простории"), `${alRooms.filter((c) => c.ok).length}/${alRooms.length}`, "pl-arooms"] : null,
@@ -6667,6 +6699,12 @@ function planRender(light) {
   row.innerHTML = tiles.map(([l, v, id]) => `<div class="stat"><span>${l}</span><b id="${id}">${v}</b></div>`).join("");
   if (pe.bgDirty || JSON.stringify(pe.p) !== pe.saved || [...pe.photos.values()].some((x) => x.dirty)) sheetDirty = true;
   $("pl-night").classList.toggle("on", !!pe.p.night);
+  const lk = $("pl-lock");
+  if (lk) {
+    lk.classList.toggle("on", !!pe.p.locked);
+    lk.setAttribute("aria-pressed", pe.p.locked ? "true" : "false");
+    lk.innerHTML = PLAN_LOCK_SVG(!pe.p.locked) + (pe.p.locked ? T("Locked", "Заклучено") : T("Lock drawing", "Заклучи цртеж"));
+  }
   if (!light) { planTray(); planPanel(st); }
 }
 // the cameras on the offer still waiting for a place
