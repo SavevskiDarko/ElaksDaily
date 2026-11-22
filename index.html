@@ -6969,15 +6969,16 @@ function p3Scene() {
   const sky = night ? 0x1B2433 : 0xDCE8F5;
   scene.background = new THREE.Color(sky);
   scene.fog = new THREE.Fog(sky, 70, 320);
-  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0x8A9A80, night ? 0.45 : 0.95));
-  const sun = new THREE.DirectionalLight(0xFFFFFF, night ? 0.15 : 0.55);
+  // light that adds up to about one on the ground, so colours show as they are
+  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0x8A9A80, night ? 0.35 : 0.62));
+  const sun = new THREE.DirectionalLight(0xFFFFFF, night ? 0.12 : 0.42);
   sun.position.set(-20, 40, -10); scene.add(sun);
   const lam = (color, extra) => new THREE.MeshLambertMaterial({ color, ...extra });
   const flat = (x, y, w, h, mat, lift) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x + w / 2, lift, y + h / 2); scene.add(m); return m;
   };
-  flat(-400, -400, p.w + 800, p.h + 800, lam(night ? 0x3A4A3A : 0xD6E4CC), 0);
+  flat(-400, -400, p.w + 800, p.h + 800, lam(night ? 0x3A4A3A : 0xB3CB9E), 0);
   const st = p.street, sw = 3;
   if (st && st !== "none") {
     const r = st === "bottom" ? [-40, p.h, p.w + 80, sw] : st === "top" ? [-40, -sw, p.w + 80, sw] : st === "left" ? [-sw, -40, sw, p.h + 80] : [p.w, -40, sw, p.h + 80];
@@ -6992,7 +6993,7 @@ function p3Scene() {
   const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[0, 0], [p.w, 0], [p.w, p.h], [0, p.h]].map(([x, z]) => new THREE.Vector3(x, 0.12, z))), edge);
   scene.add(line);
   for (const r of p.shapes || []) if (r.kind === "house") {
-    const H = r.hgt || 6, box = new THREE.Mesh(new THREE.BoxGeometry(r.w, H, r.h), lam(0xEDE7DC));
+    const H = r.hgt || 6, box = new THREE.Mesh(new THREE.BoxGeometry(r.w, H, r.h), lam(0xFBF6EE));
     box.position.set(r.x + r.w / 2, H / 2, r.y + r.h / 2); scene.add(box);
     const ed = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), edge); ed.position.copy(box.position); scene.add(ed);
     // a gable roof along the longer side
