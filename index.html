@@ -577,6 +577,17 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .pl-sw{width:14px;height:14px;border-radius:3px;background:var(--work)}
 .pl-lv0{color:var(--danger);font-weight:600}.pl-lv1{color:#B57F00;font-weight:600}.pl-lv2{color:var(--work);font-weight:600}.pl-lv3{color:var(--personal);font-weight:600}
 @media (min-width:900px){.sheet.full{max-width:1100px}}
+.pl-subscreen{position:fixed;inset:0;z-index:35;background:var(--paper);overflow-y:auto;padding:0 var(--pad) calc(20px + env(safe-area-inset-bottom))}
+.pl-subscreen > *{max-width:1100px;margin-left:auto;margin-right:auto}
+.pl-subhead{position:sticky;top:0;z-index:3;background:var(--paper);display:flex;align-items:center;gap:10px;padding:12px 0 10px}
+.pl-subhead h2{font-family:var(--cond);font-weight:700;font-size:17px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-wrap{border-radius:12px;overflow:hidden;background:#2B313B}
+#cv-canvas{display:block;width:100%;height:auto;touch-action:none}
+.cv-steps{margin:8px 0 0 20px;font-size:14px;line-height:1.5}
+.p3-wrap{position:relative;border-radius:12px;overflow:hidden;background:#DCE8F5;margin-top:8px;touch-action:none}
+.p3-wrap canvas{display:block;touch-action:none}
+#p3-modes .chip svg{width:15px;height:15px;vertical-align:-3px;margin-right:4px}
+.p3-hint{position:absolute;left:8px;top:8px;z-index:1;background:rgba(21,42,70,.72);color:#fff;font-size:12px;padding:4px 9px;border-radius:8px;pointer-events:none}
 
 /* ---- printable offer (PDF) ---- */
 #printroot{display:none}
@@ -626,6 +637,10 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .pv-legend{font-size:9pt;color:#232323;margin:0 0 5mm;text-align:center}
 .pv-keys{font-size:9.5pt;margin:0 0 4mm;line-height:1.5}
 .pv-small{font-size:8.5pt;color:#555;line-height:1.4}
+.pv-sub{font-size:10pt;margin:5mm 0 3mm}
+.pv-cv{margin:0 0 5mm;text-align:center}
+.pv-cv img{display:block;max-width:100%;max-height:110mm;width:auto;height:auto;margin:0 auto 1.5mm}
+.pv-cv span{font-size:9pt;color:#555}
 .rp-bar{background:#2462AC !important;color:#fff;font-weight:700;padding:2.6mm 3mm;font-size:10.5pt;
   display:flex;justify-content:space-between;margin-bottom:6mm}
 /* dark as the phone is, unless light was chosen in Settings → Appearance; or dark chosen */
@@ -1472,6 +1487,7 @@ const LOADERS = {
   installs:   { need: () => state.perm.elaks,   q: () => db.from("installations").select("*").order("warranty_until") },
   sites:      { need: () => state.perm.elaks,   q: () => db.from("sites").select("*").eq("active", true).order("name") },
   // camera plans: the list only — a plan's drawing and picture come when it is opened (migration 0013)
+  planPhotos: { need: () => state.perm.elaks,   optional: true, q: () => db.from("coverage_plan_photos").select("plan_id, cam_id").limit(1) },
   plans:      { need: () => state.perm.elaks,   optional: true, q: () => db.from("coverage_plans")
     .select("id, client_id, offer_id, job_id, title, cams, in_offer, created_at, updated_at").order("updated_at", { ascending: false }) },
   // the last half year, and any job still to do however old — or with no date at all
@@ -1611,7 +1627,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-120000";
+const BUILD = "20261122-150000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1947,6 +1963,7 @@ function closeSheet(fromBack) {
 // and only leave the app from Home with nothing open.
 window.addEventListener("popstate", () => {
   if (ignorePop) { ignorePop = false; return; }
+  if (pe && pe.subOpen) { planSubClose(true); return; }
   if (sheetOpen) {
     // typing in it: stay, and ask — the step back is put back until they say
     if (sheetDirty) { history.pushState({ centrala: "sheet" }, ""); closeSheetAsked(); return; }
@@ -2423,6 +2440,13 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122-150000", en: [
+    "Camera plans: see what a camera will see on a photo of the place — the lens's frame and how far a face, a person and activity are seen, laid on the ground. Tap a camera on the plan, then View on a photo.",
+    "3D: the plan as a model with the houses, walls and the cameras' shades. Look through any camera and drag to aim it.",
+  ], mk: [
+    "Планови на камери: види што ќе гледа камерата на слика од местото — рамката на објективот и до каде се гледа лице, личност и движење, на земјата. Допри камера на планот, па Поглед на слика.",
+    "3D: планот како модел со куќите, ѕидовите и нијансите на камерите. Погледни низ која било камера и повлечи за да ја насочиш.",
+  ] },
   { build: "20261122", en: [
     "Camera plans: draw the house and the yard, place the 2.8 or 3.6 mm cameras and see what each one covers — face, person, activity — with walls cutting the view.",
     "Show the client: the plan is a page in the offer's PDF, or a picture to send. It stays on the client's card, so years later you still know where every camera went.",
@@ -2461,9 +2485,10 @@ function whatsNew(all) {
   let seen = null;
   try { seen = localStorage.getItem("centrala_seen_build"); } catch { /* private mode */ }
   // a phone from before this list sees its first entry once
-  const since = String(seen || "20261106").slice(0, 8);
+  // a date, or a date and time: "20261122" comes before "20261122-150000", which comes before "20261123"
+  const since = String(seen || "20261106");
   const list = WHATS_NEW.filter((w) => all || w.build > since);
-  try { localStorage.setItem("centrala_seen_build", String(BUILD).slice(0, 8)); } catch { /* shown again next time */ }
+  try { localStorage.setItem("centrala_seen_build", String(BUILD)); } catch { /* shown again next time */ }
   if (!list.length) return;
   openSheet(`<h2>${T("What's new", "Што е ново")}</h2>
     ${list.map((w) => `<ul class="whatsnew">${(langMk() ? w.mk : w.en).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}
@@ -5829,6 +5854,15 @@ function planPal(paper) {
     text: v("--muted"), cov: v("--work"), cam: v("--navy"), sel: v("--amber"), card: v("--card"), lv: [v("--danger"), v("--amber"), v("--work"), v("--personal")] };
 }
 // the drawing as SVG markup; o: { paper, clean, sel, wallStart, temp, bgUrl, mk }
+// a camera's cone as three polygons — face, person, activity — each cut where the view is blocked
+function planCone(c, S, night) {
+  const r = planReach(c, night), fov = PLAN_LENS[c.lens] || 103, n = Math.ceil(fov), rays = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (c.h - fov / 2 + (fov * i) / n) * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
+    rays.push([dx, dy, planHit(c.x, c.y, dx, dy, S)]);
+  }
+  return [0, 1, 2].map((z) => [[c.x, c.y]].concat(rays.map(([dx, dy, h]) => { const d = Math.min(r[z], h); return [c.x + dx * d, c.y + dy * d]; })));
+}
 function planSvgInner(p, o) {
   const P = planPal(o.paper), mk = o.mk, clean = o.paper || o.clean;
   const out = [], S = planSegs(p), f = (n) => Math.round(n * 1000) / 1000;
@@ -5854,13 +5888,8 @@ function planSvgInner(p, o) {
     out.push(`<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="${P.area}" fill-opacity="0.75" stroke="${o.sel === "rect:" + r.id ? P.sel : P.line}" stroke-width="${o.sel === "rect:" + r.id ? 0.14 : 0.06}" stroke-dasharray="0.3 0.2"/>`);
   // the cones, three shades each, cut by what blocks the view
   for (const c of p.cams || []) {
-    const r = planReach(c, p.night), fov = PLAN_LENS[c.lens] || 103, n = Math.ceil(fov), rays = [];
-    for (let i = 0; i <= n; i++) {
-      const a = (c.h - fov / 2 + (fov * i) / n) * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
-      rays.push([dx, dy, planHit(c.x, c.y, dx, dy, S)]);
-    }
-    for (let z = 2; z >= 0; z--)
-      out.push(`<polygon points="${pts([[c.x, c.y]].concat(rays.map(([dx, dy, h]) => { const d = Math.min(r[z], h); return [c.x + dx * d, c.y + dy * d]; })))}" fill="${P.cov}" fill-opacity="${PLAN_OP[z] * (clean ? 0.95 : 0.8)}"/>`);
+    const polys = planCone(c, S, p.night);
+    for (let z = 2; z >= 0; z--) out.push(`<polygon points="${pts(polys[z])}" fill="${P.cov}" fill-opacity="${PLAN_OP[z] * (clean ? 0.95 : 0.8)}"/>`);
   }
   for (const r of p.shapes || []) if (r.kind === "house")
     out.push(`<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="${P.house}" stroke="${o.sel === "rect:" + r.id ? P.sel : P.line}" stroke-width="${o.sel === "rect:" + r.id ? 0.22 : 0.14}"/>`);
@@ -5929,8 +5958,12 @@ function planPng(p, bgUrl, px = 1400) {
 }
 
 // ---------- the client's page, in Macedonian ----------
-async function planClientHtml(row, bgUrl) {
+async function planClientHtml(row, bgUrl, photos) {
   const p = { ...(row.plan || planBlank()), night: false }, png = await planPng(p, bgUrl), s = planStats(p);
+  const views = [];
+  for (const cm of p.cams || []) if (cm.photo && photos && photos[cm.id]) {
+    try { views.push({ cm, img: await planCamViewPng(cm, photos[cm.id]) }); } catch (e) { console.warn("camera photo", e); }
+  }
   const c = state.clients.find((x) => x.id === row.client_id), o = state.offers.find((x) => x.id === row.offer_id);
   const sw = (op) => `<span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#4C6EF5;opacity:${op};vertical-align:-1px;margin-right:5px"></span>`;
   const col = ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"];
@@ -5943,7 +5976,9 @@ async function planClientHtml(row, bgUrl) {
         return `<tr><td>${cm.n}</td><td>${esc(cm.name || "Камера " + cm.n)}</td><td>${cm.lens} mm · ${cm.mp} MP</td><td class="r">${planM(r[0])} m</td><td class="r">${planM(r[1])} m</td><td class="r">${planM(r[2])} m</td><td class="r">${planM(nr[2])} m</td></tr>`; }).join("")}</tbody></table>
     ${s.marks.length ? `<div class="pv-keys"><b>Што се гледа на важните места:</b> ${s.marks.map(({ m, l }) =>
       `${esc(m.label || "")} — <span style="color:${col[l]};font-weight:700">${PLAN_LV_MK[l]}</span>`).join(" · ")}</div>` : ""}
-    <div class="pv-small">${planCamsN((p.cams || []).length, true)} · се гледа ${s.seen}% од дворот · лицето се распознава на ${s.face}%. Проценка според објективот и резолуцијата на камерата (EN 62676-4); светлото, времето и висината на монтажа ја менуваат.</div>`;
+    <div class="pv-small">${planCamsN((p.cams || []).length, true)} · се гледа ${s.seen}% од дворот · лицето се распознава на ${s.face}%. Проценка според објективот и резолуцијата на камерата (EN 62676-4); светлото, времето и висината на монтажа ја менуваат.</div>
+    ${views.length ? `<div class="pv-sub"><b>Што гледа секоја камера</b> — сликано од местото каде што ќе стои. Жолтата рамка е што фаќа објективот, испрекинатата е другиот објектив; на земјата се истите три нијанси.</div>
+      ${views.map(({ cm, img }) => `<div class="pv-cv"><img src="${img}" alt="Камера ${cm.n}"><span>Камера ${cm.n}${cm.name ? " — " + esc(cm.name) : ""} · ${cm.lens} mm · ${cm.mp} MP · на ${planM(cm.mh || 2.7)} m</span></div>`).join("")}` : ""}`;
 }
 
 // ---------- the list of plans, and opening one ----------
@@ -6032,7 +6067,7 @@ function startPlanner(row, bgUrl) {
   const p = JSON.parse(JSON.stringify(row.plan && row.plan.w ? row.plan : planBlank()));
   for (const k of ["shapes", "walls", "marks", "cams"]) p[k] = p[k] || [];
   pe = { id: row.id, row, p, bgUrl, bgDirty: false, sel: null, tool: "move", hist: [], client: false, wallStart: null, scalePts: null,
-    trayArticle: null, view: null, drag: null, ptrs: new Map(), typing: null };
+    trayArticle: null, view: null, drag: null, ptrs: new Map(), typing: null, photos: new Map(), subOpen: false };
   pe.saved = JSON.stringify(p);
   const c = state.clients.find((x) => x.id === row.client_id), o = state.offers.find((x) => x.id === row.offer_id);
   openSheet(`<div class="pl-head"><h2>${T("Camera plan", "План на камери")}</h2>
@@ -6050,6 +6085,7 @@ function startPlanner(row, bgUrl) {
         <button class="chip" id="pl-undo" onclick="planUndo()" disabled>↶ ${T("Undo", "Врати")}</button>
         <button class="chip" id="pl-night" onclick="planNight()">${T("Night", "Ноќ")}</button>
         <button class="chip" id="pl-clientv" onclick="planClientView()">${T("Client view", "Како клиентот")}</button>
+        <button class="chip" onclick="planOpen3d()">3D</button>
       </div>
     </div>
     <div id="pl-tray"></div>
@@ -6245,7 +6281,7 @@ function planRender(light) {
   $("pl-seen").textContent = st.seen + "%";
   $("pl-face").textContent = st.face + "%";
   $("pl-cams").textContent = pe.p.cams.length;
-  if (pe.bgDirty || JSON.stringify(pe.p) !== pe.saved) sheetDirty = true;
+  if (pe.bgDirty || JSON.stringify(pe.p) !== pe.saved || [...pe.photos.values()].some((x) => x.dirty)) sheetDirty = true;
   $("pl-night").classList.toggle("on", !!pe.p.night);
   if (!light) { planTray(); planPanel(st); }
 }
@@ -6282,7 +6318,13 @@ function planPanel(st) {
         <span class="pl-sw" style="opacity:.15"></span><span>${T("Activity seen to", "Се гледа што се случува до")}</span><b>${planM(r[2])} m</b>
       </div>
       <div class="row" style="gap:8px;align-items:center"><label style="margin:0">${T("IR at night", "IR ноќе")}</label>
-        <input id="pl-ir" type="number" inputmode="decimal" min="0" max="200" value="${c.ir ?? 30}" style="width:90px" oninput="planSetNum('ir',parseFloat(this.value)||0)"><span class="muted">m · ${PLAN_LENS[c.lens]}°</span></div>`;
+        <input id="pl-ir" type="number" inputmode="decimal" min="0" max="200" value="${c.ir ?? 30}" style="width:90px" oninput="planSetNum('ir',parseFloat(this.value)||0)"><span class="muted">m · ${PLAN_LENS[c.lens]}°</span></div>
+      <div class="row" style="gap:8px;align-items:center;margin-top:8px"><label style="margin:0">${T("Mounted at", "Висина на монтажа")}</label>
+        <input id="pl-mh" type="number" inputmode="decimal" step="0.1" min="0.5" max="20" value="${c.mh ?? 2.7}" style="width:90px" oninput="planSetNum('mh',Math.max(0.5,parseFloat(this.value)||2.7))"><span class="muted">m</span></div>
+      <div class="grid2" style="margin-top:12px">
+        <button class="btn sm ghost" style="width:100%" onclick="planCamView('${c.id}')">${ICON.camera}${c.photo ? T("Its view on the photo", "Погледот на сликата") : T("View on a photo", "Поглед на слика")}</button>
+        <button class="btn sm ghost" style="width:100%" onclick="planOpen3d('${c.id}')">${T("Look through it in 3D", "Погледни низ неа во 3D")}</button>
+      </div>`;
     return;
   }
   if (kind === "rect" && planShape(id)) {
@@ -6292,7 +6334,9 @@ function planPanel(st) {
       <p class="muted" style="font-size:12.5px;margin:0">${r.kind === "house" ? T("A house blocks what the cameras see.", "Куќата ја попречува видливоста.") : T("An area is marked on the plan; cameras see across it.", "Просторот е означен; камерите гледаат преку него.")} ${T("Drag the yellow corner to change its size.", "Повлечи го жолтиот агол за големина.")}</p>
       <label>${T("Name on the plan (opt.)", "Име на планот (опц.)")}</label><input id="pl-rlabel" value="${esc(r.label || "")}" oninput="planSet('label',this.value)">
       <div class="grid2"><div><label>${T("Width", "Ширина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.w}" oninput="planSetNum('w',Math.max(0.5,parseFloat(this.value)||0.5))"></div>
-        <div><label>${T("Depth", "Длабочина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.h}" oninput="planSetNum('h',Math.max(0.5,parseFloat(this.value)||0.5))"></div></div>`;
+        <div><label>${T("Depth", "Длабочина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.h}" oninput="planSetNum('h',Math.max(0.5,parseFloat(this.value)||0.5))"></div></div>
+      ${r.kind === "house" ? `<label>${T("Height to the roof, for 3D", "Висина до покривот, за 3D")} <span style="text-transform:none">(m)</span></label>
+        <input type="number" inputmode="decimal" step="0.5" min="2" max="60" value="${r.hgt ?? 6}" oninput="planSetNum('hgt',Math.max(2,parseFloat(this.value)||6))">` : ""}`;
     return;
   }
   if (kind === "wall" && p.walls[Number(id)]) {
@@ -6364,7 +6408,11 @@ function planPlot(k, v) {
 function planRemoveSel() {
   const [kind, id] = String(pe.sel || "").split(":"), p = pe.p;
   planRemember();
-  if (kind === "cam") p.cams = p.cams.filter((c) => String(c.id) !== id);
+  if (kind === "cam") {
+    const c = planCam(id);
+    if (c && c.photo && !pe.photos.has(c.id)) pe.photos.set(c.id, { stored: true });
+    p.cams = p.cams.filter((x) => String(x.id) !== id);
+  }
   if (kind === "rect") p.shapes = p.shapes.filter((r) => String(r.id) !== id);
   if (kind === "wall") p.walls.splice(Number(id), 1);
   if (kind === "mark") p.marks = p.marks.filter((m) => String(m.id) !== id);
@@ -6428,6 +6476,19 @@ async function savePlan() {
       else await dbq(db.from("coverage_plan_images").delete().eq("plan_id", id), T("Picture not removed", "Сликата не е отстранета"));
       pe.bgDirty = false;
     }
+    for (const [camId, e] of pe.photos) {
+      const cam = planCam(camId);
+      if (cam && cam.photo) {
+        if (e.dirty && e.data) {
+          await dbq(db.from("coverage_plan_photos").upsert({ plan_id: id, cam_id: camId, data: e.data, updated_at: new Date().toISOString() }, { onConflict: "plan_id,cam_id" }),
+            T("Camera photo not saved", "Сликата од камерата не е зачувана"));
+          e.dirty = false; e.stored = true;
+        }
+      } else if (e.stored) {
+        await dbq(db.from("coverage_plan_photos").delete().eq("plan_id", id).eq("cam_id", camId), T("Camera photo not removed", "Сликата од камерата не е отстранета"));
+        e.stored = false; if (e.data) e.dirty = true;
+      }
+    }
   } catch { return; }
   pe.saved = JSON.stringify(pe.p);
   sheetDirty = false;
@@ -6451,7 +6512,9 @@ async function sharePlan() {
     await scriptOnce("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js");
     const host = document.createElement("div");
     host.style.cssText = "position:absolute;left:-10000px;top:0;width:190mm;background:#fff;padding:6mm";
-    host.innerHTML = `<div class="pv">${await planClientHtml({ ...pe.row, plan: pe.p }, pe.bgUrl)}</div>`;
+    const photos = await planPhotosOf(pe.id);
+    for (const [camId, e] of pe.photos) if (e.data) photos[camId] = e.data;
+    host.innerHTML = `<div class="pv">${await planClientHtml({ ...pe.row, plan: pe.p }, pe.bgUrl, photos)}</div>`;
     document.body.appendChild(host);
     await imagesLoaded(host);
     const canvas = await window.html2canvas(host, { scale: 2, backgroundColor: "#ffffff", logging: false });
@@ -6489,8 +6552,658 @@ async function offerPlanPage(o) {
   const r = await within(12000, db.from("coverage_plans").select("*").eq("id", pl.id).maybeSingle(), none);
   if (r.error || !r.data) return "";
   const img = await within(12000, db.from("coverage_plan_images").select("data").eq("plan_id", pl.id).maybeSingle(), none);
-  try { return `<div class="pv-break"></div>${await planClientHtml(r.data, img.data ? img.data.data : null)}`; }
+  try { return `<div class="pv-break"></div>${await planClientHtml(r.data, img.data ? img.data.data : null, await planPhotosOf(pl.id))}`; }
   catch (e) { console.error("plan page", e); return ""; }
+}
+
+/* ============================================================
+   WHAT A CAMERA SEES — on a photo of the place, and the plan in 3D
+   The photo is taken from where the camera will hang. Over it go the lens's
+   frame and, on the ground, how far a face is readable, a person recognised
+   and activity seen: a pinhole camera at the mounting height, pitched down as
+   far as the horizon line says. The photo's own angle comes from its EXIF
+   (the 35 mm equivalent), or from 1× / 0.5×. Photos: coverage_plan_photos (0014).
+   The 3D view builds the plan as a model — houses with a roof, walls, the
+   cameras at their height, the shades on the ground — and looks through a
+   camera, with its lens, to aim it.
+============================================================ */
+const PLAN_F35 = { "1x": 26, "05x": 13 };
+const PLAN_TILT = 20;          // degrees down, until aimed in 3D
+const planPhotosReady = () => !(state.noTable && state.noTable.has("planPhotos"));
+// the 35 mm equivalent focal length a JPEG says it was taken at, or null
+function exifF35(buf) {
+  try {
+    const v = new DataView(buf);
+    if (v.getUint16(0) !== 0xFFD8) return null;
+    for (let o = 2; o + 10 < v.byteLength;) {
+      const mk = v.getUint16(o), len = v.getUint16(o + 2);
+      if (mk === 0xFFE1 && v.getUint32(o + 4) === 0x45786966) {          // "Exif"
+        const t = o + 10, le = v.getUint16(t) === 0x4949;
+        const u16 = (p) => v.getUint16(p, le), u32 = (p) => v.getUint32(p, le);
+        const tag = (ifd, want) => {
+          const n = u16(t + ifd);
+          for (let i = 0; i < n; i++) { const e = t + ifd + 2 + i * 12; if (u16(e) === want) return e; }
+          return null;
+        };
+        const ex = tag(u32(t + 4), 0x8769);
+        const f = ex && tag(u32(ex + 8), 0xA405);
+        return f ? u16(f + 8) || null : null;
+      }
+      if ((mk & 0xFF00) !== 0xFF00 || mk === 0xFFDA) break;
+      o += 2 + len;
+    }
+  } catch { /* not a photo we can read */ }
+  return null;
+}
+// a 35 mm equivalent is set by the diagonal: the photo's angle across follows its shape
+const planPhotoHfov = (f35, w, h) => 2 * Math.atan((w / Math.hypot(w, h)) * 21.633 / f35) * 180 / Math.PI;
+const planVfov = (hfov) => 2 * Math.atan(Math.tan(hfov * Math.PI / 360) * 9 / 16) * 180 / Math.PI;   // a 16:9 camera
+const PLAN_DORI_MK = ["Лице", "Личност", "Движење"];
+const planDoriEn = () => [T("Face", "Лице"), T("Person", "Личност"), T("Activity", "Движење")];
+
+// The camera's view drawn on a canvas: the photo, the lens's frame, the three bands on the ground.
+// o: { width, mk, edit } — edit adds the horizon line to drag. Returns what a tap needs to map back.
+function planCamViewDraw(canvas, img, cam, o) {
+  const W = img.naturalWidth, H = img.naturalHeight, ph = cam.photo || {};
+  const fpx = (W / 2) / Math.tan(planPhotoHfov(ph.f35 || 13, W, H) * Math.PI / 360), cx = W / 2, cy = H / 2;
+  const frame = (lens) => { const th = PLAN_LENS[lens] || 103;
+    return { th, fx: fpx * Math.tan(th * Math.PI / 360), fy: fpx * Math.tan(planVfov(th) * Math.PI / 360) }; };
+  const F = frame(cam.lens), other = PLAN_MAIN_LENSES.find((l) => l !== cam.lens), G = other ? frame(other) : null;
+  const ext = Math.max(F.fx, G ? G.fx : 0), exty = Math.max(F.fy, G ? G.fy : 0);
+  const x0 = Math.min(0, cx - ext), x1 = Math.max(W, cx + ext), y0 = Math.min(0, cy - exty), y1 = Math.max(H, cy + exty);
+  const k = o.width / (x1 - x0);
+  canvas.width = Math.round(o.width); canvas.height = Math.round((y1 - y0) * k);
+  const g = canvas.getContext("2d"), X = (x) => (x - x0) * k, Y = (y) => (y - y0) * k, s = Math.max(1, o.width / 700);
+  const fr = [X(cx - F.fx), Y(cy - F.fy), 2 * F.fx * k, 2 * F.fy * k];
+  g.fillStyle = "#2B313B"; g.fillRect(0, 0, canvas.width, canvas.height);
+  // inside the lens's frame but past the edges of the photo: stripes
+  g.save(); g.beginPath(); g.rect(...fr); g.clip();
+  g.strokeStyle = "rgba(255,255,255,.13)"; g.lineWidth = 6 * s;
+  for (let d = -canvas.height; d < canvas.width; d += 22 * s) { g.beginPath(); g.moveTo(d, canvas.height); g.lineTo(d + canvas.height, 0); g.stroke(); }
+  g.restore();
+  g.drawImage(img, X(0), Y(0), W * k, H * k);
+  // the ground, by how well it is seen — the plan's three shades
+  const hgt = cam.mh || 2.7, hy = ph.hy ?? (cy - fpx * Math.tan(15 * Math.PI / 180)) / H;
+  const beta = Math.atan((cy - hy * H) / fpx), sb = Math.sin(beta), cb = Math.cos(beta);
+  const proj = (d, psi) => {
+    const f = d * Math.cos(psi), Zc = f * cb + hgt * sb;
+    if (Zc < 0.05) return null;
+    return [X(cx + fpx * (d * Math.sin(psi)) / Zc), Y(cy - fpx * (f * sb - hgt * cb) / Zc)];
+  };
+  const half = F.th * Math.PI / 360, arc = (d) => {
+    const pts = [];
+    for (let i = 0; i <= 60; i++) { const q = proj(d, -half + (2 * half * i) / 60); if (q) pts.push(q); }
+    return pts;
+  };
+  const r = planReach(cam, false);
+  g.save(); g.beginPath(); g.rect(...fr); g.clip();
+  [2, 1, 0].forEach((z) => {
+    const outer = arc(r[z]), inner = arc(z ? r[z - 1] : 0.3).reverse();
+    if (outer.length < 2) return;
+    g.beginPath(); outer.concat(inner).forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath();
+    g.fillStyle = `rgba(76,110,245,${[0.42, 0.27, 0.14][z]})`; g.fill();
+  });
+  const names = o.mk ? PLAN_DORI_MK : planDoriEn();
+  g.font = `600 ${Math.round(13 * s)}px Arial, sans-serif`; g.textBaseline = "middle";
+  [0, 1, 2].forEach((z) => {
+    const pts = arc(r[z]);
+    if (pts.length < 2) return;
+    g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.strokeStyle = "rgba(21,42,70,.75)"; g.lineWidth = 4.5 * s; g.stroke();
+    g.strokeStyle = "#fff"; g.lineWidth = 2 * s; g.stroke();
+    // the label where the line is in sight, nearest the middle
+    const inF = pts.filter(([x, y]) => x > fr[0] + 4 && x < fr[0] + fr[2] - 4 && y > fr[1] + 10 && y < fr[1] + fr[3] - 10);
+    if (!inF.length) return;
+    const [lx, ly] = inF.reduce((b, q) => (Math.abs(q[0] - X(cx)) < Math.abs(b[0] - X(cx)) ? q : b));
+    const t = `${names[z]} ${planM(r[z])} m`, tw = g.measureText(t).width + 12 * s;
+    g.fillStyle = "rgba(21,42,70,.85)"; g.beginPath(); g.roundRect ? g.roundRect(lx - tw / 2, ly - 11 * s, tw, 22 * s, 6 * s) : g.rect(lx - tw / 2, ly - 11 * s, tw, 22 * s); g.fill();
+    g.fillStyle = "#fff"; g.textAlign = "center"; g.fillText(t, lx, ly + 0.5);
+  });
+  g.restore();
+  // outside the frame the camera sees nothing: dimmed
+  g.save(); g.fillStyle = "rgba(12,18,30,.66)"; g.beginPath(); g.rect(0, 0, canvas.width, canvas.height); g.rect(...fr); g.fill("evenodd"); g.restore();
+  // the frames: this lens solid, the other lens dashed to compare
+  g.textAlign = "left"; g.font = `700 ${Math.round(13 * s)}px Arial, sans-serif`;
+  if (G) {
+    g.save(); g.setLineDash([8 * s, 6 * s]); g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = 1.6 * s;
+    g.strokeRect(X(cx - G.fx), Y(cy - G.fy), 2 * G.fx * k, 2 * G.fy * k); g.restore();
+    g.fillStyle = "rgba(255,255,255,.9)"; g.fillText(`${other} mm`, X(cx - G.fx) + 6 * s, Y(cy + G.fy) - 10 * s);
+  }
+  g.strokeStyle = "#F5B301"; g.lineWidth = 3 * s; g.strokeRect(...fr);
+  g.fillStyle = "#F5B301"; g.fillText(`${cam.lens} mm · ${F.th}°`, fr[0] + 6 * s, fr[1] + 14 * s);
+  if (F.fx > W / 2 + 2) {
+    g.fillStyle = "rgba(255,255,255,.85)"; g.font = `600 ${Math.round(11 * s)}px Arial, sans-serif`; g.textAlign = "center";
+    const t = o.mk ? "надвор од сликата" : T("past your photo", "надвор од сликата"), m = (X(0) - fr[0]) / 2;
+    if (m > 34 * s) { g.save(); g.translate(fr[0] + m, Y(cy)); g.rotate(-Math.PI / 2); g.fillText(t, 0, 0); g.restore(); }
+  }
+  if (o.edit) {
+    const yh = Y(hy * H);
+    g.save(); g.setLineDash([10 * s, 7 * s]); g.strokeStyle = "#F5B301"; g.lineWidth = 2 * s;
+    g.beginPath(); g.moveTo(fr[0], yh); g.lineTo(fr[0] + fr[2], yh); g.stroke(); g.restore();
+    g.fillStyle = "#F5B301"; g.beginPath(); g.arc(fr[0] + fr[2] - 22 * s, yh, 11 * s, 0, 7); g.fill();
+    g.fillStyle = "#152A46"; g.font = `700 ${Math.round(12 * s)}px Arial, sans-serif`; g.textAlign = "center"; g.fillText("↕", fr[0] + fr[2] - 22 * s, yh + 1);
+    g.fillStyle = "#F5B301"; g.textAlign = "right"; g.fillText(T("eye level", "ниво на очите"), fr[0] + fr[2] - 40 * s, yh - 12 * s);
+  }
+  return { W, H, fpx, cx, cy, k, x0, y0, hy, hgt };
+}
+// the view as a picture, for the client's page
+function planCamViewPng(cam, dataUrl, width = 1200) {
+  return new Promise((ok, no) => {
+    const im = new Image();
+    im.onload = () => { const c = document.createElement("canvas"); planCamViewDraw(c, im, cam, { width, mk: true }); ok(c.toDataURL("image/jpeg", 0.86)); };
+    im.onerror = () => no(new Error("camera photo"));
+    im.src = dataUrl;
+  });
+}
+// every camera photo a saved plan has, by camera
+async function planPhotosOf(planId) {
+  if (!planId || !planPhotosReady() || offlineNow()) return {};
+  const r = await within(15000, db.from("coverage_plan_photos").select("cam_id, data").eq("plan_id", planId), { data: null });
+  const out = {};
+  for (const x of r.data || []) out[x.cam_id] = x.data;
+  return out;
+}
+
+// ---------- the screens over the plan: a camera's photo, the 3D view ----------
+// Over the plan's sheet, with a step in the history, so the phone's back button
+// closes the screen and not the plan.
+function planSubOpen(html) {
+  const el = document.createElement("div");
+  el.className = "pl-subscreen"; el.id = "pl-subscreen"; el.innerHTML = html;
+  document.body.appendChild(el);
+  history.pushState({ centrala: "plansub" }, "");
+  pe.subOpen = true;
+}
+function planSubClose(fromBack) {
+  const el = $("pl-subscreen");
+  p3Stop();
+  cv = null;
+  if (el) el.remove();
+  if (pe && pe.subOpen) { pe.subOpen = false; if (!fromBack) goBackSilently(); }
+  if (pe) planRender();
+}
+const planSubHead = (title) => `<div class="pl-subhead"><button class="chip" onclick="planSubClose()">← ${T("Plan", "План")}</button><h2>${title}</h2></div>`;
+function planCamTyping(id, k, v) { const c = planCam(id); if (!c || !isFinite(v)) return null; planTyping(id + ":" + k); c[k] = v; return c; }
+
+// ---------- 1. the camera's view on a photo ----------
+let cv = null;   // { id, img, info, spot, drag }
+async function planCamView(id) {
+  const c = planCam(id);
+  if (!c) return;
+  planSubOpen(`${planSubHead(`${T("Camera", "Камера")} ${c.n}${c.name ? " · " + esc(c.name) : ""}`)}
+    <div id="cv-body"></div>
+    <input type="file" accept="image/*" capture="environment" id="cv-cam" style="display:none" onchange="planCvPick(this)">
+    <input type="file" accept="image/*" id="cv-file" style="display:none" onchange="planCvPick(this)">`);
+  cv = { id, img: null, info: null, spot: false, drag: null };
+  if (!planPhotosReady()) {
+    $("cv-body").innerHTML = `<div class="card"><b>${T("Camera photos need a database update", "За сликите од камерите е потребно ажурирање на базата")}</b>
+      <p class="muted" style="margin-top:4px">${T("Run supabase/migrations/0014_camera_plan_photos.sql in Supabase → SQL Editor, then reload the app.",
+        "Пушти го supabase/migrations/0014_camera_plan_photos.sql во Supabase → SQL Editor, па освежи ја апликацијата.")}</p></div>`;
+    return;
+  }
+  const have = pe.photos.get(id);
+  if (c.photo && !(have && have.data)) {
+    $("cv-body").innerHTML = `<p class="muted">${T("Loading the photo…", "Се вчитува сликата…")}</p>`;
+    const r = pe.id ? await within(20000, db.from("coverage_plan_photos").select("data").eq("plan_id", pe.id).eq("cam_id", id).maybeSingle(), { data: null }) : { data: null };
+    if (!cv || cv.id !== id) return;
+    if (r.data && r.data.data) pe.photos.set(id, { data: r.data.data, stored: true });
+  }
+  planCvShow();
+}
+function planCvShow() {
+  if (!cv) return;
+  const c = planCam(cv.id), e = pe.photos.get(cv.id);
+  if (!c) return planSubClose();
+  if (!c.photo || !e || !e.data) {
+    cv.img = null;
+    $("cv-body").innerHTML = `<div class="card">
+        <b>${T("See what this camera will see", "Види што ќе гледа камерата")}</b>
+        <ol class="cv-steps">
+          <li>${T("Stand where the camera will hang, as high as you can.", "Застани каде ќе виси камерата, колку што можеш повисоко.")}</li>
+          <li>${T("Use the wide lens — 0.5× on the phone's camera.", "Користи го широкиот објектив — 0.5× на камерата на телефонот.")}</li>
+          <li>${T("Point it where the camera will look, and take the photo.", "Насочи каде ќе гледа камерата и сликај.")}</li>
+        </ol></div>
+      ${c.photo ? `<p class="muted">${T("The photo could not be loaded — no signal?", "Сликата не може да се вчита — нема сигнал?")}</p>` : ""}
+      <div class="grid2">
+        <button class="btn" style="width:100%" onclick="$('cv-cam').click()">${ICON.camera}${T("Take the photo", "Сликај")}</button>
+        <button class="btn ghost" style="width:100%" onclick="$('cv-file').click()">${ICON.image}${T("From gallery", "Од галерија")}</button>
+      </div>`;
+    return;
+  }
+  const im = new Image();
+  im.onload = () => { if (!cv) return; cv.img = im; planCvPanel(); };
+  im.src = e.data;
+}
+function planCvPanel() {
+  const c = planCam(cv.id), ph = c.photo, im = cv.img;
+  const deg = (f35) => Math.round(planPhotoHfov(f35, im.naturalWidth, im.naturalHeight));
+  const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
+  const takes = [ph.exif ? ["exif", T("as the photo says", "како што пишува сликата"), ph.exif] : null, ["05x", "0.5×", 13], ["1x", "1×", 26]].filter(Boolean);
+  const r = planReach(c, false);
+  $("cv-body").innerHTML = `<div class="cv-wrap"><canvas id="cv-canvas"></canvas></div>
+    <p class="pl-hint" id="cv-hint">${T("Drag the yellow dashed line to eye level — where the far ground meets the sky. Then the bands lie on the ground.",
+      "Повлечи ја жолтата испрекината линија до нивото на очите — каде далечната земја се среќава со небото. Тогаш појасите легнуваат на земјата.")}</p>
+    <div class="pl-reads">
+      <span class="pl-sw" style="opacity:.6"></span><span>${T("Face readable to", "Лицето се распознава до")}</span><b>${planM(r[0])} m</b>
+      <span class="pl-sw" style="opacity:.34"></span><span>${T("Person recognised to", "Се препознава кој е до")}</span><b>${planM(r[1])} m</b>
+      <span class="pl-sw" style="opacity:.15"></span><span>${T("Activity seen to", "Се гледа што се случува до")}</span><b>${planM(r[2])} m</b>
+    </div>
+    <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="planCvLens(${l})">${l} mm</button>`).join("")}</div>
+    <label>${T("The photo was taken with", "Сликата е направена со")}</label><div class="chips wrap">${takes.map(([v, l, f]) =>
+      `<button class="chip ${ph.src === v ? "on" : ""}" onclick="planCvTake('${v}')">${l} · ${deg(f)}°</button>`).join("")}</div>
+    <div class="grid2"><div><label>${T("Mounted at", "Висина на монтажа")} <span style="text-transform:none">(m)</span></label>
+      <input type="number" inputmode="decimal" step="0.1" min="0.5" max="20" value="${c.mh ?? 2.7}" oninput="planCvMh(this.value)"></div>
+      <div><button class="btn sm ghost" style="width:100%;margin-top:30px" onclick="planCvSpot()">${T("Set by a spot I know", "Постави по место што го знам")}</button></div></div>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn sm ghost" style="width:100%" onclick="$('cv-file').click()">${ICON.image}${T("Another photo", "Друга слика")}</button>
+      <button class="btn sm ghost" style="width:100%" onclick="planCvRemove()">${T("Remove photo", "Отстрани ја сликата")}</button>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:10px">${T("An estimate: the photo is taken from about where the camera will hang, pointing the same way. Light, weather and the exact spot change it.",
+      "Проценка: сликата е од околу местото каде ќе виси камерата, насочена исто. Светлото, времето и точното место ја менуваат.")}</p>`;
+  const cvs = $("cv-canvas");
+  cvs.addEventListener("pointerdown", planCvDown);
+  cvs.addEventListener("pointermove", planCvMove);
+  cvs.addEventListener("pointerup", planCvUp);
+  cvs.addEventListener("pointercancel", planCvUp);
+  planCvDraw();
+}
+function planCvDraw() {
+  const cvs = $("cv-canvas");
+  if (!cv || !cv.img || !cvs) return;
+  const w = cvs.parentElement.clientWidth || 360;
+  cv.info = planCamViewDraw(cvs, cv.img, planCam(cv.id), { width: w * Math.min(2, window.devicePixelRatio || 1), edit: true });
+}
+// a point on the canvas, in the photo's own pixels
+function planCvAt(e) {
+  const cvs = $("cv-canvas"), b = cvs.getBoundingClientRect(), i = cv.info, sc = cvs.width / b.width;
+  return [i.x0 + ((e.clientX - b.left) * sc) / i.k, i.y0 + ((e.clientY - b.top) * sc) / i.k, sc];
+}
+function planCvDown(e) {
+  if (!cv || !cv.info) return;
+  const [x, y, sc] = planCvAt(e), i = cv.info;
+  if (cv.spot) { cv.spot = false; return planCvSpotAt(x, y); }
+  if (Math.abs(y - i.hy * i.H) * i.k / sc > 44) return;       // only near the line
+  try { $("cv-canvas").setPointerCapture(e.pointerId); } catch { /* not every pointer */ }
+  planRemember();
+  cv.drag = true;
+}
+function planCvMove(e) {
+  if (!cv || !cv.drag) return;
+  const [, y] = planCvAt(e), c = planCam(cv.id), i = cv.info;
+  // never above the photo's top or below its middle: the camera looks level or down
+  c.photo.hy = Math.max(-0.3, Math.min(0.5, y / i.H));
+  if (!planRaf) planRaf = requestAnimationFrame(() => { planRaf = 0; planCvDraw(); });
+}
+function planCvUp() { if (cv) cv.drag = null; }
+function planCvLens(l) { planRemember(); planCam(cv.id).lens = l; planCvPanel(); }
+function planCvTake(v) {
+  const c = planCam(cv.id);
+  planRemember();
+  c.photo.src = v; c.photo.f35 = v === "exif" ? c.photo.exif : PLAN_F35[v];
+  planCvPanel();
+}
+function planCvMh(v) { if (planCamTyping(cv.id, "mh", Math.max(0.5, Math.min(20, parseFloat(v) || 0)))) planCvDraw(); }
+function planCvSpot() {
+  cv.spot = true;
+  $("cv-hint").textContent = T("Tap a spot on the ground in the photo whose distance from the camera's wall you know.",
+    "Допри место на земјата на сликата чие растојание од ѕидот на камерата го знаеш.");
+  $("cv-canvas").scrollIntoView({ block: "center", behavior: "smooth" });
+}
+// a spot on the ground at a known distance fixes how far down the camera looks
+async function planCvSpotAt(x, y) {
+  const v = await askText(T("How many metres from the wall below the camera to that spot?", "Колку метри има од ѕидот под камерата до тоа место?"), "");
+  const d = parseFloat(String(v || "").replace(",", "."));
+  if (!cv) return;
+  const c = planCam(cv.id), i = cv.info;
+  if (d > 0.3) {
+    const fwd = d * Math.cos(Math.atan((x - i.cx) / i.fpx)), alpha = Math.atan((c.mh || 2.7) / fwd);
+    const beta = alpha - Math.atan((y - i.cy) / i.fpx);
+    planRemember();
+    c.photo.hy = Math.max(-0.3, Math.min(0.5, (i.cy - i.fpx * Math.tan(beta)) / i.H));
+    toast(T("Set: the bands now lie on the ground", "Поставено: појасите сега легнуваат на земјата"));
+  }
+  planCvPanel();
+}
+function planCvRemove() {
+  const c = planCam(cv.id), e = pe.photos.get(cv.id);
+  planRemember();
+  delete c.photo;
+  if (e && e.data) e.dirty = true;
+  planCvShow();
+}
+function planCvPick(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f || !cv) return;
+  const id = cv.id;
+  f.arrayBuffer().then((buf) => {
+    const exif = exifF35(buf), url = URL.createObjectURL(f), im = new Image();
+    im.onload = () => {
+      URL.revokeObjectURL(url);
+      const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
+      c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+      const data = c.toDataURL("image/jpeg", 0.82), cam = planCam(id);
+      if (!cam || !cv) return;
+      planRemember();
+      // no angle in the photo: taken with the wide lens, as asked
+      const f35 = exif || PLAN_F35["05x"], fpx = (c.width / 2) / Math.tan(planPhotoHfov(f35, c.width, c.height) * Math.PI / 360);
+      cam.photo = { f35, src: exif ? "exif" : "05x", exif: exif || null, hy: (c.height / 2 - fpx * Math.tan(15 * Math.PI / 180)) / c.height };
+      const prev = pe.photos.get(id);
+      pe.photos.set(id, { data, dirty: true, stored: !!(prev && prev.stored) });
+      planCvShow();
+      if (!exif) toast(T("The photo does not say its angle: 0.5× assumed — change it if it was 1×", "Сликата не го кажува аголот: земено е 0.5× — смени ако е 1×"));
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); toast(T("Could not read that picture", "Сликата не може да се прочита")); };
+    im.src = url;
+  });
+}
+
+// ---------- 2. the plan in 3D ----------
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js";
+let p3 = null;   // { THREE, renderer, scene, camera, stat, dyn, mode, orbit, ptrs, drag, raf }
+async function planOpen3d(mode) {
+  planSubOpen(`${planSubHead(T("3D view", "3D поглед"))}
+    <div class="chips wrap" id="p3-modes"></div>
+    <div class="p3-wrap" id="p3-wrap"><div class="p3-hint" id="p3-hint">${T("Loading the 3D view…", "Се вчитува 3D погледот…")}</div></div>
+    <div id="p3-panel"></div>`);
+  try { await scriptOnce(THREE_URL); }
+  catch { if ($("p3-hint")) $("p3-hint").textContent = T("The 3D view needs a signal the first time it opens.", "3D погледот бара сигнал првиот пат."); return; }
+  if (!$("p3-wrap") || !pe) return;            // closed while it loaded
+  if (!p3Start()) return;
+  p3Mode(typeof mode === "string" && planCam(mode) ? mode : "orbit");
+}
+function p3Start() {
+  const THREE = window.THREE, wrap = $("p3-wrap");
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); }
+  catch { $("p3-hint").textContent = T("This phone cannot show 3D.", "Овој телефон не може да прикаже 3D."); return false; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  wrap.appendChild(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
+  p3 = { THREE, renderer, scene: null, camera, stat: null, dyn: null, mode: "orbit", orbit: null, ptrs: new Map(), drag: null, raf: 0 };
+  p3Scene();
+  const el = renderer.domElement;
+  el.addEventListener("pointerdown", p3Down);
+  el.addEventListener("pointermove", p3Move);
+  el.addEventListener("pointerup", p3Up);
+  el.addEventListener("pointercancel", p3Up);
+  el.addEventListener("wheel", p3Wheel, { passive: false });
+  window.addEventListener("resize", p3Resize);
+  return true;
+}
+function p3Stop() {
+  if (!p3) return;
+  window.cancelAnimationFrame(p3.raf);
+  window.removeEventListener("resize", p3Resize);
+  p3Dispose(p3.scene);
+  p3.renderer.dispose();
+  try { p3.renderer.forceContextLoss(); } catch { /* already gone */ }
+  p3 = null;
+}
+function p3Dispose(o) {
+  if (!o) return;
+  o.traverse((x) => {
+    if (x.geometry) x.geometry.dispose();
+    for (const m of [].concat(x.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
+  });
+}
+// a word on a little card, always facing the viewer
+function p3Label(text, bg, fg, h = 0.8) {
+  const THREE = p3.THREE, c = document.createElement("canvas"), g = c.getContext("2d");
+  g.font = "700 44px Arial, sans-serif";
+  const w = Math.max(64, Math.ceil(g.measureText(text).width) + 36);
+  c.width = w; c.height = 64;
+  g.fillStyle = bg; g.beginPath(); g.roundRect ? g.roundRect(0, 0, w, 64, 30) : g.rect(0, 0, w, 64); g.fill();
+  g.font = "700 44px Arial, sans-serif"; g.fillStyle = fg; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, w / 2, 34);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+  s.scale.set((h * w) / 64, h, 1);
+  s.renderOrder = 10;
+  return s;
+}
+// what does not move while aiming: the ground, the houses, the walls
+function p3Scene() {
+  const { THREE } = p3, p = pe.p, night = !!p.night;
+  if (p3.scene) p3Dispose(p3.scene);
+  const scene = new THREE.Scene();
+  const sky = night ? 0x1B2433 : 0xDCE8F5;
+  scene.background = new THREE.Color(sky);
+  scene.fog = new THREE.Fog(sky, 70, 320);
+  // light that adds up to about one on the ground, so colours show as they are
+  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0x8A9A80, night ? 0.35 : 0.62));
+  const sun = new THREE.DirectionalLight(0xFFFFFF, night ? 0.12 : 0.42);
+  sun.position.set(-20, 40, -10); scene.add(sun);
+  const lam = (color, extra) => new THREE.MeshLambertMaterial({ color, ...extra });
+  const flat = (x, y, w, h, mat, lift) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    m.rotation.x = -Math.PI / 2; m.position.set(x + w / 2, lift, y + h / 2); scene.add(m); return m;
+  };
+  flat(-400, -400, p.w + 800, p.h + 800, lam(night ? 0x3A4A3A : 0xB3CB9E), 0);
+  const st = p.street, sw = 3;
+  if (st && st !== "none") {
+    const r = st === "bottom" ? [-40, p.h, p.w + 80, sw] : st === "top" ? [-40, -sw, p.w + 80, sw] : st === "left" ? [-sw, -40, sw, p.h + 80] : [p.w, -40, sw, p.h + 80];
+    flat(...r, lam(0xBFC4CB), 0.02);
+  }
+  if (pe.bgUrl && p.bg) {
+    const tex = new THREE.TextureLoader().load(pe.bgUrl, () => p3Draw());
+    flat(p.bg.x, p.bg.y, p.bg.w, p.bg.h, lam(0xFFFFFF, { map: tex, transparent: true, opacity: p.bg.opacity ?? 0.6 }), 0.04);
+  }
+  for (const r of p.shapes || []) if (r.kind !== "house") flat(r.x, r.y, r.w, r.h, lam(0xE6E2DA), 0.06);
+  const edge = new THREE.LineBasicMaterial({ color: 0x5B6472 });
+  const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[0, 0], [p.w, 0], [p.w, p.h], [0, p.h]].map(([x, z]) => new THREE.Vector3(x, 0.12, z))), edge);
+  scene.add(line);
+  for (const r of p.shapes || []) if (r.kind === "house") {
+    const H = r.hgt || 6, box = new THREE.Mesh(new THREE.BoxGeometry(r.w, H, r.h), lam(0xFBF6EE));
+    box.position.set(r.x + r.w / 2, H / 2, r.y + r.h / 2); scene.add(box);
+    const ed = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), edge); ed.position.copy(box.position); scene.add(ed);
+    // a gable roof along the longer side
+    const along = r.w >= r.h, span = along ? r.h : r.w, len = along ? r.w : r.h, rise = Math.min(2.5, span * 0.3);
+    const sh = new THREE.Shape();
+    sh.moveTo(-span / 2 - 0.3, 0); sh.lineTo(span / 2 + 0.3, 0); sh.lineTo(0, rise); sh.closePath();
+    const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: len + 0.6, bevelEnabled: false }), lam(0xB4553F));
+    if (along) { roof.rotation.y = Math.PI / 2; roof.position.set(r.x - 0.3, H, r.y + r.h / 2); }
+    else roof.position.set(r.x + r.w / 2, H, r.y - 0.3);
+    scene.add(roof);
+  }
+  const wh = p.wallH ?? 2;
+  for (const [[ax, ay], [bx, by]] of p.walls || []) {
+    const len = Math.hypot(bx - ax, by - ay);
+    if (len < 0.05) continue;
+    const w = new THREE.Mesh(new THREE.BoxGeometry(len, wh, 0.2), lam(0x9AA3AE));
+    w.position.set((ax + bx) / 2, wh / 2, (ay + by) / 2); w.rotation.y = -Math.atan2(by - ay, bx - ax);
+    scene.add(w);
+  }
+  p3.scene = scene; p3.dyn = null;
+  p3Dyn();
+}
+// what follows the cameras: their shades on the ground, the cameras, the places
+function p3Dyn() {
+  const { THREE, scene } = p3, p = pe.p, S = planSegs(p), lv = (p.marks || []).map((m) => ({ m, l: planLevel(p, m.x, m.y, S) }));
+  if (p3.dyn) { scene.remove(p3.dyn); p3Dispose(p3.dyn); }
+  const dyn = new THREE.Group();
+  for (const c of p.cams || []) {
+    const polys = planCone(c, S, p.night);
+    [2, 1, 0].forEach((z) => {
+      const sh = new THREE.Shape(polys[z].map(([x, y]) => new THREE.Vector2(x, y)));
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshBasicMaterial({
+        color: 0x4C6EF5, transparent: true, opacity: PLAN_OP[z] * 0.9, depthWrite: false, side: THREE.DoubleSide }));
+      m.rotation.x = Math.PI / 2; m.position.y = 0.08 + (2 - z) * 0.006; m.renderOrder = 2;
+      dyn.add(m);
+    });
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.2), new THREE.MeshLambertMaterial({ color: 0x1E3A5F }));
+    body.position.x = 0.21; g.add(body);
+    g.position.set(c.x, c.mh || 2.7, c.y);
+    g.rotation.order = "YZX"; g.rotation.set(0, -c.h * Math.PI / 180, -(c.tilt ?? PLAN_TILT) * Math.PI / 180);
+    g.userData.cam = c.id;
+    dyn.add(g);
+    const lab = p3Label(String(c.n), "#1E3A5F", "#FFFFFF", 1.1);
+    lab.position.set(c.x, (c.mh || 2.7) + 1, c.y); lab.userData.cam = c.id;
+    dyn.add(lab);
+  }
+  const col = ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"];
+  for (const m of p.marks || []) {
+    const l = (lv.find((x) => x.m.id === m.id) || {}).l ?? 0;
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.1, 12), new THREE.MeshLambertMaterial({ color: col[l] }));
+    pin.position.set(m.x, 0.55, m.y); dyn.add(pin);
+    if (m.label) { const t = p3Label(m.label, "rgba(255,255,255,.92)", col[l], 0.6); t.position.set(m.x, 1.5, m.y); dyn.add(t); }
+  }
+  scene.add(dyn);
+  p3.dyn = dyn;
+}
+function p3Mode(m) {
+  if (!p3) return;
+  const p = pe.p;
+  p3.mode = m;
+  if (!p3.orbit) p3.orbit = { tx: p.w / 2, tz: p.h / 2, r: Math.max(p.w, p.h) * 1.35, ph: 0.95,
+    th: { top: -1.25, left: 2.8, right: 0.35 }[p.street] ?? 1.9 };
+  if (m === "top") Object.assign(p3.orbit, { ph: 0.0001, th: Math.PI / 2, tx: p.w / 2, tz: p.h / 2, r: Math.max(p.w, p.h) * 1.25 });
+  if (m === "orbit" && p3.orbit.ph < 0.1) p3.orbit.ph = 0.95;
+  $("p3-modes").innerHTML = [["orbit", "3D"], ["top", T("From above", "Одозгора")]].concat((p.cams || []).map((c) => [c.id, `${ICON.camera}${c.n}${c.name ? " " + esc(c.name) : ""}`]))
+    .map(([v, l]) => `<button class="chip ${m === v ? "on" : ""}" onclick="p3Mode('${v}')">${l}</button>`).join("");
+  p3Own();
+  p3Panel();
+  p3Resize();
+}
+// a camera's own body is not in its own view
+function p3Own() { for (const o of p3.dyn.children) if (o.userData.cam) o.visible = o.userData.cam !== p3.mode; }
+const p3AimText = (c) => `${T("Through camera", "Низ камера")} ${c.n}: ${c.lens} mm, ${PLAN_LENS[c.lens]}° · ${T("turned", "свртена")} ${Math.round(((c.h % 360) + 360) % 360)}° · ${T("tilted down", "наведната")} ${Math.round(c.tilt ?? PLAN_TILT)}°`;
+function p3Panel() {
+  const el = $("p3-panel"), c = planCam(p3.mode);
+  if (c) {
+    const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
+    $("p3-hint").textContent = T("Drag to aim the camera", "Повлечи за да ја насочиш камерата");
+    el.innerHTML = `<p class="muted" id="p3-aim" style="margin:8px 0 0">${p3AimText(c)}</p>
+      <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="p3Lens(${l})">${l} mm</button>`).join("")}</div>
+      <div class="grid2"><div><label>${T("Mounted at", "Висина на монтажа")} <span style="text-transform:none">(m)</span></label>
+        <input type="number" inputmode="decimal" step="0.1" min="0.5" max="20" value="${c.mh ?? 2.7}" oninput="p3Mh(this.value)"></div>
+        <div><button class="btn sm ghost" style="width:100%;margin-top:30px" onclick="p3Snap()">${ICON.share}${T("Send picture", "Испрати слика")}</button></div></div>
+      <div id="p3-file"></div>`;
+    return;
+  }
+  $("p3-hint").textContent = T("Drag to turn · two fingers to zoom and move", "Повлечи за вртење · со два прста зумирај и помести");
+  el.innerHTML = `<div class="grid2"><div><label>${T("Walls, fences", "Ѕидови, огради")} <span style="text-transform:none">(m)</span></label>
+      <input type="number" inputmode="decimal" step="0.1" min="0.3" max="10" value="${pe.p.wallH ?? 2}" oninput="p3WallH(this.value)"></div>
+      <div><button class="btn sm ghost" style="width:100%;margin-top:30px" onclick="p3Snap()">${ICON.share}${T("Send picture", "Испрати слика")}</button></div></div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">${T("A house's height is set on the plan: tap the house. Tap a camera chip above to look through it and aim it.",
+      "Висината на куќата се поставува на планот: допри ја куќата. Допри камера горе за да гледаш низ неа и да ја насочиш.")}</p>
+    <div id="p3-file"></div>`;
+}
+function p3Lens(l) { planRemember(); planCam(p3.mode).lens = l; p3Dyn(); p3Mode(p3.mode); }
+function p3Mh(v) { if (planCamTyping(p3.mode, "mh", Math.max(0.5, Math.min(20, parseFloat(v) || 0)))) { p3Dyn(); p3Draw(); } }
+function p3WallH(v) {
+  const n = parseFloat(v);
+  if (!(n >= 0.3 && n <= 10)) return;
+  planTyping("wallH"); pe.p.wallH = n;
+  p3Scene(); p3Draw();
+}
+function p3Resize() {
+  if (!p3) return;
+  const wrap = $("p3-wrap"), w = wrap.clientWidth || 360;
+  // through a camera: its own 16:9 picture
+  const h = planCam(p3.mode) ? Math.round((w * 9) / 16) : Math.round(Math.max(280, Math.min(window.innerHeight * 0.6, w * 0.9)));
+  wrap.style.height = h + "px";
+  p3.renderer.setSize(w, h, false);
+  p3.renderer.domElement.style.width = "100%"; p3.renderer.domElement.style.height = "100%";
+  p3.camera.aspect = w / h;
+  p3Draw();
+}
+function p3Draw() {
+  if (!p3 || p3.raf) return;
+  p3.raf = requestAnimationFrame(() => {
+    if (!p3) return;
+    p3.raf = 0;
+    if (p3.dynDirty) { p3.dynDirty = false; p3Dyn(); p3Own(); const a = $("p3-aim"), c = planCam(p3.mode); if (a && c) a.textContent = p3AimText(c); }
+    p3Render();
+  });
+}
+function p3Render() {
+  const { THREE, camera } = p3, c = planCam(p3.mode);
+  if (c) {
+    const h = c.h * Math.PI / 180, t = (c.tilt ?? PLAN_TILT) * Math.PI / 180, y = c.mh || 2.7;
+    camera.fov = planVfov(PLAN_LENS[c.lens] || 103);
+    camera.position.set(c.x, y, c.y);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(new THREE.Vector3(c.x + Math.cos(h) * Math.cos(t), y - Math.sin(t), c.y + Math.sin(h) * Math.cos(t)));
+  } else {
+    const o = p3.orbit;
+    camera.fov = 50;
+    camera.position.set(o.tx + o.r * Math.sin(o.ph) * Math.cos(o.th), o.r * Math.cos(o.ph), o.tz + o.r * Math.sin(o.ph) * Math.sin(o.th));
+    // looking straight down, "up" on the screen is the plan's top
+    camera.up.set(0, o.ph < 0.01 ? 0 : 1, o.ph < 0.01 ? -1 : 0);
+    camera.lookAt(new THREE.Vector3(o.tx, 0, o.tz));
+  }
+  camera.updateProjectionMatrix();
+  p3.renderer.render(p3.scene, camera);
+}
+function p3Down(e) {
+  if (!p3) return;
+  p3.ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  try { e.target.setPointerCapture(e.pointerId); } catch { /* not every pointer */ }
+  if (planCam(p3.mode)) { if (!p3.drag) { planRemember(); p3.drag = { aim: true }; } return; }
+  if (p3.ptrs.size === 2) {
+    const [a, b] = [...p3.ptrs.values()];
+    p3.drag = { pinch: true, d0: Math.hypot(a[0] - b[0], a[1] - b[1]), r0: p3.orbit.r, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+  } else p3.drag = { pan: e.button === 2 || e.shiftKey };
+}
+function p3Move(e) {
+  if (!p3 || !p3.drag || !p3.ptrs.has(e.pointerId)) return;
+  const prev = p3.ptrs.get(e.pointerId), dx = e.clientX - prev[0], dy = e.clientY - prev[1];
+  p3.ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  const c = planCam(p3.mode), o = p3.orbit, w = p3.renderer.domElement.clientWidth || 360;
+  if (c) {
+    // a drag turns the camera as far as the picture moves: its angle per pixel
+    const per = (PLAN_LENS[c.lens] || 103) / w;
+    c.h = (((c.h + dx * per) % 360) + 360) % 360;
+    c.tilt = Math.max(0, Math.min(85, (c.tilt ?? PLAN_TILT) + dy * per));
+    p3.dynDirty = true;
+    p3Draw();
+    return;
+  }
+  if (p3.drag.pinch && p3.ptrs.size >= 2) {
+    const [a, b] = [...p3.ptrs.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    o.r = Math.max(4, Math.min(300, (p3.drag.r0 * p3.drag.d0) / Math.max(10, d)));
+    p3Pan(mid[0] - p3.drag.mid[0], mid[1] - p3.drag.mid[1]); p3.drag.mid = mid;
+  } else if (p3.drag.pan) p3Pan(dx, dy);
+  else if (p3.mode === "top") p3Pan(dx, dy);
+  else { o.th += dx * 0.008; o.ph = Math.max(0.12, Math.min(1.45, o.ph - dy * 0.008)); }
+  p3Draw();
+}
+// slide the point looked at along the ground, as far as the finger went
+function p3Pan(dx, dy) {
+  const o = p3.orbit, s = o.r / ((p3.renderer.domElement.clientHeight || 400) * 0.9);
+  const rx = Math.sin(o.th), rz = -Math.cos(o.th);          // the screen's right, on the ground
+  const fx = -Math.cos(o.th), fz = -Math.sin(o.th);          // away from the viewer
+  o.tx -= (dx * rx - dy * fx) * s; o.tz -= (dx * rz - dy * fz) * s;
+}
+function p3Up(e) {
+  if (!p3) return;
+  p3.ptrs.delete(e.pointerId);
+  if (p3.ptrs.size) return;
+  const d = p3.drag;
+  p3.drag = null;
+  // an aim that moved nothing leaves no undo step
+  if (d && d.aim && pe.hist.length && JSON.stringify(JSON.parse(pe.hist[pe.hist.length - 1]).p) === JSON.stringify(pe.p)) pe.hist.pop();
+}
+function p3Wheel(e) {
+  e.preventDefault();
+  if (!p3 || planCam(p3.mode)) return;
+  p3.orbit.r = Math.max(4, Math.min(300, p3.orbit.r * (e.deltaY > 0 ? 1.12 : 0.89)));
+  p3Draw();
+}
+// the view as a picture to send — the same two taps as the plan's
+async function p3Snap() {
+  if (!p3) return;
+  p3Render();
+  const blob = await new Promise((r) => p3.renderer.domElement.toBlob(r, "image/png"));
+  if (!blob) return say(T("Could not make the picture", "Не можев да ја направам сликата"));
+  const c = state.clients.find((x) => x.id === pe.row.client_id), cam = planCam(p3.mode);
+  planFile = new File([blob], `${cam ? "Камера " + cam.n : "3D план"}${c ? " - " + c.name.replace(/[\\/:*?"<>|]+/g, "-") : ""}.png`, { type: "image/png" });
+  const can = !!(navigator.canShare && navigator.canShare({ files: [planFile] }));
+  $("p3-file").innerHTML = `<div class="card row" style="gap:10px;margin-top:10px"><span class="thumb ph">${ICON.image}</span>
+      <div style="flex:1;min-width:0"><b style="overflow-wrap:anywhere">${esc(planFile.name)}</b><div class="muted">${Math.max(1, Math.round(planFile.size / 1024))} KB</div></div></div>
+    ${can ? `<button class="btn amber" onclick="sendPlanFile()">${ICON.share}${T("Share — Viber, WhatsApp…", "Сподели — Viber, WhatsApp…")}</button>` : ""}
+    <button class="btn ghost" onclick="downloadPlanFile()">${T("Download", "Преземи")}</button>`;
 }
 
 // Puts real pictures where the template left «IMG:n» markers.
