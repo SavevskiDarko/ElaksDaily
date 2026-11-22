@@ -760,6 +760,10 @@ a.btn{text-decoration:none;display:block;text-align:center}
       <input class="search" id="sup-search" placeholder="Search suppliers…" style="display:none" oninput="renderSuppliers()">
       <div id="sup-list"></div>
     </div>
+    <div id="el-body-plans" style="display:none">
+      <input class="search" id="plan-search" placeholder="Search plans…" oninput="renderPlans()">
+      <div id="plan-list"></div>
+    </div>
     <div id="el-body-cli" style="display:none">
       <input class="search" id="cli-search" placeholder="Search clients…" style="display:none" oninput="renderClients()">
       <div id="cli-list"></div>
@@ -1607,7 +1611,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-090000";
+const BUILD = "20261122-120000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -1782,7 +1786,7 @@ function syncFab() {
 // and on those the button is hidden rather than left to do something random.
 const ELAKS_NEW = {
   off: openOfferSheet, pur: openPurchaseSheet, cli: openClientSheet,
-  sup: openSupplierSheet, job: openJobSheet, inv: openArticleSheet,
+  sup: openSupplierSheet, job: openJobSheet, inv: openArticleSheet, plans: () => newPlan({}),
 };
 function fabAction() {
   if (state.tab === "today") return openTaskSheet;
@@ -2422,9 +2426,11 @@ const WHATS_NEW = [
   { build: "20261122", en: [
     "Camera plans: draw the house and the yard, place the 2.8 or 3.6 mm cameras and see what each one covers — face, person, activity — with walls cutting the view.",
     "Show the client: the plan is a page in the offer's PDF, or a picture to send. It stays on the client's card, so years later you still know where every camera went.",
+    "Find every plan in Elaks → Plans, or start one from a client, an offer or a job.",
   ], mk: [
     "Планови на камери: нацртај ја куќата и дворот, постави ги камерите со 2.8 или 3.6 mm и види што покрива секоја — лице, личност, движење — а ѕидовите го сечат погледот.",
     "Покажи му на клиентот: планот е страница во PDF-от на понудата или слика за праќање. Останува на картичката на клиентот, па и по години знаеш каде е секоја камера.",
+    "Сите планови се во Elaks → Планови, а нов почнуваш и од клиент, понуда или работа.",
   ] },
   { build: "20261117", en: [
     "Money: a tab of your own for what comes in and what goes out each month — only you see it.",
@@ -2505,6 +2511,9 @@ function searchGroups() {
       add(T("Suppliers", "Добавувачи"), state.suppliers, (x) => [x.name, x.phone], (x) => x.name, (x) => x.phone || "",
         (x) => `state.elaksView='sup';tab('elaks');openSupplierSheet('${x.id}')`);
     }
+    add(T("Camera plans", "Планови на камери"), state.plans || [], (x) => [x.title, cn(x.client_id), (state.offers.find((o) => o.id === x.offer_id) || {}).number],
+      (x) => x.title || T("Camera plan", "План на камери"), (x) => [cn(x.client_id), planCamsN(x.cams || 0)].filter(Boolean).join(" · "),
+      (x) => `state.elaksView='plans';tab('elaks');openPlan('${x.id}')`);
     add(T("Documents", "Документи"), state.docs, (d) => [d.kind, d.doc_no, d.supplier, cn(d.client_id), d.note], (d) => [d.kind, d.doc_no].filter(Boolean).join(" "),
       (d) => [d.supplier || cn(d.client_id), d.doc_date ? dmy(d.doc_date) : ""].filter(Boolean).join(" · "), (d) => `state.elaksView='doc';tab('elaks');openDocSheet('${d.id}')`);
   }
@@ -4994,7 +5003,7 @@ const seesCosts = () => !!state.perm.owner;
 // people on either side; then the paperwork.
 const ELAKS_SECTIONS = () => [["work", T("Work", "Работа")], ["off", T("Offers", "Понуди")],
   ["job", T("Jobs", "Работи")], ["invoice", T("Invoices", "Фактури")], ["inv", T("Stock", "Магацин")],
-  ["pur", T("Purchases", "Набавки")], ["cli", T("Clients", "Клиенти")], ["sup", T("Suppliers", "Добавувачи")],
+  ["pur", T("Purchases", "Набавки")], ["cli", T("Clients", "Клиенти")], ["plans", T("Plans", "Планови")], ["sup", T("Suppliers", "Добавувачи")],
   ["doc", T("Documents", "Документи")]].filter(([v]) => seesCosts() || (v !== "pur" && v !== "sup"));
 function renderElaks() {
   if (!ELAKS_SECTIONS().some(([v]) => v === state.elaksView)) state.elaksView = "work";
@@ -5021,6 +5030,7 @@ function renderElaks() {
   const invEl = $("el-body-invoice"); if (invEl) invEl.style.display = state.elaksView === "invoice" ? "" : "none";
   const docEl = $("el-body-doc"); if (docEl) docEl.style.display = state.elaksView === "doc" ? "" : "none";
   const supEl = $("el-body-sup"); if (supEl) supEl.style.display = state.elaksView === "sup" ? "" : "none";
+  const planEl = $("el-body-plans"); if (planEl) planEl.style.display = state.elaksView === "plans" ? "" : "none";
   syncFab();
   if (state.elaksView === "inv") renderInv();
   else if (state.elaksView === "off") renderOffers();
@@ -5030,6 +5040,7 @@ function renderElaks() {
   else if (state.elaksView === "invoice") renderInvoices();
   else if (state.elaksView === "doc") renderDocs();
   else if (state.elaksView === "sup") renderSuppliers();
+  else if (state.elaksView === "plans") renderPlans();
   else renderClients();
 }
 function renderOffers() {
@@ -5937,6 +5948,33 @@ async function planClientHtml(row, bgUrl) {
 
 // ---------- the list of plans, and opening one ----------
 const plansOf = (key, id) => (state.plans || []).filter((x) => x[key] === id);
+// Elaks → Plans: every plan, newest first, whoever it is for
+function renderPlans() {
+  const el = $("plan-list");
+  if (!el) return;
+  if (!plansReady()) {
+    $("plan-search").style.display = "none";
+    el.innerHTML = `<div class="card"><b>${T("Camera plans need a database update", "За плановите е потребно ажурирање на базата")}</b>
+      <p class="muted" style="margin-top:4px">${T("Run supabase/migrations/0013_camera_plans.sql in Supabase → SQL Editor, then reload the app.",
+        "Пушти го supabase/migrations/0013_camera_plans.sql во Supabase → SQL Editor, па освежи ја апликацијата.")}</p></div>`;
+    return;
+  }
+  const all = state.plans || [];
+  $("plan-search").style.display = all.length > 6 ? "" : "none";
+  const q = ($("plan-search").value || "").trim().toLowerCase();
+  const cname = (id) => (state.clients.find((c) => c.id === id) || {}).name || "";
+  const onum = (id) => (state.offers.find((o) => o.id === id) || {}).number || "";
+  const list = all.filter((x) => !q || [x.title, cname(x.client_id), onum(x.offer_id)].some((v) => String(v || "").toLowerCase().includes(q)))
+    .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+  el.innerHTML = `<button class="btn sm" style="width:100%;margin-bottom:10px" onclick="newPlan({})">${ICON.camera}${T("Draw a camera plan", "Нацртај план на камери")}</button>
+    ${list.map((x) => `<div class="card row tapp" role="button" tabindex="0" onclick="openPlan('${x.id}')">
+      <div style="flex:1;min-width:0"><b>${esc(x.title || T("Camera plan", "План на камери"))}</b>
+        <div class="muted">${[cname(x.client_id) ? esc(cname(x.client_id)) : T("no client", "без клиент"), onum(x.offer_id) ? esc(onum(x.offer_id)) : "",
+          planCamsN(x.cams || 0), dmy(String(x.updated_at || x.created_at || "").slice(0, 10))].filter(Boolean).join(" · ")}</div></div>
+      <span class="muted">›</span></div>`).join("")
+      || `<div class="empty">${q ? T("No plan matches.", "Нема таков план.")
+        : T("No camera plan yet. Draw one here, or from a client, an offer or a job.", "Сè уште нема план. Нацртај го тука или од клиент, понуда или работа.")}</div>`}`;
+}
 function plansBlock(clientId) {
   if (!plansReady()) return "";
   const list = plansOf("client_id", clientId).slice().sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
@@ -5984,6 +6022,12 @@ async function openPlan(id) {
   const img = await within(20000, db.from("coverage_plan_images").select("data").eq("plan_id", id).maybeSingle(), { data: null });
   startPlanner(r.data, img.data ? img.data.data : null);
 }
+const planSubText = (c, o) => [c ? esc(c.name) : "", o ? esc(o.number) : ""].filter(Boolean).join(" · ") || T("not linked to a client yet", "сè уште не е врзан за клиент");
+function planClient(id) {
+  pe.row.client_id = id || null;
+  sheetDirty = true;
+  $("pl-sub").innerHTML = planSubText(state.clients.find((x) => x.id === id), state.offers.find((x) => x.id === pe.row.offer_id));
+}
 function startPlanner(row, bgUrl) {
   const p = JSON.parse(JSON.stringify(row.plan && row.plan.w ? row.plan : planBlank()));
   for (const k of ["shapes", "walls", "marks", "cams"]) p[k] = p[k] || [];
@@ -5992,7 +6036,7 @@ function startPlanner(row, bgUrl) {
   pe.saved = JSON.stringify(p);
   const c = state.clients.find((x) => x.id === row.client_id), o = state.offers.find((x) => x.id === row.offer_id);
   openSheet(`<div class="pl-head"><h2>${T("Camera plan", "План на камери")}</h2>
-      <span class="muted">${[c ? esc(c.name) : "", o ? esc(o.number) : ""].filter(Boolean).join(" · ") || T("not linked to a client yet", "сè уште не е врзан за клиент")}</span></div>
+      <span class="muted" id="pl-sub">${planSubText(c, o)}</span></div>
     <div class="pl-tools">
       <div class="chips wrap" id="pl-tool">
         <button class="chip on" data-t="move" onclick="planTool('move')">${T("Move", "Помести")}</button>
@@ -6266,7 +6310,13 @@ function planPanel(st) {
   }
   // nothing chosen: the plan itself
   const o = state.offers.find((x) => x.id === pe.row.offer_id);
-  el.innerHTML = `<label>${T("Plan name", "Име на планот")}</label><input id="pl-title" value="${esc(pe.row.title || "")}" oninput="pe.row.title=this.value;sheetDirty=true" placeholder="${T("e.g. House and yard", "пр. Куќа и двор")}">
+  const clients = state.clients.filter((c) => c.active !== false || c.id === pe.row.client_id).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  el.innerHTML = `<label>${T("Client", "Клиент")}</label>
+    <select id="pl-client" onchange="planClient(this.value)">
+      <option value="">${T("— not linked to a client —", "— не е врзан за клиент —")}</option>
+      ${clients.map((c) => `<option value="${c.id}" ${c.id === pe.row.client_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+    </select>
+    <label>${T("Plan name", "Име на планот")}</label><input id="pl-title" value="${esc(pe.row.title || "")}" oninput="pe.row.title=this.value;sheetDirty=true" placeholder="${T("e.g. House and yard", "пр. Куќа и двор")}">
     <div class="grid2"><div><label>${T("Plot width", "Ширина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.w}" onchange="planPlot('w',this.value)"></div>
       <div><label>${T("Plot depth", "Длабочина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.h}" onchange="planPlot('h',this.value)"></div></div>
     <label>${T("The street is", "Улицата е")}</label>
@@ -6382,6 +6432,7 @@ async function savePlan() {
   pe.saved = JSON.stringify(pe.p);
   sheetDirty = false;
   await refreshAll(["plans"]);
+  if (state.tab === "elaks") renderElaks();
   toast(T("Plan saved", "Планот е зачуван"));
 }
 async function delPlan() {
@@ -12988,7 +13039,7 @@ const MK = {
   "Money": "Пари",
   "Forgot password?": "Ја заборави лозинката?",
   "New guest": "Нов гостин", "Edit stay": "Измени престој", "New article": "Нов артикл",
-  "Search supplier or document…": "Барај добавувач или документ…", "Search clients…": "Барај клиенти…",
+  "Search supplier or document…": "Барај добавувач или документ…", "Search clients…": "Барај клиенти…", "Search plans…": "Барај планови…",
   "Search number, client or note…": "Барај број, клиент или белешка…", "Search name, policy number or phone…": "Барај име, број на полиса или телефон…",
   "e.g. Standup · Order cameras": "пр. Состанок · Нарачај камери", "e.g. 5MP Hikvision DS-2CE17K0T-LFS": "пр. 5MP Hikvision DS-2CE17K0T-LFS",
   "e.g. Apartment Center 1": "пр. Стан Центар 1", "bins on Tuesday · parking spot 4": "ѓубре во вторник · паркинг место 4",
