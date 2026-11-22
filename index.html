@@ -1638,7 +1638,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-235500";
+const BUILD = "20261122-235800";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2451,6 +2451,11 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122-235800", en: [
+    "360° fisheye for ceiling cameras: pick 360° as a camera's lens. It sees all round, cut by the walls; how far a face, a person and activity are seen follows its megapixels and the ceiling's height. In 3D it hangs from the ceiling and looks straight down.",
+  ], mk: [
+    "Рибино око 360° за камери на таван: избери 360° како објектив. Гледа наоколу, со ѕидовите; до каде се распознава лице, личност и движење зависи од мегапикселите и висината на таванот. Во 3D виси од таванот и гледа право надолу.",
+  ] },
   { build: "20261122-235500", en: [
     "3D looks like the real thing: cameras as bullets or turrets, detectors with their lens, the keypad with its keys, the siren with its light, the panel — instead of boxes.",
     "Give a camera or a device its product from the stock (Product, in its panel): in 3D it then stands as that product's photo, and its name goes on the client's page.",
@@ -5820,9 +5825,15 @@ async function htmlPdfFile(html, name) {
    it. A plan belongs to the client (coverage_plans, migration 0013), and
    remembers the offer and job it was drawn for.
 ============================================================ */
-const PLAN_LENS = { 2.8: 103, 3.6: 83, 4: 78, 6: 54 };        // typical horizontal angle, degrees
-const PLAN_MAIN_LENSES = [2.8, 3.6];
-const PLAN_HPX = { 2: 1920, 4: 2560, 5: 2592, 8: 3840 };       // horizontal pixels
+// A 360° fisheye on the ceiling is kept as its lens, 1.05 mm, and sees all round.
+const PLAN_FISH = 1.05;
+const PLAN_LENS = { 2.8: 103, 3.6: 83, 4: 78, 6: 54, [PLAN_FISH]: 360 };   // typical horizontal angle, degrees
+const PLAN_MAIN_LENSES = [2.8, 3.6, PLAN_FISH];
+const PLAN_HPX = { 2: 1920, 4: 2560, 5: 2592, 6: 3072, 8: 3840, 12: 4000 };   // horizontal pixels
+// the resolutions a camera of each kind comes in
+const PLAN_MPS = [2, 4, 5, 8], PLAN_MPS_FISH = [4, 5, 6, 12];
+const planFish = (c) => !!c && c.lens === PLAN_FISH;
+const planLensLbl = (l, mk) => l === PLAN_FISH ? (mk ? "Рибино око 360°" : T("360° fisheye", "Рибино око 360°")) : `${l} mm`;
 const PLAN_PPM = [250, 125, 63];
 const PLAN_OP = [0.6, 0.34, 0.15];
 const PLAN_LV_MK = ["не се гледа", "се гледа што се случува", "се препознава кој е", "лицето се распознава"];
@@ -5840,12 +5851,33 @@ const PLAN_ROOMS = [["Living room", "Дневна"], ["Kitchen", "Кујна"], 
 const planInside = (p) => p.kind === "in";
 // a house, a room or a shelf: its outline stops the view
 const planBlocks = (k) => k === "house" || k === "room" || k === "shelf";
-const planLensOf = (s) => { const m = String(s || "").match(/(\d{1,2}(?:[.,]\d)?)\s*mm\b/i); const v = m ? parseFloat(m[1].replace(",", ".")) : null; return v && PLAN_LENS[v] ? v : 2.8; };
-const planMpOf = (m) => m >= 7 ? 8 : m >= 5 ? 5 : m >= 3 ? 4 : m ? 2 : 4;
-const planReach = (c, night) => PLAN_PPM.map((p) => {
+const planLensOf = (s) => {
+  if (/fish ?eye|рибино|panoram|360\s*°/i.test(String(s || ""))) return PLAN_FISH;
+  const m = String(s || "").match(/(\d{1,2}(?:[.,]\d)?)\s*mm\b/i), v = m ? parseFloat(m[1].replace(",", ".")) : null;
+  return v && PLAN_LENS[v] && v !== PLAN_FISH ? v : 2.8;
+};
+const planMpOf = (m) => m >= 10 ? 12 : m >= 7 ? 8 : m >= 5.5 ? 6 : m >= 5 ? 5 : m >= 3 ? 4 : m ? 2 : 4;
+const planReach = (c, night) => planFish(c) ? planFishReach(c, night) : PLAN_PPM.map((p) => {
   const d = PLAN_HPX[c.mp || 4] / (p * 2 * Math.tan((PLAN_LENS[c.lens] || 103) * Math.PI / 360));
   return night ? Math.min(d, parseFloat(c.ir) || 30) : d;
 });
+// A fisheye looks straight down from the ceiling; its picture is a circle about as many pixels
+// across as its megapixels allow. How many of them fall on a metre of floor drops away from
+// under it, along the circle and out towards its edge (an equidistant lens). Taken together —
+// the mean of the two, as for an area — that gives how far round it a face, a person and
+// activity are seen. Higher on the ceiling, the floor right under it is seen less well.
+// "3.8 m round" — or, where a fisheye this high never gets there, not at this height
+const planReachLbl = (d, fish) => d > 0.05 ? `${planM(d)} m${fish ? " " + T("round", "наоколу") : ""}` : T("not at this height", "не на оваа висина");
+function planFishReach(c, night) {
+  const h = Math.max(1.5, c.mh || 2.7), R = Math.sqrt((c.mp || 5) * 1e6) / 2, k = 2 / Math.PI;
+  const ppm = (d) => Math.sqrt((R * k * Math.atan(d / h) / d) * (R * k * h / (h * h + d * d)));
+  return PLAN_PPM.map((p) => {
+    if (ppm(0.01) < p) return 0;
+    let lo = 0.01, hi = 60;
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (ppm(m) >= p) lo = m; else hi = m; }
+    return night ? Math.min(lo, parseFloat(c.ir) || 10) : lo;
+  });
+}
 const planCamsN = (n, mk) => `${n} ${n === 1 ? (mk ? "камера" : T("camera", "камера")) : (mk ? "камери" : T("cameras", "камери"))}`;
 const planM = (d) => (Math.round(d * 10) / 10).toLocaleString("en-US");
 function planBlank() {
@@ -6223,11 +6255,14 @@ function planSvgInner(p, o) {
   const camDim = layer !== "cam", alDim = layer !== "alarm";
   const hitR = o.hitR || 0.8, hit = (x, y) => o.paper ? "" : `<circle cx="${f(x)}" cy="${f(y)}" r="${f(hitR)}" fill="transparent"/>`;
   if (!(camDim && o.paper)) for (const c of p.cams || []) {
-    const on = !clean && !camDim && o.sel === "cam:" + c.id, a = c.h * Math.PI / 180, hx = Math.cos(a), hy = Math.sin(a);
-    out.push(`<g ${camDim ? 'opacity="0.3" pointer-events="none"' : `data-k="cam:${c.id}"`}>${camDim ? "" : hit(c.x, c.y)}<polygon points="${pts([[c.x + hx * 0.75, c.y + hy * 0.75], [c.x - hy * 0.32, c.y + hx * 0.32], [c.x + hy * 0.32, c.y - hx * 0.32]])}" fill="${P.cam}" stroke="#fff" stroke-width="0.06"/>
+    const on = !clean && !camDim && o.sel === "cam:" + c.id, a = c.h * Math.PI / 180, hx = Math.cos(a), hy = Math.sin(a), fish = planFish(c);
+    // a fisheye looks all round: a ring, not a pointer
+    out.push(`<g ${camDim ? 'opacity="0.3" pointer-events="none"' : `data-k="cam:${c.id}"`}>${camDim ? "" : hit(c.x, c.y)}${fish
+      ? `<circle cx="${f(c.x)}" cy="${f(c.y)}" r="0.74" fill="none" stroke="${P.cam}" stroke-width="0.1" stroke-dasharray="0.18 0.12"/>`
+      : `<polygon points="${pts([[c.x + hx * 0.75, c.y + hy * 0.75], [c.x - hy * 0.32, c.y + hx * 0.32], [c.x + hy * 0.32, c.y - hx * 0.32]])}" fill="${P.cam}" stroke="#fff" stroke-width="0.06"/>`}
       <circle cx="${f(c.x)}" cy="${f(c.y)}" r="0.5" fill="${on ? P.sel : P.cam}" stroke="#fff" stroke-width="0.09"/>
       <text x="${f(c.x)}" y="${f(c.y + 0.2)}" font-size="0.56" text-anchor="middle" fill="${on ? "#152A46" : "#fff"}" font-family="IBM Plex Mono, monospace" font-weight="600" pointer-events="none">${c.n}</text></g>`);
-    if (on) out.push(`<line x1="${f(c.x)}" y1="${f(c.y)}" x2="${f(c.x + hx * 2.2)}" y2="${f(c.y + hy * 2.2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
+    if (on && !fish) out.push(`<line x1="${f(c.x)}" y1="${f(c.y)}" x2="${f(c.x + hx * 2.2)}" y2="${f(c.y + hy * 2.2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
       <g data-k="rot:${c.id}">${hit(c.x + hx * 2.2, c.y + hy * 2.2)}<circle cx="${f(c.x + hx * 2.2)}" cy="${f(c.y + hy * 2.2)}" r="0.45" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/></g>`);
   }
   // the alarm's devices as badges about the same size on screen however far the plan is zoomed
@@ -6321,12 +6356,12 @@ async function planCamPageHtml(row, bgUrl, photos) {
     <div class="pv-legend">${sw(0.6)}Лицето се распознава &nbsp; ${sw(0.34)}Се препознава кој е &nbsp; ${sw(0.15)}Се гледа што се случува</div>
     <table class="rp-tbl"><thead><tr><th>#</th><th>Каде</th><th>Камера</th><th class="r">Лице до</th><th class="r">Личност до</th><th class="r">Гледа до</th><th class="r">Ноќе до</th></tr></thead>
       <tbody>${(p.cams || []).map((cm) => { const r = planReach(cm, false), nr = planReach(cm, true);
-        return `<tr><td>${cm.n}</td><td>${esc(cm.name || "Камера " + cm.n)}</td><td>${cm.lens} mm · ${cm.mp} MP</td><td class="r">${planM(r[0])} m</td><td class="r">${planM(r[1])} m</td><td class="r">${planM(r[2])} m</td><td class="r">${planM(nr[2])} m</td></tr>`; }).join("")}</tbody></table>
+        return `<tr><td>${cm.n}</td><td>${esc(cm.name || "Камера " + cm.n)}</td><td>${planLensLbl(cm.lens, true)} · ${cm.mp} MP</td>${[r[0], r[1], r[2], nr[2]].map((d) => `<td class="r">${d > 0.05 ? planM(d) + " m" : "—"}</td>`).join("")}</tr>`; }).join("")}</tbody></table>
     ${s.marks.length ? `<div class="pv-keys"><b>Што се гледа на важните места:</b> ${s.marks.map(({ m, l }) =>
       `${esc(m.label || "")} — <span style="color:${col[l]};font-weight:700">${PLAN_LV_MK[l]}</span>`).join(" · ")}</div>` : ""}
     <div class="pv-small">${planCamsN((p.cams || []).length, true)} · се гледа ${[s.yard ? `${s.seen}% од дворот` : "", s.rooms ? `${s.seenIn}% од просториите` : ""].filter(Boolean).join(" и ")} · лицето се распознава на ${s.face}%. Проценка според објективот и резолуцијата на камерата (EN 62676-4); светлото, времето и висината на монтажа ја менуваат.</div>
     ${views.length ? `<div class="pv-sub"><b>Што гледа секоја камера</b> — сликано од местото каде што ќе стои. Жолтата рамка е што фаќа објективот, испрекинатата е другиот објектив; на земјата се истите три нијанси.</div>
-      ${views.map(({ cm, img }) => `<div class="pv-cv"><img src="${img}" alt="Камера ${cm.n}"><span>Камера ${cm.n}${cm.name ? " — " + esc(cm.name) : ""} · ${cm.lens} mm · ${cm.mp} MP · на ${planM(cm.mh || 2.7)} m</span></div>`).join("")}` : ""}`;
+      ${views.map(({ cm, img }) => `<div class="pv-cv"><img src="${img}" alt="Камера ${cm.n}"><span>Камера ${cm.n}${cm.name ? " — " + esc(cm.name) : ""} · ${planLensLbl(cm.lens, true)} · ${cm.mp} MP · на ${planM(cm.mh || 2.7)} m</span></div>`).join("")}` : ""}`;
 }
 
 // ---------- the list of plans, and opening one ----------
@@ -6647,6 +6682,7 @@ function planDown(e) {
     const src = a ? [a.name, a.code, a.specs].join(" ") : "";
     const c = { id: planNewId("c"), n, name: "", x: planSnap(x), y: planSnap(y), h: 90, mh: planWhere(p, x, y) === "yard" && !planInside(p) ? 2.7 : 2.6,
       lens: a ? planLensOf(src) : 2.8, mp: a ? planMpOf(camOf(a).mp) : 4, ir: 30, article_id: a ? a.id : null, model: a ? a.name : "" };
+    if (planFish(c)) planLensSwitched(c);
     p.cams.push(c); pe.sel = "cam:" + c.id; planTool("move"); return;
   }
   if (t === "device") {
@@ -6823,26 +6859,29 @@ function planPanel(st) {
   if (pe.client) { el.innerHTML = `<p class="muted">${T("This is how the client sees it. Tap Client view again to keep drawing.", "Вака го гледа клиентот. Допри пак за да продолжиш со цртање.")}</p>`; return; }
   const rm = `<button class="btn sm danger" style="flex:none" onclick="planRemoveSel()">${T("Remove", "Отстрани")}</button>`;
   if (kind === "cam" && planCam(id)) {
-    const c = planCam(id), r = planReach(c, p.night);
+    const c = planCam(id), r = planReach(c, p.night), fish = planFish(c);
     const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${T("Camera", "Камера")} ${c.n}${c.model ? ` <span class="muted" style="font-weight:400">· ${esc(c.model)}</span>` : ""}</b>${rm}</div>
       <label>${T("Where", "Каде")}</label><input id="pl-cname" value="${esc(c.name || "")}" oninput="planSet('name',this.value)" placeholder="${T("e.g. Gate, Parking", "пр. Порта, Паркинг")}">
       ${planProductPick(c.article_id, "cam")}
-      <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="planSetNum('lens',${l})">${l} mm</button>`).join("")}</div>
-      <label>${T("Resolution", "Резолуција")}</label><div class="chips">${Object.keys(PLAN_HPX).map((m) => `<button class="chip ${Number(m) === c.mp ? "on" : ""}" onclick="planSetNum('mp',${m})">${m} MP</button>`).join("")}</div>
+      <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="planSetNum('lens',${l})">${planLensLbl(l)}</button>`).join("")}</div>
+      <label>${T("Resolution", "Резолуција")}</label><div class="chips">${(fish ? PLAN_MPS_FISH : PLAN_MPS).concat(fish ? [] : [c.mp]).filter((m, i, a) => m && a.indexOf(m) === i).map((m) => `<button class="chip ${Number(m) === c.mp ? "on" : ""}" onclick="planSetNum('mp',${m})">${m} MP</button>`).join("")}</div>
+      ${fish ? `<p class="muted" style="font-size:12.5px;margin:8px 0 0">${T("On the ceiling, looking straight down: it sees all round, best right under it. Its height is the ceiling's.",
+        "На таванот, гледа право надолу: гледа наоколу, најдобро точно под неа. Висината е висината на таванот.")}</p>` : ""}
       <div class="pl-reads">
-        <span class="pl-sw" style="opacity:.6"></span><span>${T("Face readable to", "Лицето се распознава до")}</span><b>${planM(r[0])} m</b>
-        <span class="pl-sw" style="opacity:.34"></span><span>${T("Person recognised to", "Се препознава кој е до")}</span><b>${planM(r[1])} m</b>
-        <span class="pl-sw" style="opacity:.15"></span><span>${T("Activity seen to", "Се гледа што се случува до")}</span><b>${planM(r[2])} m</b>
+        <span class="pl-sw" style="opacity:.6"></span><span>${fish ? T("Face readable within", "Лицето се распознава до") : T("Face readable to", "Лицето се распознава до")}</span><b>${planReachLbl(r[0], fish)}</b>
+        <span class="pl-sw" style="opacity:.34"></span><span>${fish ? T("Person recognised within", "Се препознава кој е до") : T("Person recognised to", "Се препознава кој е до")}</span><b>${planReachLbl(r[1], fish)}</b>
+        <span class="pl-sw" style="opacity:.15"></span><span>${fish ? T("Activity seen within", "Се гледа што се случува до") : T("Activity seen to", "Се гледа што се случува до")}</span><b>${planReachLbl(r[2], fish)}</b>
       </div>
       <div class="row" style="gap:8px;align-items:center"><label style="margin:0">${T("IR at night", "IR ноќе")}</label>
-        <input id="pl-ir" type="number" inputmode="decimal" min="0" max="200" value="${c.ir ?? 30}" style="width:90px" oninput="planSetNum('ir',parseFloat(this.value)||0)"><span class="muted">m · ${PLAN_LENS[c.lens]}°</span></div>
-      <div class="row" style="gap:8px;align-items:center;margin-top:8px"><label style="margin:0">${T("Mounted at", "Висина на монтажа")}</label>
+        <input id="pl-ir" type="number" inputmode="decimal" min="0" max="200" value="${c.ir ?? (fish ? 10 : 30)}" style="width:90px" oninput="planSetNum('ir',parseFloat(this.value)||0)"><span class="muted">m · ${PLAN_LENS[c.lens]}°</span></div>
+      <div class="row" style="gap:8px;align-items:center;margin-top:8px"><label style="margin:0">${fish ? T("Ceiling height", "Висина на таванот") : T("Mounted at", "Висина на монтажа")}</label>
         <input id="pl-mh" type="number" inputmode="decimal" step="0.1" min="0.5" max="20" value="${c.mh ?? 2.7}" style="width:90px" oninput="planSetNum('mh',Math.max(0.5,parseFloat(this.value)||2.7))"><span class="muted">m</span></div>
-      <div class="grid2" style="margin-top:12px">
+      ${fish ? `<button class="btn sm ghost" style="width:100%;margin-top:12px" onclick="planOpen3d('${c.id}')">${T("Look through it in 3D", "Погледни низ неа во 3D")}</button>`
+      : `<div class="grid2" style="margin-top:12px">
         <button class="btn sm ghost" style="width:100%" onclick="planCamView('${c.id}')">${ICON.camera}${c.photo ? T("Its view on the photo", "Погледот на сликата") : T("View on a photo", "Поглед на слика")}</button>
         <button class="btn sm ghost" style="width:100%" onclick="planOpen3d('${c.id}')">${T("Look through it in 3D", "Погледни низ неа во 3D")}</button>
-      </div>`;
+      </div>`}`;
     return;
   }
   if (kind === "rect" && planShape(id)) {
@@ -6986,7 +7025,19 @@ function planSetNum(k, v) {
   const typing = planIsTyping();
   if (typing) planTyping(pe.sel + k); else planRemember();
   t[k] = v;
+  if (kind === "cam" && k === "lens") planLensSwitched(t);
   planRender(typing);
+}
+// a fisheye comes in its own resolutions, with a shorter IR, on the ceiling; and back
+function planLensSwitched(c) {
+  if (planFish(c)) {
+    if (!PLAN_MPS_FISH.includes(c.mp)) c.mp = 5;
+    if (c.ir == null || c.ir === 30) c.ir = 10;
+    if (c.mh == null || c.mh < 2.4) c.mh = 2.7;
+  } else {
+    if (!PLAN_MPS.includes(c.mp)) c.mp = 4;
+    if (c.ir === 10) c.ir = 30;
+  }
 }
 function planAlarmSel(id) { pe.sel = "al:" + id; planRender(); }
 function planAlarmSet(k, v) {
@@ -7028,8 +7079,9 @@ function planPickProduct(id) {
   if (a && kind === "cam") {
     // its lens and resolution, where its name or specs say them
     const src = [a.name, a.code, a.specs].filter(Boolean).join(" ");
-    if (/\d\s*mm\b/i.test(src)) t.lens = planLensOf(src);
+    if (/\d\s*mm\b/i.test(src) || planLensOf(src) === PLAN_FISH) { t.lens = planLensOf(src); planLensSwitched(t); }
     if (camOf(a).mp != null) t.mp = planMpOf(camOf(a).mp);
+    if (planFish(t) && !PLAN_MPS_FISH.includes(t.mp)) t.mp = 5;
   }
   if (a && kind === "al") { const ty = alarmTypeOf(a); if (ty && ty !== t.type) alarmRetype(t, ty); }
   planRender();
@@ -7379,6 +7431,7 @@ let cv = null;   // { id, img, info, spot, drag }
 async function planCamView(id) {
   const c = planCam(id);
   if (!c) return;
+  if (planFish(c)) return toast(T("A fisheye looks straight down: its view is in 3D", "Рибиното око гледа право надолу: погледот е во 3D"));
   planSubOpen(`${planSubHead(`${T("Camera", "Камера")} ${c.n}${c.name ? " · " + esc(c.name) : ""}`)}
     <div id="cv-body"></div>
     <input type="file" accept="image/*" capture="environment" id="cv-cam" style="display:none" onchange="planCvPick(this)">
@@ -7426,7 +7479,7 @@ function planCvShow() {
 function planCvPanel() {
   const c = planCam(cv.id), ph = c.photo, im = cv.img;
   const deg = (f35) => Math.round(planPhotoHfov(f35, im.naturalWidth, im.naturalHeight));
-  const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
+  const lenses = PLAN_MAIN_LENSES.filter((l) => l !== PLAN_FISH);
   const takes = [ph.exif ? ["exif", T("as the photo says", "како што пишува сликата"), ph.exif] : null, ["05x", "0.5×", 13], ["1x", "1×", 26]].filter(Boolean);
   const r = planReach(c, false);
   $("cv-body").innerHTML = `<div class="cv-wrap"><canvas id="cv-canvas"></canvas></div>
@@ -7619,6 +7672,7 @@ function p3Label(text, bg, fg, h = 0.8) {
 const P3_BIG = 4;
 // a camera's shape: from its article's name, else a bullet outside and a turret inside
 function p3CamForm(c) {
+  if (planFish(c)) return "fisheye";
   const a = c.article_id && state.stock.find((x) => x.id === c.article_id);
   const hay = [c.model, a && a.name, a && a.specs].filter(Boolean).join(" ");
   if (/bullet|булет|цевк/i.test(hay)) return "bullet";
@@ -7679,6 +7733,11 @@ function p3Model(kind, M) {
       cylX(0.035, 0.012, M.white, 0.006); cylX(0.011, 0.05, M.white, 0.035);
       cylX(0.036, 0.17, M.white, 0.145); box(0.19, 0.008, 0.08, M.white, 0.15, 0.042); cylX(0.03, 0.004, M.dark, 0.232);
       break;
+    case "fisheye": {                                // on the ceiling: the disc, a ring, the dome looking down
+      cylY(0.075, 0.028, M.white, 0, -0.014); cylY(0.05, 0.004, M.grey, 0, -0.03);
+      add(new THREE.SphereGeometry(0.034, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), M.dark, 0, -0.03, 0);
+      break;
+    }
     case "turret":                                   // base, ball, lens
       cylX(0.06, 0.022, M.white, 0.011); dot(0.047, M.white, 0.06, 0, 0); cylX(0.02, 0.012, M.dark, 0.103);
       break;
@@ -7912,7 +7971,7 @@ function p3Dyn() {
     const g = p3PhotoOf(c) || p3Model(p3CamForm(c), mats), cy = p3.wallTop ? Math.min(c.mh || 2.7, p3.wallTop) : c.mh || 2.7;
     g.position.set(c.x, cy, c.y);
     if (g.userData.photo) { const a = c.h * Math.PI / 180, out = g.scale.x / 2 + 0.08; g.position.set(c.x + Math.cos(a) * out, cy, c.y + Math.sin(a) * out); }
-    if (!g.userData.photo) { g.rotation.order = "YZX"; g.rotation.set(0, -c.h * Math.PI / 180, -(c.tilt ?? PLAN_TILT) * Math.PI / 180); }
+    if (!g.userData.photo && !planFish(c)) { g.rotation.order = "YZX"; g.rotation.set(0, -c.h * Math.PI / 180, -(c.tilt ?? PLAN_TILT) * Math.PI / 180); }
     g.userData.cam = c.id;
     dyn.add(g);
     const lab = p3Label(String(c.n), "#1E3A5F", "#FFFFFF", 0.6);
@@ -7945,15 +8004,16 @@ function p3Mode(m) {
 }
 // a camera's own body is not in its own view
 function p3Own() { for (const o of p3.dyn.children) if (o.userData.cam) o.visible = o.userData.cam !== p3.mode; }
-const p3AimText = (c) => `${T("Through camera", "Низ камера")} ${c.n}: ${c.lens} mm, ${PLAN_LENS[c.lens]}° · ${T("turned", "свртена")} ${Math.round(((c.h % 360) + 360) % 360)}° · ${T("tilted down", "наведната")} ${Math.round(c.tilt ?? PLAN_TILT)}°`;
+const p3AimText = (c) => planFish(c) ? `${T("Through camera", "Низ камера")} ${c.n}: ${planLensLbl(c.lens)}, ${T("looking straight down from the ceiling", "гледа право надолу од таванот")}`
+  : `${T("Through camera", "Низ камера")} ${c.n}: ${c.lens} mm, ${PLAN_LENS[c.lens]}° · ${T("turned", "свртена")} ${Math.round(((c.h % 360) + 360) % 360)}° · ${T("tilted down", "наведната")} ${Math.round(c.tilt ?? PLAN_TILT)}°`;
 function p3Panel() {
   const el = $("p3-panel"), c = planCam(p3.mode);
   if (c) {
     const lenses = PLAN_MAIN_LENSES.includes(c.lens) ? PLAN_MAIN_LENSES : PLAN_MAIN_LENSES.concat(c.lens);
-    $("p3-hint").textContent = T("Drag to aim the camera", "Повлечи за да ја насочиш камерата");
+    $("p3-hint").textContent = planFish(c) ? T("A fisheye sees all round: nothing to aim", "Рибино око гледа наоколу: нема што да се насочува") : T("Drag to aim the camera", "Повлечи за да ја насочиш камерата");
     el.innerHTML = `<p class="muted" id="p3-aim" style="margin:8px 0 0">${p3AimText(c)}</p>
-      <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="p3Lens(${l})">${l} mm</button>`).join("")}</div>
-      <div class="grid2"><div><label>${T("Mounted at", "Висина на монтажа")} <span style="text-transform:none">(m)</span></label>
+      <label>${T("Lens", "Објектив")}</label><div class="chips">${lenses.map((l) => `<button class="chip ${c.lens === l ? "on" : ""}" onclick="p3Lens(${l})">${planLensLbl(l)}</button>`).join("")}</div>
+      <div class="grid2"><div><label>${planFish(c) ? T("Ceiling height", "Висина на таванот") : T("Mounted at", "Висина на монтажа")} <span style="text-transform:none">(m)</span></label>
         <input type="number" inputmode="decimal" step="0.1" min="0.5" max="20" value="${c.mh ?? 2.7}" oninput="p3Mh(this.value)"></div>
         <div><button class="btn sm ghost" style="width:100%;margin-top:30px" onclick="p3Snap()">${ICON.share}${T("Send picture", "Испрати слика")}</button></div></div>
       <div id="p3-file"></div>`;
@@ -7974,7 +8034,7 @@ function p3Panel() {
       (p.cams || []).length ? T("Tap a camera above to look through it and aim it.", "Допри камера горе за да гледаш низ неа и да ја насочиш.") : ""}</p>
     <div id="p3-file"></div>`;
 }
-function p3Lens(l) { planRemember(); planCam(p3.mode).lens = l; p3Dyn(); p3Mode(p3.mode); }
+function p3Lens(l) { planRemember(); const c = planCam(p3.mode); c.lens = l; planLensSwitched(c); p3Dyn(); p3Mode(p3.mode); }
 function p3Mh(v) { if (planCamTyping(p3.mode, "mh", Math.max(0.5, Math.min(20, parseFloat(v) || 0)))) { p3Dyn(); p3Draw(); } }
 function p3WallH(v) {
   const n = parseFloat(v);
@@ -7994,7 +8054,8 @@ function p3Resize() {
   if (!p3) return;
   const wrap = $("p3-wrap"), w = wrap.clientWidth || 360;
   // through a camera: its own 16:9 picture
-  const h = planCam(p3.mode) ? Math.round((w * 9) / 16) : Math.round(Math.max(280, Math.min(window.innerHeight * 0.6, w * 0.9)));
+  // through a camera, its own picture: 16:9, or round-ish for a fisheye
+  const cm = planCam(p3.mode), h = cm ? (planFish(cm) ? Math.round(Math.min(w, window.innerHeight * 0.6)) : Math.round((w * 9) / 16)) : Math.round(Math.max(280, Math.min(window.innerHeight * 0.6, w * 0.9)));
   wrap.style.height = h + "px";
   p3.renderer.setSize(w, h, false);
   p3.renderer.domElement.style.width = "100%"; p3.renderer.domElement.style.height = "100%";
@@ -8012,7 +8073,14 @@ function p3Draw() {
 }
 function p3Render() {
   const { THREE, camera } = p3, c = planCam(p3.mode);
-  if (c) {
+  if (c && planFish(c)) {
+    // a fisheye from the ceiling: straight down, as wide as a picture can show
+    const y = (c.mh || 2.7) - 0.1;
+    camera.fov = 120;
+    camera.position.set(c.x, y, c.y);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(new THREE.Vector3(c.x, 0, c.y));
+  } else if (c) {
     const h = c.h * Math.PI / 180, t = (c.tilt ?? PLAN_TILT) * Math.PI / 180, y = c.mh || 2.7;
     camera.fov = planVfov(PLAN_LENS[c.lens] || 103);
     camera.position.set(c.x, y, c.y);
@@ -8033,7 +8101,7 @@ function p3Down(e) {
   if (!p3) return;
   p3.ptrs.set(e.pointerId, [e.clientX, e.clientY]);
   try { e.target.setPointerCapture(e.pointerId); } catch { /* not every pointer */ }
-  if (planCam(p3.mode)) { if (!p3.drag) { planRemember(); p3.drag = { aim: true }; } return; }
+  if (planCam(p3.mode)) { if (planFish(planCam(p3.mode))) return; if (!p3.drag) { planRemember(); p3.drag = { aim: true }; } return; }
   if (p3.ptrs.size === 2) {
     const [a, b] = [...p3.ptrs.values()];
     p3.drag = { pinch: true, d0: Math.hypot(a[0] - b[0], a[1] - b[1]), r0: p3.orbit.r, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
