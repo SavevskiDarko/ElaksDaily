@@ -20,7 +20,7 @@
   --net-bg:#FFF4D6; --net-ink:#7A5500;
   --surface:#FFFFFF; --on-dark:#FFFFFF;
   --plan-lot:#EEF3EA; --plan-street:#DCDFE4; --plan-area:#E6E2DA; --plan-house:#D5DBE4; --plan-line:#3B4452;
-  --plan-floor:#F6F2EA; --plan-in:#E3E6EA; --plan-shelf:#B9A98F;
+  --plan-floor:#F6F2EA; --plan-in:#E3E6EA; --plan-shelf:#B9A98F; --plan-glass:#A9D4F2;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
   --cond:'IBM Plex Sans Condensed',var(--sans);
@@ -592,7 +592,8 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .pl-layer button{padding:6px 14px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--muted)}
 .pl-layer button svg{width:15px;height:15px;vertical-align:-3px;margin-right:5px}
 .pl-layer button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
-.al-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
+.al-ico{display:inline-block;flex:none;margin-right:6px;vertical-align:-4px;overflow:visible}
+.pv-legend .al-ico{margin-right:3px;vertical-align:-3px}
 .al-ok{color:var(--personal);font-weight:700;width:14px;text-align:center}
 .al-warn{color:#fff;background:var(--danger);border-radius:50%;width:18px;height:18px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .p3-hint{position:absolute;left:8px;top:8px;z-index:1;background:rgba(21,42,70,.72);color:#fff;font-size:12px;padding:4px 9px;border-radius:8px;pointer-events:none}
@@ -657,14 +658,14 @@ a.btn{text-decoration:none;display:block;text-align:center}
   :root:not([data-theme="light"]){--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
     --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;
     --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;
-    --plan-floor:#2A2F37;--plan-in:#16191E;--plan-shelf:#6B5E4E;color-scheme:dark}
+    --plan-floor:#2A2F37;--plan-in:#16191E;--plan-shelf:#6B5E4E;--plan-glass:#4F86B0;color-scheme:dark}
   :root:not([data-theme="light"]) .btn.ghost{background:var(--card);color:var(--ink)}
   :root:not([data-theme="light"]) .tick{border-color:#39424F}
 }
 :root[data-theme="dark"]{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
   --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;
     --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;
-    --plan-floor:#2A2F37;--plan-in:#16191E;--plan-shelf:#6B5E4E;color-scheme:dark}
+    --plan-floor:#2A2F37;--plan-in:#16191E;--plan-shelf:#6B5E4E;--plan-glass:#4F86B0;color-scheme:dark}
 :root[data-theme="dark"] .btn.ghost{background:var(--card);color:var(--ink)}
 :root[data-theme="dark"] .tick{border-color:#39424F}
 :root[data-theme="light"]{color-scheme:light}
@@ -1637,7 +1638,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-230000";
+const BUILD = "20261122-235000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2450,6 +2451,13 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122-235000", en: [
+    "Alarm devices are bigger and easier to tell apart: each has its own sign — motion, contact, siren, keypad, panel, glass-break, smoke — and a detector's badge points where it looks, with its zone number beside it. They stay the same size on screen as you zoom.",
+    "Windows: + Window next to + Door puts a window in a wall of the house or a room. A contact placed by it goes on it.",
+  ], mk: [
+    "Алармните уреди се поголеми и полесно се разликуваат: секој има свој знак — движење, контакт, сирена, тастатура, централа, кршење стакло, чад — а значката на детекторот покажува каде гледа, со бројот на зоната до неа. На екранот остануваат иста големина додека зумираш.",
+    "Прозорци: + Прозорец до + Врата става прозорец во ѕид од куќата или просторијата. Контакт поставен до него оди на него.",
+  ] },
   { build: "20261122-230000", en: [
     "Lock drawing: on a camera plan, lock the house and rooms once they are drawn — then a finger moves only cameras and alarm devices, and on the rest it moves the view. Tap Locked to change the rooms again.",
     "Cameras and devices are easier to grab: a slightly missed tap still takes them.",
@@ -5835,13 +5843,13 @@ const planCamsN = (n, mk) => `${n} ${n === 1 ? (mk ? "камера" : T("camera"
 const planM = (d) => (Math.round(d * 10) / 10).toLocaleString("en-US");
 function planBlank() {
   return { v: 1, kind: "out", w: 24, h: 18, street: "bottom", night: false,
-    shapes: [{ id: "s1", kind: "house", x: 7, y: 5, w: 10, h: 8, label: "" }], walls: [], marks: [], cams: [], doors: [], alarm: [], bg: null };
+    shapes: [{ id: "s1", kind: "house", x: 7, y: 5, w: 10, h: 8, label: "" }], walls: [], marks: [], cams: [], doors: [], windows: [], alarm: [], bg: null };
 }
 // the inside: one room with its entrance, to draw the rest from
 function planBlankIn() {
   return { v: 1, kind: "in", w: 12, h: 9, street: "none", night: false,
     shapes: [{ id: "s1", kind: "room", x: 0, y: 0, w: 12, h: 9, label: "" }], walls: [], marks: [], cams: [],
-    doors: [{ id: "d1", x: 6, y: 9, w: 0.9, a: 0 }], alarm: [], bg: null };
+    doors: [{ id: "d1", x: 6, y: 9, w: 0.9, a: 0 }], windows: [], alarm: [], bg: null };
 }
 // What blocks the view: the walls drawn, and the outline of every house, room and shelf,
 // less the doors in them. Each piece says what it belongs to, for the 3D view.
@@ -5957,9 +5965,9 @@ const ALARM_TYPES = {
   smoke:     { en: "Smoke / heat", mk: "Чад / топлина", code: "ЧАД", cov: "circle", range: 5, zone: "fire", mh: 2.7, col: "#8C6D4F" },
   panic:     { en: "Panic button", mk: "Паник копче", code: "ПАН", cov: null, zone: "h24", mh: 1, col: "#C2255C" },
   flood:     { en: "Water leak", mk: "Поплава", code: "ВОД", cov: null, zone: "h24", mh: 0.1, col: "#1C7ED6" },
-  siren_in:  { en: "Siren inside", mk: "Внатрешна сирена", code: "СИР", cov: null, zone: null, mh: 2.4, col: "#5F3DC4" },
+  siren_in:  { en: "Siren inside", mk: "Внатрешна сирена", code: "СИР", cov: null, zone: null, mh: 2.4, col: "#7950F2" },
   siren_out: { en: "Siren outside", mk: "Надворешна сирена", code: "СИР", cov: null, zone: null, mh: 3, col: "#5F3DC4" },
-  keypad:    { en: "Keypad", mk: "Тастатура", code: "ТАС", cov: null, zone: null, mh: 1.5, col: "#1E3A5F" },
+  keypad:    { en: "Keypad", mk: "Тастатура", code: "ТАС", cov: null, zone: null, mh: 1.5, col: "#0B7285" },
   panel:     { en: "Control panel", mk: "Централа", code: "ЦЕН", cov: null, zone: null, mh: 1.6, col: "#152A46" },
 };
 const ALARM_ZONES = { entry: ["Entry delay", "Влез (одложена)"], follow: ["Follow", "Следна"], instant: ["Instant", "Моментална"], h24: ["24 hours", "24 часа"], fire: ["Fire", "Пожар"] };
@@ -5976,6 +5984,48 @@ const alarmTypeOf = (a) => { const hay = [a.name, a.code, a.specs].filter(Boolea
 const alarmArticle = (a) => a.category === "Alarm" || (!!alarmTypeOf(a) && !CAM_RX.test([a.name, a.code].join(" ")));
 const alarmZoned = (d) => !!alarmT(d).zone;
 const alarmNext = (p) => Math.max(0, ...(p.alarm || []).filter(alarmZoned).map((d) => d.n || 0)) + 1;
+/* How a device looks: a round badge in its colour with a white sign for what it is, a
+   detector's badge drawn to a point where it looks, and a zone's number on a tag beside it.
+   The signs are drawn in a 24-unit box around 12,12; a detector's looks right (0°) and
+   turns with it. The same badge goes on the plan, in the device row and on the client's page. */
+const ALARM_GLYPH = {
+  pir: '<circle cx="7" cy="12" r="2.3" fill="#fff" stroke="none"/><path d="M11.6 8a5.6 5.6 0 0 1 0 8M15.2 4.8a10 10 0 0 1 0 14.4"/>',
+  outpir: '<circle cx="5.5" cy="12" r="2.1" fill="#fff" stroke="none"/><path d="M9.4 9a4.2 4.2 0 0 1 0 6M12.8 6.2a8.2 8.2 0 0 1 0 11.6M16.2 3.6a12.2 12.2 0 0 1 0 16.8"/>',
+  curtain: '<circle cx="5.5" cy="12" r="2.1" fill="#fff" stroke="none"/><path d="M9.5 12h10.5M10 9.2l9.8-1.4M10 14.8l9.8 1.4"/>',
+  beam: '<rect x="2.5" y="8.5" width="4" height="7" rx="1.2" fill="#fff" stroke="none"/><rect x="17.5" y="8.5" width="4" height="7" rx="1.2" fill="#fff" stroke="none"/><path d="M8.6 12h6.8" stroke-dasharray="1.8 1.6"/>',
+  contact: '<path d="M6.5 4.5H10V12a2 2 0 0 0 4 0V4.5h3.5V12a5.5 5.5 0 0 1-11 0z"/><path d="M6.5 8.3H10M14 8.3h3.5"/>',
+  glass: '<rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/><path d="M12.5 4.5l-2 5 3.5 2.5-3 3.2 1.2 4.3M14 12l5.5-2.2"/>',
+  smoke: '<path d="M12 3.5c.9 3.2 4.8 5.2 4.8 9.8a4.8 4.8 0 0 1-9.6 0c0-2.4 1.3-3.9 2.4-4.9.2 1.5.9 2.5 2 3.1-.2-2.6-.5-5.3.4-8z"/>',
+  panic: '<path d="M12 5v8.5" stroke-width="3.2"/><circle cx="12" cy="18.3" r="1.9" fill="#fff" stroke="none"/>',
+  flood: '<path d="M12 3.8C9.2 8 6.6 11.1 6.6 14.6a5.4 5.4 0 0 0 10.8 0C17.4 11.1 14.8 8 12 3.8z"/><path d="M9.6 15a2.5 2.5 0 0 0 2.4 2.4"/>',
+  siren_in: '<path d="M3.8 9.4h3.4L11.6 5.6v12.8L7.2 14.6H3.8z" fill="#fff"/><path d="M15 9a4.3 4.3 0 0 1 0 6M17.8 6.3a8.2 8.2 0 0 1 0 11.4"/>',
+  siren_out: '<path d="M7 17.5v-4.3a5 5 0 0 1 10 0v4.3" fill="#fff"/><path d="M5 17.5h14v2.3H5zM12 3v2.4M4.6 6.4l1.7 1.7M19.4 6.4l-1.7 1.7"/>',
+  keypad: '<rect x="5.5" y="3" width="13" height="18" rx="2"/><path d="M8.6 6.6h6.8"/><g fill="#fff" stroke="none"><circle cx="9" cy="11" r="1.15"/><circle cx="12" cy="11" r="1.15"/><circle cx="15" cy="11" r="1.15"/><circle cx="9" cy="14.2" r="1.15"/><circle cx="12" cy="14.2" r="1.15"/><circle cx="15" cy="14.2" r="1.15"/><circle cx="9" cy="17.4" r="1.15"/><circle cx="12" cy="17.4" r="1.15"/><circle cx="15" cy="17.4" r="1.15"/></g>',
+  panel: '<path d="M12 3l7 2.9v5.6c0 4.4-2.9 7.8-7 9.5-4.1-1.7-7-5.1-7-9.5V5.9z"/><path d="M8.7 12.1l2.3 2.3 4.4-4.6"/>',
+};
+// the badge at x,y with radius R; o: { ring (its outline), shadow, flat (no point, for a list) }
+function alarmBadge(type, x, y, R, h, o = {}) {
+  const t = ALARM_TYPES[type] || ALARM_TYPES.pir, fan = t.cov === "fan" && !o.flat, f = (n) => Math.round(n * 1000) / 1000;
+  let body = `<circle cx="${f(x)}" cy="${f(y)}" r="${f(R)}"`;
+  if (fan) {
+    const a = (h || 0) * Math.PI / 180, th = 42 * Math.PI / 180, at = (k, r) => f(x + r * Math.cos(a + k)) + " " + f(y + r * Math.sin(a + k));
+    body = `<path d="M${at(th, R)}A${f(R)} ${f(R)} 0 1 1 ${at(-th, R)}L${at(0, R * 1.62)}Z"`;
+  }
+  const shadow = o.shadow ? `${body} fill="#0B1530" fill-opacity="0.3" stroke="none" transform="translate(${f(R * 0.06)} ${f(R * 0.13)})"/>` : "";
+  return `${shadow}${body} fill="${t.col}" stroke="${o.ring || "#fff"}" stroke-width="${f(R * 0.15)}" stroke-linejoin="round"/>`
+    + `<g transform="translate(${f(x)} ${f(y)}) rotate(${fan ? f(h || 0) : 0}) scale(${f((R * 1.3) / 24)}) translate(-12 -12)" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${ALARM_GLYPH[type] || ""}</g>`;
+}
+// the zone's number on a white tag: behind a detector (its point is in front), else up and right
+function alarmTag(d, R) {
+  const t = alarmT(d), s = String(d.n ?? "–"), f = (n) => Math.round(n * 1000) / 1000;
+  const a = ((d.h || 0) + 180) * Math.PI / 180, fan = t.cov === "fan";
+  const cx = fan ? d.x + Math.cos(a) * R * 1.05 : d.x + R * 0.82, cy = fan ? d.y + Math.sin(a) * R * 1.05 : d.y - R * 0.82;
+  const fs = R * 0.74, hh = R * 0.92, w = Math.max(hh, s.length * fs * 0.62 + R * 0.42);
+  return `<rect x="${f(cx - w / 2)}" y="${f(cy - hh / 2)}" width="${f(w)}" height="${f(hh)}" rx="${f(hh / 2)}" fill="#fff" stroke="${t.col}" stroke-width="${f(R * 0.11)}"/>`
+    + `<text x="${f(cx)}" y="${f(cy + fs * 0.36)}" font-size="${f(fs)}" text-anchor="middle" fill="${t.col}" font-family="IBM Plex Mono, monospace" font-weight="700" pointer-events="none">${esc(s)}</text>`;
+}
+// a small badge on its own, for a button or a line of text
+const alarmIcon = (type, px = 18) => `<svg class="al-ico" viewBox="-13 -13 26 26" width="${px}" height="${px}" aria-hidden="true">${alarmBadge(type, 0, 0, 11.4, 0, { flat: true })}</svg>`;
 // what a detector covers: a fan or a circle, cut where the walls stop it
 function alarmPoly(d, S) {
   const t = alarmT(d);
@@ -6068,11 +6118,11 @@ function alarmOffWall(p, x, y, rx, ry) {
 function planPal(paper) {
   if (paper) return { lot: "#EEF3EA", street: "#DCDFE4", area: "#E6E2DA", house: "#D5DBE4", line: "#3B4452", grid: "#D8DEE4", text: "#5B6472",
     floor: "#F6F2EA", inBg: "#E3E6EA", shelf: "#B9A98F",
-    cov: "#4C6EF5", cam: "#1E3A5F", sel: "#F5B301", card: "#FFFFFF", lv: ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"] };
+    cov: "#4C6EF5", cam: "#1E3A5F", sel: "#F5B301", card: "#FFFFFF", glass: "#BFE0F7", lv: ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"] };
   const v = (k) => window.getComputedStyle(document.documentElement).getPropertyValue(k).trim();
   return { lot: v("--plan-lot"), street: v("--plan-street"), area: v("--plan-area"), house: v("--plan-house"), line: v("--plan-line"), grid: v("--line"),
     floor: v("--plan-floor"), inBg: v("--plan-in"), shelf: v("--plan-shelf"),
-    text: v("--muted"), cov: v("--work"), cam: v("--navy"), sel: v("--amber"), card: v("--card"), lv: [v("--danger"), v("--amber"), v("--work"), v("--personal")] };
+    text: v("--muted"), cov: v("--work"), cam: v("--navy"), sel: v("--amber"), card: v("--card"), glass: v("--plan-glass"), lv: [v("--danger"), v("--amber"), v("--work"), v("--personal")] };
 }
 // the drawing as SVG markup; o: { paper, clean, sel, wallStart, temp, bgUrl, mk }
 // a camera's cone as three polygons — face, person, activity — each cut where the view is blocked
@@ -6146,6 +6196,13 @@ function planSvgInner(p, o) {
       <line x1="${f(d.x - ux)}" y1="${f(d.y - uy)}" x2="${f(d.x + ux)}" y2="${f(d.y + uy)}" stroke="${on ? P.sel : under}" stroke-width="${on ? 0.3 : 0.26}"/>
       ${[-1, 1].map((k) => `<line x1="${f(d.x + k * ux - nx)}" y1="${f(d.y + k * uy - ny)}" x2="${f(d.x + k * ux + nx)}" y2="${f(d.y + k * uy + ny)}" stroke="${P.line}" stroke-width="0.06"/>`).join("")}</g>`);
   }
+  // windows: a pane of glass set in the wall, a thin line along its middle — the wall goes on behind it
+  for (const w of p.windows || []) {
+    const a = w.a || 0, on = o.sel === "win:" + w.id, len = w.w || 1.2;
+    out.push(`<g data-k="win:${w.id}" transform="translate(${f(w.x)} ${f(w.y)}) rotate(${f(a)})"><rect x="${f(-len / 2)}" y="-0.4" width="${f(len)}" height="0.8" fill="transparent"/>
+      <rect x="${f(-len / 2)}" y="-0.15" width="${f(len)}" height="0.3" fill="${P.glass}" stroke="${on ? P.sel : P.line}" stroke-width="${on ? 0.1 : 0.05}"/>
+      <line x1="${f(-len / 2)}" y1="0" x2="${f(len / 2)}" y2="0" stroke="${on ? P.sel : P.line}" stroke-width="0.035"/></g>`);
+  }
   if (!inside) out.push(`<rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" stroke="${P.text}" stroke-width="0.07" stroke-dasharray="0.4 0.25" pointer-events="none"/>`);
   if (o.temp) out.push(`<rect x="${f(o.temp.x)}" y="${f(o.temp.y)}" width="${f(o.temp.w)}" height="${f(o.temp.h)}" fill="${P.sel}" fill-opacity="0.2" stroke="${P.sel}" stroke-width="0.1"/>`);
   // the places that matter, ringed in the colour of how well they are seen
@@ -6166,21 +6223,20 @@ function planSvgInner(p, o) {
     if (on) out.push(`<line x1="${f(c.x)}" y1="${f(c.y)}" x2="${f(c.x + hx * 2.2)}" y2="${f(c.y + hy * 2.2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
       <g data-k="rot:${c.id}">${hit(c.x + hx * 2.2, c.y + hy * 2.2)}<circle cx="${f(c.x + hx * 2.2)}" cy="${f(c.y + hy * 2.2)}" r="0.45" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/></g>`);
   }
+  // the alarm's devices as badges about the same size on screen however far the plan is zoomed
+  // (o.devR, in metres); a contact a little smaller, sitting on its door or window
+  const devR = o.devR || 0.45;
   if (!(alDim && o.paper)) for (const d of p.alarm || []) {
     const t = alarmT(d), on = !clean && !alDim && o.sel === "al:" + d.id, a = (d.h || 0) * Math.PI / 180, hx = Math.cos(a), hy = Math.sin(a);
-    const label = alarmZoned(d) ? String(d.n ?? "") : t.code;
+    const R = devR * (alDim ? 0.5 : d.type === "contact" ? 0.88 : 1);
     const g = alDim ? 'opacity="0.3" pointer-events="none"' : `data-k="al:${d.id}"`;
-    if (d.type === "contact") {
-      const ca = (d.h || 0) % 180;
-      out.push(`<g ${g}>${alDim ? "" : hit(d.x, d.y)}<rect x="${f(d.x - 0.32)}" y="${f(d.y - 0.13)}" width="0.64" height="0.26" rx="0.06" fill="${t.col}" stroke="${on ? P.sel : "#fff"}" stroke-width="${on ? 0.1 : 0.05}" transform="rotate(${f(ca)} ${f(d.x)} ${f(d.y)})"/>
-        <text x="${f(d.x)}" y="${f(d.y - 0.32)}" font-size="0.42" text-anchor="middle" fill="${t.col}" font-family="IBM Plex Mono, monospace" font-weight="700" pointer-events="none">${esc(label)}</text></g>`);
-      continue;
-    }
-    out.push(`<g ${g}>${alDim ? "" : hit(d.x, d.y)}${t.cov === "fan" ? `<line x1="${f(d.x)}" y1="${f(d.y)}" x2="${f(d.x + hx * 0.6)}" y2="${f(d.y + hy * 0.6)}" stroke="${t.col}" stroke-width="0.12"/>` : ""}
-      <rect x="${f(d.x - 0.34)}" y="${f(d.y - 0.34)}" width="0.68" height="0.68" rx="${t.cov === "circle" ? 0.34 : 0.12}" fill="${on ? P.sel : t.col}" stroke="#fff" stroke-width="0.07"/>
-      <text x="${f(d.x)}" y="${f(d.y + (alarmZoned(d) ? 0.15 : 0.1))}" font-size="${alarmZoned(d) ? 0.42 : 0.26}" text-anchor="middle" fill="${on ? "#152A46" : "#fff"}" font-family="IBM Plex Mono, monospace" font-weight="700" pointer-events="none">${esc(label)}</text></g>`);
-    if (on && t.cov === "fan") out.push(`<line x1="${f(d.x)}" y1="${f(d.y)}" x2="${f(d.x + hx * 2)}" y2="${f(d.y + hy * 2)}" stroke="${P.sel}" stroke-width="0.07" pointer-events="none"/>
-      <g data-k="arot:${d.id}">${hit(d.x + hx * 2, d.y + hy * 2)}<circle cx="${f(d.x + hx * 2)}" cy="${f(d.y + hy * 2)}" r="0.42" fill="${P.sel}" stroke="${P.card}" stroke-width="0.08"/></g>`);
+    out.push(`<g ${g}>${alDim ? "" : hit(d.x, d.y)}${on ? `<circle cx="${f(d.x)}" cy="${f(d.y)}" r="${f(R * 1.5)}" fill="${P.sel}" fill-opacity="0.28" stroke="${P.sel}" stroke-width="${f(R * 0.14)}"/>` : ""}`
+      + alarmBadge(d.type, d.x, d.y, R, d.h || 0, { ring: on ? P.sel : "#fff", shadow: !alDim })
+      + (alarmZoned(d) && !alDim ? alarmTag(d, R) : "") + `</g>`);
+    // turning a detector: a yellow dot out in front of it
+    const hd = Math.max(2, R * 3.4);
+    if (on && t.cov === "fan") out.push(`<line x1="${f(d.x + hx * R * 1.62)}" y1="${f(d.y + hy * R * 1.62)}" x2="${f(d.x + hx * hd)}" y2="${f(d.y + hy * hd)}" stroke="${P.sel}" stroke-width="${f(Math.max(0.07, R * 0.12))}" stroke-dasharray="${f(R * 0.3)} ${f(R * 0.2)}" pointer-events="none"/>
+      <g data-k="arot:${d.id}">${hit(d.x + hx * hd, d.y + hy * hd)}<circle cx="${f(d.x + hx * hd)}" cy="${f(d.y + hy * hd)}" r="${f(Math.max(0.42, R * 0.55))}" fill="${P.sel}" stroke="${P.card}" stroke-width="${f(Math.max(0.08, R * 0.12))}"/></g>`);
   }
   if (!clean && o.sel && o.sel.startsWith("rect:")) {
     const r = (p.shapes || []).find((x) => "rect:" + x.id === o.sel);
@@ -6204,7 +6260,7 @@ function planBounds(p) {
 function planPng(p, bgUrl, px = 1400, layer = "cam") {
   const b = planBounds(p), hpx = Math.round((px * b.h) / b.w);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${hpx}" viewBox="${b.x} ${b.y} ${b.w} ${b.h}">${
-    planSvgInner(p, { paper: true, mk: true, bgUrl, marks: planStats(p).marks, layer })}</svg>`;
+    planSvgInner(p, { paper: true, mk: true, bgUrl, marks: planStats(p).marks, layer, devR: Math.max(0.45, (26 * b.w) / px) })}</svg>`;
   return new Promise((ok, no) => {
     const im = new Image();
     im.onload = () => {
@@ -6232,13 +6288,12 @@ async function planAlarmHtml(row, bgUrl) {
   const p = { ...(row.plan || planBlank()), night: false }, A = p.alarm || [], png = await planPng(p, bgUrl, 1400, "alarm");
   const c = state.clients.find((x) => x.id === row.client_id), o = state.offers.find((x) => x.id === row.offer_id);
   const types = ALARM_PICK.filter((ty) => A.some((d) => d.type === ty));
-  const dot = (col) => `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${col};vertical-align:-1px;margin-right:5px"></span>`;
   const zl = A.filter(alarmZoned).sort((a, b) => (a.n || 0) - (b.n || 0)), rest = A.filter((d) => !alarmZoned(d));
   const parts = zl.some((d) => d.part);
   return `<div class="pv-plain"><b>План на алармот${row.title ? " — " + esc(row.title) : ""}</b>
       <span>${[c ? esc(c.name) : "", o ? "Понуда " + esc(o.number) : "", dmy(todayStr())].filter(Boolean).join(" · ")}</span></div>
     <img class="pv-planimg" src="${png}" alt="План на алармот">
-    <div class="pv-legend">${types.map((ty) => `${dot(ALARM_TYPES[ty].col)}${ALARM_TYPES[ty].mk} × ${A.filter((d) => d.type === ty).length}`).join(" &nbsp; ")}</div>
+    <div class="pv-legend">${types.map((ty) => `<span class="nw">${alarmIcon(ty, 15)}${ALARM_TYPES[ty].mk} × ${A.filter((d) => d.type === ty).length}</span>`).join(" &nbsp; ")}</div>
     ${zl.length ? `<table class="rp-tbl"><thead><tr><th>Зона</th><th>Каде</th><th>Уред</th><th>Тип на зона</th>${parts ? "<th>Партиција</th>" : ""}</tr></thead>
       <tbody>${zl.map((d) => `<tr><td>${d.n ?? ""}</td><td>${esc(d.name || "")}</td><td>${alarmName(d.type, true)}${d.model ? " — " + esc(d.model) : ""}</td><td>${d.zone ? ALARM_ZONES[d.zone][1] : ""}</td>${parts ? `<td>${esc(d.part || "")}</td>` : ""}</tr>`).join("")}</tbody></table>` : ""}
     ${rest.length ? `<div class="pv-keys"><b>Сирени, тастатура и централа:</b> ${rest.map((d) => `${alarmName(d.type, true)}${d.name ? " — " + esc(d.name) : ""}`).join(" · ")}</div>` : ""}
@@ -6354,7 +6409,7 @@ function planClient(id) {
 }
 function startPlanner(row, bgUrl) {
   const p = JSON.parse(JSON.stringify(row.plan && row.plan.w ? row.plan : planBlank()));
-  for (const k of ["shapes", "walls", "marks", "cams", "doors", "alarm"]) p[k] = p[k] || [];
+  for (const k of ["shapes", "walls", "marks", "cams", "doors", "windows", "alarm"]) p[k] = p[k] || [];
   pe = { id: row.id, row, p, bgUrl, bgDirty: false, sel: null, tool: "move", hist: [], client: false, wallStart: null, scalePts: null,
     trayArticle: null, view: null, drag: null, ptrs: new Map(), typing: null, photos: new Map(), subOpen: false,
     layer: p.alarm.length && !p.cams.length ? "alarm" : "cam", alarmType: "pir" };
@@ -6399,20 +6454,20 @@ function startPlanner(row, bgUrl) {
   planFit();
   planTool("move");
 }
-// the tools: a house and a gate outside; rooms, doors and shelves inside
+// the tools: a house and a gate outside; rooms, doors, windows and shelves inside
 const planToolList = () => {
   const dev = pe.layer === "alarm" ? ["device", T("Device", "Уред")] : ["camera", T("Camera", "Камера")];
   if (pe.p.locked) return [["move", T("Move", "Помести")], dev];
   return planInside(pe.p)
     ? [["move", T("Move", "Помести")], dev, ["room", T("Room", "Просторија")], ["wall", T("Wall", "Ѕид")],
-       ["door", T("Door", "Врата")], ["shelf", T("Shelf", "Полица")], ["mark", T("Place", "Место")]]
+       ["door", T("Door", "Врата")], ["window", T("Window", "Прозорец")], ["shelf", T("Shelf", "Полица")], ["mark", T("Place", "Место")]]
     : [["move", T("Move", "Помести")], dev, ["house", T("House", "Куќа")], ["room", T("Room", "Просторија")],
-       ["wall", T("Wall", "Ѕид")], ["door", T("Gate, door", "Порта, врата")], ["area", T("Area", "Простор")], ["mark", T("Place", "Место")]];
+       ["wall", T("Wall", "Ѕид")], ["door", T("Gate, door", "Порта, врата")], ["window", T("Window", "Прозорец")], ["area", T("Area", "Простор")], ["mark", T("Place", "Место")]];
 };
-// Locked: the house, rooms, walls, doors, areas, shelves and places stay put — a finger on
+// Locked: the house, rooms, walls, doors, windows, areas, shelves and places stay put — a finger on
 // them moves the view — and only the cameras and the alarm's devices move. Kept with the plan.
 const PLAN_LOCK_SVG = (open) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:5px" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="${open ? "M8 11V7a4 4 0 0 1 7.5-2" : "M8 11V7a4 4 0 0 1 8 0v4"}"/></svg>`;
-const planSelLocked = (sel) => /^(rect|wall|door|mark):/.test(String(sel || ""));
+const planSelLocked = (sel) => /^(rect|wall|door|win|mark):/.test(String(sel || ""));
 function planLock() {
   if (!pe) return;
   pe.p.locked = !pe.p.locked;
@@ -6442,7 +6497,7 @@ function planKind(k) {
   if ((p.kind || "out") === k) return;
   planRemember();
   const fresh = !p.cams.length && !p.walls.length && !p.marks.length && p.shapes.length <= 1 && (!p.shapes[0] || p.shapes[0].id === "s1")
-    && (p.doors || []).every((d) => d.id === "d1") && !(p.alarm || []).length;
+    && (p.doors || []).every((d) => d.id === "d1") && !(p.windows || []).length && !(p.alarm || []).length;
   if (fresh) pe.p = { ...(k === "in" ? planBlankIn() : planBlank()), bg: p.bg, night: p.night };
   else { p.kind = k; if (k === "in") p.street = "none"; }
   pe.sel = null;
@@ -6454,11 +6509,12 @@ const planCam = (id) => pe.p.cams.find((c) => String(c.id) === String(id));
 const planShape = (id) => pe.p.shapes.find((r) => String(r.id) === String(id));
 const planMark = (id) => pe.p.marks.find((m) => String(m.id) === String(id));
 const planDoor = (id) => (pe.p.doors || []).find((d) => String(d.id) === String(id));
+const planWin = (id) => (pe.p.windows || []).find((w) => String(w.id) === String(id));
 const planAlarm = (id) => (pe.p.alarm || []).find((d) => String(d.id) === String(id));
-// a contact goes on the nearest door, else on a wall (a window), else where it was put
+// a contact goes on the nearest door or window, else on a wall, else where it was put
 function alarmOnDoor(p, x, y) {
   let best = null;
-  for (const dr of p.doors || []) { const k = Math.hypot(dr.x - x, dr.y - y); if (k <= 1.2 && (!best || k < best.k)) best = { k, dr }; }
+  for (const dr of (p.doors || []).concat(p.windows || [])) { const k = Math.hypot(dr.x - x, dr.y - y); if (k <= 1.2 && (!best || k < best.k)) best = { k, dr }; }
   if (best) return [best.dr.x, best.dr.y, best.dr.a || 0];
   const q = planNearSeg(p, x, y, 0.8);
   return q ? [q.x, q.y, Math.round(q.a)] : [planSnap(x), planSnap(y), 0];
@@ -6508,6 +6564,7 @@ function planTool(t) {
     room: T("Drag across the plan to draw a room — its walls block the view, a camera inside sees all of it", "Повлечи преку планот за просторија — ѕидовите го запираат погледот, камера внатре ја гледа цела"),
     shelf: T("Drag across the plan to draw a shelf or cabinet (it blocks the view)", "Повлечи преку планот за полица или ормар (го запира погледот)"),
     door: T("Tap on a wall where the door or gate is — the view goes through it", "Допри на ѕид каде е вратата или портата — погледот минува низ неа"),
+    window: T("Tap on a wall of the house or a room where the window is", "Допри на ѕид од куќата или просторијата каде е прозорецот"),
     wall: T("Tap where the wall starts, then where it ends", "Допри каде почнува ѕидот, па каде завршува"),
     camera: T("Tap where the camera hangs", "Допри каде виси камерата"),
     device: T("Tap where it goes: ", "Допри каде оди: ") + alarmName(pe.alarmType).toLowerCase() + (pe.alarmType === "contact" ? T(" — on a door or window", " — на врата или прозорец") : ""),
@@ -6563,6 +6620,13 @@ function planDown(e) {
     const d = { id: planNewId("d"), x: q.x, y: q.y, a: Math.round(q.a), w: !planInside(p) && q.kind === "wall" ? 3 : 0.9 };
     p.doors.push(d); pe.sel = "door:" + d.id; planTool("move"); return;
   }
+  if (t === "window") {
+    const q = planNearSeg(p, x, y, 1);
+    if (!q) { toast(T("Tap on a wall — the window goes in it", "Допри на ѕид — прозорецот оди во него")); return; }
+    planRemember();
+    const w = { id: planNewId("w"), x: q.x, y: q.y, a: Math.round(q.a), w: 1.2 };
+    p.windows.push(w); pe.sel = "win:" + w.id; planTool("move"); return;
+  }
   if (t === "wall") {
     const q = [planSnap(x), planSnap(y)];
     if (!pe.wallStart) { pe.wallStart = q; $("pl-hint").textContent = T("Now tap where it ends · tap + Wall again to cancel", "Сега допри каде завршува · допри + Ѕид пак за откажи"); }
@@ -6606,7 +6670,7 @@ function planDown(e) {
   }
   // moving things — on a locked drawing, only cameras and devices; the rest is like empty plan
   let [kind, id, end] = k.split(":");
-  if (pe.p.locked && /^(rect|rsz|wall|wend|mark|door)$/.test(kind)) kind = "";
+  if (pe.p.locked && /^(rect|rsz|wall|wend|mark|door|win)$/.test(kind)) kind = "";
   if (kind === "cam") { planRemember(); pe.sel = "cam:" + id; pe.drag = { mode: "cam", id }; }
   else if (kind === "rot") { planRemember(); pe.drag = { mode: "rot", id }; }
   else if (kind === "rect") { planRemember(); const r = planShape(id); pe.sel = "rect:" + id; pe.drag = { mode: "rect", id, dx: x - r.x, dy: y - r.y }; }
@@ -6615,6 +6679,7 @@ function planDown(e) {
   else if (kind === "wend") { planRemember(); pe.drag = { mode: "wend", i: Number(id), e: Number(end) }; }
   else if (kind === "mark") { planRemember(); pe.sel = "mark:" + id; pe.drag = { mode: "mark", id }; }
   else if (kind === "door") { planRemember(); pe.sel = "door:" + id; pe.drag = { mode: "door", id }; }
+  else if (kind === "win") { planRemember(); pe.sel = "win:" + id; pe.drag = { mode: "win", id }; }
   else if (kind === "al") { planRemember(); pe.sel = "al:" + id; pe.drag = { mode: "al", id }; }
   else if (kind === "arot") { planRemember(); pe.drag = { mode: "arot", id }; }
   else { pe.sel = null; pe.drag = { mode: "pan", sx: e.clientX, sy: e.clientY, v0: { ...pe.view } }; }
@@ -6647,9 +6712,9 @@ function planMove(e) {
       else [dv.x, dv.y] = alarmOffWall(p, planSnap(x), planSnap(y), x, y);
     }
     else if (d.mode === "arot") { const dv = planAlarm(d.id); dv.h = Math.round(Math.atan2(y - dv.y, x - dv.x) * 180 / Math.PI / 5) * 5; }
-    else if (d.mode === "door") {
-      // a door slides along the walls; off them it waits where the finger is
-      const dr = planDoor(d.id), q = planNearSeg({ ...p, doors: [] }, x, y, 1.2);
+    else if (d.mode === "door" || d.mode === "win") {
+      // a door or a window slides along the walls; off them it waits where the finger is
+      const dr = d.mode === "door" ? planDoor(d.id) : planWin(d.id), q = planNearSeg({ ...p, doors: [] }, x, y, 1.2);
       if (q) Object.assign(dr, { x: q.x, y: q.y, a: Math.round(q.a) }); else Object.assign(dr, { x, y });
     }
     else if (d.mode === "draw") { d.x1 = planSnap(x); d.y1 = planSnap(y); }
@@ -6662,7 +6727,7 @@ function planUp(e) {
   const d = pe.drag;
   if (d && d.mode === "pinch" && pe.ptrs.size) return;
   pe.drag = null;
-  if (d && /^(cam|rot|rect|rsz|wend|mark|door|al|arot)$/.test(d.mode) && pe.hist.length && JSON.stringify(JSON.parse(pe.hist[pe.hist.length - 1]).p) === JSON.stringify(pe.p)) {
+  if (d && /^(cam|rot|rect|rsz|wend|mark|door|win|al|arot)$/.test(d.mode) && pe.hist.length && JSON.stringify(JSON.parse(pe.hist[pe.hist.length - 1]).p) === JSON.stringify(pe.p)) {
     pe.hist.pop(); $("pl-undo").disabled = !pe.hist.length;
   }
   if (d && d.mode === "draw" && d.x1 !== undefined) {
@@ -6686,7 +6751,9 @@ function planRender(light) {
     ? { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) } : null;
   // about 18 pixels of finger around a camera or a device, however far in or out the plan is zoomed
   const mpp = Math.max(v.w / (svg.clientWidth || 360), v.h / (svg.clientHeight || 300)), hitR = Math.max(0.55, Math.min(4, 18 * mpp));
-  svg.innerHTML = planSvgInner(pe.p, { clean: pe.client, sel: pe.sel, wallStart: pe.wallStart, temp, bgUrl: pe.bgUrl, marks: st.marks, scalePts: pe.scalePts, layer: pe.layer, hitR });
+  // an alarm device about 30 pixels across, never smaller than 0.6 m when zoomed far in
+  const devR = Math.max(0.3, Math.min(3, 15 * mpp));
+  svg.innerHTML = planSvgInner(pe.p, { clean: pe.client, sel: pe.sel, wallStart: pe.wallStart, temp, bgUrl: pe.bgUrl, marks: st.marks, scalePts: pe.scalePts, layer: pe.layer, hitR, devR });
   const al = pe.layer === "alarm" ? alarmChecks(pe.p) : null, alRooms = al ? al.filter((c) => /%/.test(c.text)) : [];
   const tiles = al ? [[T("Zones", "Зони"), pe.p.alarm.filter(alarmZoned).length, "pl-zones"], [T("Devices", "Уреди"), pe.p.alarm.length, "pl-devs"],
     alRooms.length ? [T("Rooms covered", "Покриени простории"), `${alRooms.filter((c) => c.ok).length}/${alRooms.length}`, "pl-arooms"] : null,
@@ -6724,7 +6791,7 @@ function planTray() {
     el.innerHTML = `${left.length ? `<div class="pl-trayrow"><span class="muted nw">${T("On the offer", "Во понудата")}:</span>${left.map(({ a, n }) =>
         `<button class="chip ${pe.trayArticle === a.id ? "on" : ""}" onclick="planAlarmArticle('${a.id}')">${esc(a.name)} × ${n}</button>`).join("")}</div>` : ""}
       <div class="pl-trayrow">${ALARM_PICK.map((ty) => `<button class="chip sm ${dev && pe.alarmType === ty ? "on" : ""}" onclick="planAlarmPick('${ty}')">
-        <span class="al-dot" style="background:${ALARM_TYPES[ty].col}"></span>${alarmName(ty)}</button>`).join("")}</div>`;
+        ${alarmIcon(ty)}${alarmName(ty)}</button>`).join("")}</div>`;
     return;
   }
   const want = new Map();
@@ -6774,7 +6841,7 @@ function planPanel(st) {
     const r = planShape(id);
     const kinds = (planInside(p) ? PLAN_KINDS_IN : PLAN_KINDS_OUT).concat(r.kind).filter((x, i, a) => a.indexOf(x) === i);
     const about = { house: T("A house blocks what the cameras see; a camera inside it sees nothing outside but through a door.", "Куќата го запира погледот; камера внатре гледа надвор само низ врата."),
-      room: T("A room's walls block the view; a camera inside sees all of it. Add doors with + Door.", "Ѕидовите на просторијата го запираат погледот; камера внатре ја гледа цела. Додај врати со + Врата."),
+      room: T("A room's walls block the view; a camera inside sees all of it. Add doors with + Door and windows with + Window.", "Ѕидовите на просторијата го запираат погледот; камера внатре ја гледа цела. Додај врати со + Врата и прозорци со + Прозорец."),
       shelf: T("A shelf or cabinet blocks the view behind it.", "Полица или ормар го запира погледот зад себе.") }[r.kind]
       || T("An area is marked on the plan; cameras see across it.", "Просторот е означен; камерите гледаат преку него.");
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(r.label || PLAN_KINDS[r.kind][langMk() ? 1 : 0])} · ${planM(r.w)} × ${planM(r.h)} m</b>${rm}</div>
@@ -6812,7 +6879,7 @@ function planPanel(st) {
       keypad: T("By the main door, inside, on the way in.", "Покрај главната врата, внатре, на патот при влегување."),
       panel: T("Out of sight, in a cupboard or storage room.", "Скриена, во ормар или магацин.") }[d.type] || "";
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${alarmName(d.type)}${zoned ? ` · ${T("zone", "зона")} ${d.n ?? "–"}` : ""}${d.model ? ` <span class="muted" style="font-weight:400">· ${esc(d.model)}</span>` : ""}</b>${rm}</div>
-      <div class="chips wrap" style="margin-top:6px">${ALARM_PICK.map((ty) => `<button class="chip sm ${d.type === ty ? "on" : ""}" onclick="planAlarmSet('type','${ty}')"><span class="al-dot" style="background:${ALARM_TYPES[ty].col}"></span>${alarmName(ty)}</button>`).join("")}</div>
+      <div class="chips wrap" style="margin-top:6px">${ALARM_PICK.map((ty) => `<button class="chip sm ${d.type === ty ? "on" : ""}" onclick="planAlarmSet('type','${ty}')">${alarmIcon(ty)}${alarmName(ty)}</button>`).join("")}</div>
       <label>${T("Where", "Каде")}</label><input id="pl-aname" value="${esc(d.name || "")}" oninput="planAlarmSet('name',this.value)" placeholder="${T("e.g. Hall, Front door", "пр. Ходник, Влезна врата")}">
       ${zoned ? `<div class="grid2"><div><label>${T("Zone number", "Број на зона")}</label><input type="number" inputmode="numeric" min="1" max="999" value="${d.n ?? ""}" oninput="planAlarmNum('n',parseInt(this.value,10))"></div>
         <div><label>${T("Partition (opt.)", "Партиција (опц.)")}</label><input value="${esc(d.part || "")}" oninput="planAlarmSet('part',this.value)" placeholder="${T("e.g. House", "пр. Куќа")}"></div></div>
@@ -6828,6 +6895,14 @@ function planPanel(st) {
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${d.w >= 2.5 ? T("Gate", "Порта") : T("Door", "Врата")} · ${planM(d.w)} m</b>${rm}</div>
       <div class="chips">${widths.concat(d.w).filter((x, i, a) => a.indexOf(x) === i).map((w) => `<button class="chip ${d.w === w ? "on" : ""}" onclick="planDoorW(${w})">${planM(w)} m</button>`).join("")}</div>
       <p class="muted" style="font-size:12.5px;margin:6px 0 0">${T("An opening in the wall: the cameras see through it. Drag it along the wall to move it.", "Отвор во ѕидот: камерите гледаат низ него. Повлечи го по ѕидот за да го поместиш.")}</p>`;
+    return;
+  }
+  if (kind === "win" && planWin(id)) {
+    const w = planWin(id), widths = [0.6, 0.9, 1.2, 1.5, 2, 3];
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${T("Window", "Прозорец")} · ${planM(w.w)} m</b>${rm}</div>
+      <div class="chips">${widths.concat(w.w).filter((x, i, a) => a.indexOf(x) === i).map((v) => `<button class="chip ${w.w === v ? "on" : ""}" onclick="planWinW(${v})">${planM(v)} m</button>`).join("")}</div>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 0">${T("Glass in the wall: the plan counts it as wall, as a motion detector does not see through glass. On the alarm, a contact goes on it, or a glass-break detector near it. Drag it along the wall to move it.",
+        "Стакло во ѕидот: планот го смета за ѕид, бидејќи детекторот на движење не гледа низ стакло. За алармот, на него оди контакт, или детектор за кршење стакло во близина. Повлечи го по ѕидот за да го поместиш.")}</p>`;
     return;
   }
   if (kind === "mark" && planMark(id)) {
@@ -6847,12 +6922,12 @@ function planPanel(st) {
     const zl = A.filter(alarmZoned).sort((a, b) => (a.n || 0) - (b.n || 0)).concat(A.filter((d) => !alarmZoned(d)));
     alarmHead = A.length ? `<div class="sec" style="margin-top:4px">${T("Zones", "Зони")}</div>
       ${zl.map((d) => `<div class="mov tapp" role="button" tabindex="0" onclick="planAlarmSel('${d.id}')">
-        <span><span class="al-dot" style="background:${alarmT(d).col}"></span><b class="mono">${alarmZoned(d) ? d.n : "–"}</b> ${esc(d.name || alarmName(d.type))}${d.name ? ` <span class="muted">· ${alarmName(d.type)}</span>` : ""}</span>
+        <span>${alarmIcon(d.type, 20)}<b class="mono">${alarmZoned(d) ? d.n : "–"}</b> ${esc(d.name || alarmName(d.type))}${d.name ? ` <span class="muted">· ${alarmName(d.type)}</span>` : ""}</span>
         <span class="muted nw">${d.zone ? T(ALARM_ZONES[d.zone][0], ALARM_ZONES[d.zone][1]) : ""}${d.part ? " · " + esc(d.part) : ""}</span></div>`).join("")}
       <div class="sec">${T("Check", "Провери")}</div>
       ${checks.map((c) => `<div class="mov"><span class="${c.ok ? "al-ok" : "al-warn"}">${c.ok ? "✓" : "!"}</span><span style="flex:1;margin-left:8px">${esc(c.text)}</span></div>`).join("")}`
-      : `<div class="card"><b>${T("The alarm on this plan", "Алармот на овој план")}</b><p class="muted" style="margin-top:4px">${T("Pick a device in the row above the drawing and tap where it goes. Contacts go on the doors you have drawn; rooms show how much a motion detector covers.",
-        "Избери уред во редот над цртежот и допри каде оди. Контактите одат на нацртаните врати; просториите покажуваат колку ги покрива детекторот.")}</p></div>`;
+      : `<div class="card"><b>${T("The alarm on this plan", "Алармот на овој план")}</b><p class="muted" style="margin-top:4px">${T("Pick a device in the row above the drawing and tap where it goes. Contacts go on the doors and windows you have drawn; rooms show how much a motion detector covers.",
+        "Избери уред во редот над цртежот и допри каде оди. Контактите одат на нацртаните врати и прозорци; просториите покажуваат колку ги покрива детекторот.")}</p></div>`;
   }
   el.innerHTML = `${alarmHead}<label>${T("This plan is", "Овој план е")}</label>
     <div class="chips"><button class="chip ${inside ? "" : "on"}" onclick="planKind('out')">${T("Outside — house and yard", "Надвор — куќа и двор")}</button>
@@ -6932,6 +7007,7 @@ function planAlarmNum(k, v) {
   planRender(typing);
 }
 function planDoorW(w) { const d = planDoor(String(pe.sel).split(":")[1]); if (!d) return; planRemember(); d.w = w; planRender(); }
+function planWinW(w) { const d = planWin(String(pe.sel).split(":")[1]); if (!d) return; planRemember(); d.w = w; planRender(); }
 function planInOffer() { pe.row.in_offer = pe.row.in_offer === false; sheetDirty = true; planPanel(planStats(pe.p)); }
 function planSet0(k, v) { planRemember(); pe.p[k] = v; planFit(); }
 function planPlot(k, v) {
@@ -6951,6 +7027,7 @@ function planRemoveSel() {
   if (kind === "wall") p.walls.splice(Number(id), 1);
   if (kind === "mark") p.marks = p.marks.filter((m) => String(m.id) !== id);
   if (kind === "door") p.doors = (p.doors || []).filter((d) => String(d.id) !== id);
+  if (kind === "win") p.windows = (p.windows || []).filter((w) => String(w.id) !== id);
   if (kind === "al") p.alarm = (p.alarm || []).filter((d) => String(d.id) !== id);
   pe.sel = null;
   planRender();
@@ -7558,6 +7635,15 @@ function p3Scene() {
     const w = new THREE.Mesh(new THREE.BoxGeometry(len, h, indoor ? 0.14 : 0.2), indoor ? inner : fence);
     w.position.set((ax + bx) / 2, h / 2, (ay + by) / 2); w.rotation.y = -Math.atan2(by - ay, bx - ax);
     scene.add(w);
+  }
+  // windows: glass in the wall from the sill up, standing a little proud of it so it shows
+  const glass = new THREE.MeshBasicMaterial({ color: night ? 0x4F86B0 : 0xA9D4F2, transparent: true, opacity: 0.8 });
+  for (const w of p.windows || []) {
+    const q = planNearSeg(p, w.x, w.y, 0.3), indoor = inside || !q || q.kind !== "wall" || planWhere(p, w.x, w.y) !== "yard";
+    const top = Math.min(2.1, (indoor ? rh : wh) - 0.15), sill = Math.max(0.2, Math.min(0.9, top - 0.4));
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w.w || 1.2, top - sill, indoor ? 0.2 : 0.26), glass);
+    m.position.set(w.x, (top + sill) / 2, w.y); m.rotation.y = -(w.a || 0) * Math.PI / 180; scene.add(m);
+    const ed = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edge); ed.position.copy(m.position); ed.rotation.copy(m.rotation); scene.add(ed);
   }
   for (const r of p.shapes || []) if (r.kind === "shelf") {
     const H = r.hgt ?? 2, box = new THREE.Mesh(new THREE.BoxGeometry(r.w, H, r.h), lam(0x9C8669));
