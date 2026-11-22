@@ -20,6 +20,7 @@
   --net-bg:#FFF4D6; --net-ink:#7A5500;
   --surface:#FFFFFF; --on-dark:#FFFFFF;
   --plan-lot:#EEF3EA; --plan-street:#DCDFE4; --plan-area:#E6E2DA; --plan-house:#D5DBE4; --plan-line:#3B4452;
+  --plan-floor:#F6F2EA; --plan-in:#E3E6EA; --plan-shelf:#B9A98F;
   --r:14px; --pad:16px;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
   --cond:'IBM Plex Sans Condensed',var(--sans);
@@ -648,13 +649,15 @@ a.btn{text-decoration:none;display:block;text-align:center}
   /* Elaks's orange a shade lighter, to stand out on a dark card */
   :root:not([data-theme="light"]){--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
     --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;
-    --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;color-scheme:dark}
+    --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;
+    --plan-floor:#2A2F37;--plan-in:#16191E;--plan-shelf:#6B5E4E;color-scheme:dark}
   :root:not([data-theme="light"]) .btn.ghost{background:var(--card);color:var(--ink)}
   :root:not([data-theme="light"]) .tick{border-color:#39424F}
 }
 :root[data-theme="dark"]{--paper:#12161C;--card:#1A202A;--ink:#E7EAF0;--line:#2A3242;--muted:#95A1B5;--danger-bg:#3A1B22;--surface:#1A202A;
   --elaks:#F08E46;--hb-miss:#3A4456;--net-bg:#33290F;--net-ink:#F2C94C;
-    --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;color-scheme:dark}
+    --plan-lot:#18211D;--plan-street:#272D36;--plan-area:#2A2925;--plan-house:#2E3846;--plan-line:#B7C1CF;
+    --plan-floor:#2A2F37;--plan-in:#16191E;--plan-shelf:#6B5E4E;color-scheme:dark}
 :root[data-theme="dark"] .btn.ghost{background:var(--card);color:var(--ink)}
 :root[data-theme="dark"] .tick{border-color:#39424F}
 :root[data-theme="light"]{color-scheme:light}
@@ -1627,7 +1630,7 @@ const askText = (msg, value) => dialog({ msg, input: value ?? "" });
 // The app sits open in the background for days, so a deploy never reaches it
 // until the page is really reloaded — switching to it from recents just resumes
 // the old page. Check whenever it comes back to the foreground.
-const BUILD = "20261122-150000";
+const BUILD = "20261122-180000";
 let lastBuildCheck = Date.now();
 async function checkForUpdate() {
   if (Date.now() - lastBuildCheck < 60000) return;
@@ -2440,6 +2443,13 @@ async function noteGo(at) {
 
 /* ---------- what is new, once, after an update ---------- */
 const WHATS_NEW = [
+  { build: "20261122-180000", en: [
+    "Camera plans inside: choose Inside for a shop, an office or a flat — draw rooms, doors and shelves. Room walls stop the view, doors let it through, and the plan shows how much of the rooms is seen.",
+    "A house with cameras inside and out: draw its rooms in it with + Room. In 3D, turn the roof off to look into the rooms.",
+  ], mk: [
+    "Планови и внатре: избери Внатре за продавница, канцеларија или стан — нацртај простории, врати и полици. Ѕидовите го запираат погледот, вратите го пуштаат, а планот покажува колку од просториите се гледа.",
+    "Куќа со камери и внатре и надвор: нацртај ги просториите во неа со + Просторија. Во 3D исклучи го покривот за да ги видиш просториите.",
+  ] },
   { build: "20261122-150000", en: [
     "Camera plans: see what a camera will see on a photo of the place — the lens's frame and how far a face, a person and activity are seen, laid on the ground. Tap a camera on the plan, then View on a photo.",
     "3D: the plan as a model with the houses, walls and the cameras' shades. Look through any camera and drag to aim it.",
@@ -5782,8 +5792,18 @@ const PLAN_OP = [0.6, 0.34, 0.15];
 const PLAN_LV_MK = ["не се гледа", "се гледа што се случува", "се препознава кој е", "лицето се распознава"];
 const planLvEn = (l) => [T("not seen", "не се гледа"), T("activity seen", "се гледа што се случува"),
   T("person recognised", "се препознава кој е"), T("face readable", "лицето се распознава")][l];
-const PLAN_KINDS = { house: ["House", "Куќа"], porch: ["Porch", "Трем"], parking: ["Parking", "Паркинг"], garden: ["Garden", "Двор"], other: ["Area", "Простор"] };
+const PLAN_KINDS = { house: ["House", "Куќа"], porch: ["Porch", "Трем"], parking: ["Parking", "Паркинг"], garden: ["Garden", "Двор"], other: ["Area", "Простор"],
+  room: ["Room", "Просторија"], shelf: ["Shelf, cabinet", "Полица, ормар"] };
+// what a plan of the outside, and one of the inside, offers to draw
+const PLAN_KINDS_OUT = ["house", "room", "porch", "parking", "garden", "other"];
+const PLAN_KINDS_IN = ["room", "shelf", "other"];
 const PLAN_MARKS = [["Gate", "Порта"], ["Front door", "Влезна врата"], ["Back door", "Задна врата"], ["Parking", "Паркинг"], ["Garage", "Гаража"], ["Window", "Прозорец"]];
+const PLAN_MARKS_IN = [["Entrance", "Влез"], ["Cash desk", "Каса"], ["Safe", "Сеф"], ["Stairs", "Скали"], ["Window", "Прозорец"], ["Back door", "Задна врата"]];
+const PLAN_ROOMS = [["Living room", "Дневна"], ["Kitchen", "Кујна"], ["Bedroom", "Спална"], ["Hall", "Ходник"], ["Entrance", "Влез"],
+  ["Office", "Канцеларија"], ["Shop", "Продавница"], ["Storage", "Магацин"], ["Garage", "Гаража"]];
+const planInside = (p) => p.kind === "in";
+// a house, a room or a shelf: its outline stops the view
+const planBlocks = (k) => k === "house" || k === "room" || k === "shelf";
 const planLensOf = (s) => { const m = String(s || "").match(/(\d{1,2}(?:[.,]\d)?)\s*mm\b/i); const v = m ? parseFloat(m[1].replace(",", ".")) : null; return v && PLAN_LENS[v] ? v : 2.8; };
 const planMpOf = (m) => m >= 7 ? 8 : m >= 5 ? 5 : m >= 3 ? 4 : m ? 2 : 4;
 const planReach = (c, night) => PLAN_PPM.map((p) => {
@@ -5793,17 +5813,60 @@ const planReach = (c, night) => PLAN_PPM.map((p) => {
 const planCamsN = (n, mk) => `${n} ${n === 1 ? (mk ? "камера" : T("camera", "камера")) : (mk ? "камери" : T("cameras", "камери"))}`;
 const planM = (d) => (Math.round(d * 10) / 10).toLocaleString("en-US");
 function planBlank() {
-  return { v: 1, w: 24, h: 18, street: "bottom", night: false,
-    shapes: [{ id: "s1", kind: "house", x: 7, y: 5, w: 10, h: 8, label: "" }], walls: [], marks: [], cams: [], bg: null };
+  return { v: 1, kind: "out", w: 24, h: 18, street: "bottom", night: false,
+    shapes: [{ id: "s1", kind: "house", x: 7, y: 5, w: 10, h: 8, label: "" }], walls: [], marks: [], cams: [], doors: [], bg: null };
 }
-// what blocks the view: the walls drawn, and the outline of every house rectangle
-function planSegs(p) {
-  const s = (p.walls || []).slice();
-  for (const r of p.shapes || []) if (r.kind === "house") {
+// the inside: one room with its entrance, to draw the rest from
+function planBlankIn() {
+  return { v: 1, kind: "in", w: 12, h: 9, street: "none", night: false,
+    shapes: [{ id: "s1", kind: "room", x: 0, y: 0, w: 12, h: 9, label: "" }], walls: [], marks: [], cams: [],
+    doors: [{ id: "d1", x: 6, y: 9, w: 0.9, a: 0 }], bg: null };
+}
+// What blocks the view: the walls drawn, and the outline of every house, room and shelf,
+// less the doors in them. Each piece says what it belongs to, for the 3D view.
+function planSegsTagged(p) {
+  const out = [];
+  for (const r of p.shapes || []) if (planBlocks(r.kind)) {
     const a = [r.x, r.y], b = [r.x + r.w, r.y], c = [r.x + r.w, r.y + r.h], d = [r.x, r.y + r.h];
-    s.push([a, b], [b, c], [c, d], [d, a]);
+    for (const [s0, e0] of [[a, b], [b, c], [c, d], [d, a]]) out.push({ s: s0, e: e0, kind: r.kind, r });
   }
-  return s;
+  for (const w of p.walls || []) out.push({ s: w[0], e: w[1], kind: "wall" });
+  return planDoorCut(out, p.doors);
+}
+function planSegs(p) { return planSegsTagged(p).map((g) => [g.s, g.e]); }
+// a door or a gate is a gap in whatever wall it sits on — in two rooms' shared wall, in both
+function planDoorCut(segs, doors) {
+  if (!doors || !doors.length) return segs;
+  const out = [];
+  for (const g of segs) {
+    const [ax, ay] = g.s, [bx, by] = g.e, len = Math.hypot(bx - ax, by - ay);
+    if (len < 0.01) continue;
+    const at = (t) => [ax + t * (bx - ax), ay + t * (by - ay)], gaps = [];
+    for (const d of doors) {
+      const t = ((d.x - ax) * (bx - ax) + (d.y - ay) * (by - ay)) / (len * len), [px, py] = at(t);
+      if (t < -0.05 || t > 1.05 || Math.hypot(d.x - px, d.y - py) > 0.2) continue;
+      const half = (d.w || 0.9) / 2 / len;
+      gaps.push([t - half, t + half]);
+    }
+    if (!gaps.length) { out.push(g); continue; }
+    gaps.sort((u, v) => u[0] - v[0]);
+    let t0 = 0;
+    for (const [g0, g1] of gaps) { if (g0 > t0 + 1e-3) out.push({ ...g, s: at(t0), e: at(Math.min(1, g0)) }); t0 = Math.max(t0, g1); }
+    if (t0 < 1 - 1e-3) out.push({ ...g, s: at(t0), e: [bx, by] });
+  }
+  return out;
+}
+// the nearest wall or outline to a point, and where on it — for a door
+function planNearSeg(p, x, y, max) {
+  let best = null;
+  for (const g of planSegsTagged({ ...p, doors: [] })) {
+    const [ax, ay] = g.s, [bx, by] = g.e, l2 = (bx - ax) ** 2 + (by - ay) ** 2;
+    if (l2 < 1e-6) continue;
+    const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / l2)), px = ax + t * (bx - ax), py = ay + t * (by - ay);
+    const d = Math.hypot(x - px, y - py);
+    if (d <= max && (!best || d < best.d)) best = { d, x: px, y: py, a: Math.atan2(by - ay, bx - ax) * 180 / Math.PI, kind: g.kind };
+  }
+  return best;
 }
 function planHit(px, py, dx, dy, S) {
   let best = Infinity;
@@ -5830,27 +5893,42 @@ function planLevel(p, x, y, S) {
   }
   return best;
 }
-const planInHouse = (p, x, y) => (p.shapes || []).some((r) => r.kind === "house" && x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h);
-// the yard seen, and where faces are readable: a grid of at most ~2,500 points
+// where a point is: in a room, in the yard, or inside a house or a shelf (counted as neither)
+function planWhere(p, x, y) {
+  const inR = (r) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h, sh = p.shapes || [];
+  if (sh.some((r) => r.kind === "shelf" && inR(r))) return "block";
+  if (sh.some((r) => r.kind === "room" && inR(r))) return "room";
+  if (sh.some((r) => r.kind === "house" && inR(r))) return "block";
+  return "yard";
+}
+// How much of the yard and of the rooms is seen, and where faces are readable: a grid of at most
+// ~2,500 points. A plan of the inside counts only its rooms — or all of it, if it has none.
 function planStats(p) {
-  const S = planSegs(p), step = Math.max(0.5, Math.sqrt((p.w * p.h) / 2500));
-  let n = 0, seen = 0, face = 0;
+  const S = planSegs(p), step = Math.max(0.5, Math.sqrt((p.w * p.h) / 2500)), inside = planInside(p);
+  const hasRooms = (p.shapes || []).some((r) => r.kind === "room"), n = { yard: 0, room: 0 }, seen = { yard: 0, room: 0 };
+  let all = 0, face = 0;
   for (let x = step / 2; x < p.w; x += step) for (let y = step / 2; y < p.h; y += step) {
-    if (planInHouse(p, x, y)) continue;
-    n++;
+    let w = planWhere(p, x, y);
+    if (w === "block") continue;
+    if (inside && w === "yard") { if (hasRooms) continue; w = "room"; }
+    n[w]++; all++;
     const l = planLevel(p, x, y, S);
-    if (l >= 1) seen++;
+    if (l >= 1) seen[w]++;
     if (l === 3) face++;
   }
-  return { seen: n ? Math.round((seen / n) * 100) : 0, face: n ? Math.round((face / n) * 100) : 0,
+  const pc = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  return { seen: pc(seen.yard, n.yard), seenIn: pc(seen.room, n.room), face: pc(face, all),
+    yard: n.yard > 0 || !n.room, rooms: n.room > 0,
     marks: (p.marks || []).map((m) => ({ m, l: planLevel(p, m.x, m.y, S) })) };
 }
 // the colours: the app's own on screen, paper ones for the client's page
 function planPal(paper) {
   if (paper) return { lot: "#EEF3EA", street: "#DCDFE4", area: "#E6E2DA", house: "#D5DBE4", line: "#3B4452", grid: "#D8DEE4", text: "#5B6472",
+    floor: "#F6F2EA", inBg: "#E3E6EA", shelf: "#B9A98F",
     cov: "#4C6EF5", cam: "#1E3A5F", sel: "#F5B301", card: "#FFFFFF", lv: ["#D6455D", "#B57F00", "#4C6EF5", "#2F9E68"] };
   const v = (k) => window.getComputedStyle(document.documentElement).getPropertyValue(k).trim();
   return { lot: v("--plan-lot"), street: v("--plan-street"), area: v("--plan-area"), house: v("--plan-house"), line: v("--plan-line"), grid: v("--line"),
+    floor: v("--plan-floor"), inBg: v("--plan-in"), shelf: v("--plan-shelf"),
     text: v("--muted"), cov: v("--work"), cam: v("--navy"), sel: v("--amber"), card: v("--card"), lv: [v("--danger"), v("--amber"), v("--work"), v("--personal")] };
 }
 // the drawing as SVG markup; o: { paper, clean, sel, wallStart, temp, bgUrl, mk }
@@ -5868,8 +5946,8 @@ function planSvgInner(p, o) {
   const out = [], S = planSegs(p), f = (n) => Math.round(n * 1000) / 1000;
   const pts = (a) => a.map(([x, y]) => f(x) + "," + f(y)).join(" ");
   const txt = (x, y, s, size, extra) => `<text x="${f(x)}" y="${f(y)}" font-size="${size}" text-anchor="middle" fill="${P.text}" font-family="IBM Plex Sans Condensed, Arial, sans-serif" font-weight="600" ${extra || ""}>${esc(s)}</text>`;
-  const st = p.street, sw = 3;
-  out.push(`<rect x="-30" y="-30" width="${p.w + 60}" height="${p.h + 60}" fill="${P.lot}"/>`);
+  const st = p.street, sw = 3, inside = planInside(p);
+  out.push(`<rect x="-30" y="-30" width="${p.w + 60}" height="${p.h + 60}" fill="${inside ? P.inBg : P.lot}"/>`);
   if (st && st !== "none") {
     const r = st === "bottom" ? [-30, p.h, p.w + 60, sw] : st === "top" ? [-30, -sw, p.w + 60, sw] : st === "left" ? [-sw, -30, sw, p.h + 60] : [p.w, -30, sw, p.h + 60];
     out.push(`<rect x="${r[0]}" y="${r[1]}" width="${r[2]}" height="${r[3]}" fill="${P.street}"/>`);
@@ -5884,17 +5962,25 @@ function planSvgInner(p, o) {
     out.push(`<g stroke="${P.grid}">${g.join("")}</g>`);
   }
   if (p.night) out.push(`<rect x="-30" y="-30" width="${p.w + 60}" height="${p.h + 60}" fill="#0B1530" fill-opacity="0.38" pointer-events="none"/>`);
-  for (const r of p.shapes || []) if (r.kind !== "house")
-    out.push(`<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="${P.area}" fill-opacity="0.75" stroke="${o.sel === "rect:" + r.id ? P.sel : P.line}" stroke-width="${o.sel === "rect:" + r.id ? 0.14 : 0.06}" stroke-dasharray="0.3 0.2"/>`);
-  // the cones, three shades each, cut by what blocks the view
+  const isSel = (r) => o.sel === "rect:" + r.id, rect = (r, extra) => `<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" ${extra}/>`;
+  // under the shades: areas, the houses, the rooms' floors (a camera inside sees across them)
+  for (const r of p.shapes || []) if (!planBlocks(r.kind))
+    out.push(rect(r, `fill="${P.area}" fill-opacity="0.75" stroke="${isSel(r) ? P.sel : P.line}" stroke-width="${isSel(r) ? 0.14 : 0.06}" stroke-dasharray="0.3 0.2"`));
+  for (const r of p.shapes || []) if (r.kind === "house") out.push(rect(r, `fill="${P.house}"`));
+  for (const r of p.shapes || []) if (r.kind === "room") out.push(rect(r, `fill="${P.floor}"`));
+  // the cones, three shades each, cut by what blocks the view — a tap goes through them
   for (const c of p.cams || []) {
     const polys = planCone(c, S, p.night);
-    for (let z = 2; z >= 0; z--) out.push(`<polygon points="${pts(polys[z])}" fill="${P.cov}" fill-opacity="${PLAN_OP[z] * (clean ? 0.95 : 0.8)}"/>`);
+    for (let z = 2; z >= 0; z--) out.push(`<polygon points="${pts(polys[z])}" fill="${P.cov}" fill-opacity="${PLAN_OP[z] * (clean ? 0.95 : 0.8)}" pointer-events="none"/>`);
   }
-  for (const r of p.shapes || []) if (r.kind === "house")
-    out.push(`<rect data-k="rect:${r.id}" x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="${P.house}" stroke="${o.sel === "rect:" + r.id ? P.sel : P.line}" stroke-width="${o.sel === "rect:" + r.id ? 0.22 : 0.14}"/>`);
+  // over them: shelves, and the walls of houses and rooms
+  for (const r of p.shapes || []) if (r.kind === "shelf")
+    out.push(rect(r, `fill="${P.shelf}" stroke="${isSel(r) ? P.sel : P.line}" stroke-width="${isSel(r) ? 0.18 : 0.08}"`));
+  for (const r of p.shapes || []) if (r.kind === "house" || r.kind === "room")
+    out.push(`<rect x="${f(r.x)}" y="${f(r.y)}" width="${f(r.w)}" height="${f(r.h)}" fill="none" stroke="${isSel(r) ? P.sel : P.line}" stroke-width="${isSel(r) ? 0.22 : r.kind === "room" ? 0.15 : 0.14}" pointer-events="none"/>`);
   for (const r of p.shapes || []) {
     const name = r.label || (PLAN_KINDS[r.kind] || PLAN_KINDS.other)[mk || langMk() ? 1 : 0];
+    if (r.kind === "shelf" && !r.label) continue;
     if (r.w >= 1.5 && r.h >= 1) out.push(txt(r.x + r.w / 2, r.y + r.h / 2 + 0.25, name, Math.min(0.85, r.h * 0.45, r.w / Math.max(3, name.length * 0.55)), 'pointer-events="none"'));
   }
   (p.walls || []).forEach(([[ax, ay], [bx, by]], i) => {
@@ -5902,7 +5988,15 @@ function planSvgInner(p, o) {
     out.push(`<line x1="${f(ax)}" y1="${f(ay)}" x2="${f(bx)}" y2="${f(by)}" stroke="transparent" stroke-width="0.9" data-k="wall:${i}"/>`);
     out.push(`<line x1="${f(ax)}" y1="${f(ay)}" x2="${f(bx)}" y2="${f(by)}" stroke="${on ? P.sel : P.line}" stroke-width="${on ? 0.3 : 0.18}" stroke-linecap="round" pointer-events="none"/>`);
   });
-  out.push(`<rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" stroke="${P.text}" stroke-width="0.07" stroke-dasharray="0.4 0.25" pointer-events="none"/>`);
+  // doors and gates: the wall painted out where they are, with a tick at each side
+  for (const d of p.doors || []) {
+    const a = (d.a || 0) * Math.PI / 180, ux = Math.cos(a) * (d.w || 0.9) / 2, uy = Math.sin(a) * (d.w || 0.9) / 2, nx = -Math.sin(a) * 0.22, ny = Math.cos(a) * 0.22;
+    const on = o.sel === "door:" + d.id, under = planWhere(p, d.x + nx, d.y + ny) === "room" ? P.floor : inside ? P.inBg : P.lot;
+    out.push(`<g data-k="door:${d.id}"><line x1="${f(d.x - ux)}" y1="${f(d.y - uy)}" x2="${f(d.x + ux)}" y2="${f(d.y + uy)}" stroke="transparent" stroke-width="0.8"/>
+      <line x1="${f(d.x - ux)}" y1="${f(d.y - uy)}" x2="${f(d.x + ux)}" y2="${f(d.y + uy)}" stroke="${on ? P.sel : under}" stroke-width="${on ? 0.3 : 0.26}"/>
+      ${[-1, 1].map((k) => `<line x1="${f(d.x + k * ux - nx)}" y1="${f(d.y + k * uy - ny)}" x2="${f(d.x + k * ux + nx)}" y2="${f(d.y + k * uy + ny)}" stroke="${P.line}" stroke-width="0.06"/>`).join("")}</g>`);
+  }
+  if (!inside) out.push(`<rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" stroke="${P.text}" stroke-width="0.07" stroke-dasharray="0.4 0.25" pointer-events="none"/>`);
   if (o.temp) out.push(`<rect x="${f(o.temp.x)}" y="${f(o.temp.y)}" width="${f(o.temp.w)}" height="${f(o.temp.h)}" fill="${P.sel}" fill-opacity="0.2" stroke="${P.sel}" stroke-width="0.1"/>`);
   // the places that matter, ringed in the colour of how well they are seen
   const lv = o.marks || [];
@@ -5976,7 +6070,7 @@ async function planClientHtml(row, bgUrl, photos) {
         return `<tr><td>${cm.n}</td><td>${esc(cm.name || "Камера " + cm.n)}</td><td>${cm.lens} mm · ${cm.mp} MP</td><td class="r">${planM(r[0])} m</td><td class="r">${planM(r[1])} m</td><td class="r">${planM(r[2])} m</td><td class="r">${planM(nr[2])} m</td></tr>`; }).join("")}</tbody></table>
     ${s.marks.length ? `<div class="pv-keys"><b>Што се гледа на важните места:</b> ${s.marks.map(({ m, l }) =>
       `${esc(m.label || "")} — <span style="color:${col[l]};font-weight:700">${PLAN_LV_MK[l]}</span>`).join(" · ")}</div>` : ""}
-    <div class="pv-small">${planCamsN((p.cams || []).length, true)} · се гледа ${s.seen}% од дворот · лицето се распознава на ${s.face}%. Проценка според објективот и резолуцијата на камерата (EN 62676-4); светлото, времето и висината на монтажа ја менуваат.</div>
+    <div class="pv-small">${planCamsN((p.cams || []).length, true)} · се гледа ${[s.yard ? `${s.seen}% од дворот` : "", s.rooms ? `${s.seenIn}% од просториите` : ""].filter(Boolean).join(" и ")} · лицето се распознава на ${s.face}%. Проценка според објективот и резолуцијата на камерата (EN 62676-4); светлото, времето и висината на монтажа ја менуваат.</div>
     ${views.length ? `<div class="pv-sub"><b>Што гледа секоја камера</b> — сликано од местото каде што ќе стои. Жолтата рамка е што фаќа објективот, испрекинатата е другиот објектив; на земјата се истите три нијанси.</div>
       ${views.map(({ cm, img }) => `<div class="pv-cv"><img src="${img}" alt="Камера ${cm.n}"><span>Камера ${cm.n}${cm.name ? " — " + esc(cm.name) : ""} · ${cm.lens} mm · ${cm.mp} MP · на ${planM(cm.mh || 2.7)} m</span></div>`).join("")}` : ""}`;
 }
@@ -6065,7 +6159,7 @@ function planClient(id) {
 }
 function startPlanner(row, bgUrl) {
   const p = JSON.parse(JSON.stringify(row.plan && row.plan.w ? row.plan : planBlank()));
-  for (const k of ["shapes", "walls", "marks", "cams"]) p[k] = p[k] || [];
+  for (const k of ["shapes", "walls", "marks", "cams", "doors"]) p[k] = p[k] || [];
   pe = { id: row.id, row, p, bgUrl, bgDirty: false, sel: null, tool: "move", hist: [], client: false, wallStart: null, scalePts: null,
     trayArticle: null, view: null, drag: null, ptrs: new Map(), typing: null, photos: new Map(), subOpen: false };
   pe.saved = JSON.stringify(p);
@@ -6073,14 +6167,7 @@ function startPlanner(row, bgUrl) {
   openSheet(`<div class="pl-head"><h2>${T("Camera plan", "План на камери")}</h2>
       <span class="muted" id="pl-sub">${planSubText(c, o)}</span></div>
     <div class="pl-tools">
-      <div class="chips wrap" id="pl-tool">
-        <button class="chip on" data-t="move" onclick="planTool('move')">${T("Move", "Помести")}</button>
-        <button class="chip" data-t="camera" onclick="planTool('camera')">+ ${T("Camera", "Камера")}</button>
-        <button class="chip" data-t="house" onclick="planTool('house')">+ ${T("House", "Куќа")}</button>
-        <button class="chip" data-t="wall" onclick="planTool('wall')">+ ${T("Wall", "Ѕид")}</button>
-        <button class="chip" data-t="area" onclick="planTool('area')">+ ${T("Area", "Простор")}</button>
-        <button class="chip" data-t="mark" onclick="planTool('mark')">+ ${T("Place", "Место")}</button>
-      </div>
+      <div class="chips wrap" id="pl-tool"></div>
       <div class="chips">
         <button class="chip" id="pl-undo" onclick="planUndo()" disabled>↶ ${T("Undo", "Врати")}</button>
         <button class="chip" id="pl-night" onclick="planNight()">${T("Night", "Ноќ")}</button>
@@ -6092,11 +6179,7 @@ function startPlanner(row, bgUrl) {
     <div class="pl-hint" id="pl-hint"></div>
     <div class="pl-canvas"><svg id="pl-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${T("Plan of the property", "План на имотот")}"></svg>
       <div class="pl-zoom"><button onclick="planZoom(0.8)" aria-label="${T("Zoom in", "Зумирај")}">+</button><button onclick="planZoom(1.25)" aria-label="${T("Zoom out", "Одзумирај")}">−</button><button onclick="planFit()">${T("Fit", "Цело")}</button></div></div>
-    <div class="card pl-stats"><div class="stat-row top">
-      <div class="stat"><span>${T("Yard seen", "Се гледа од дворот")}</span><b id="pl-seen">–</b></div>
-      <div class="stat"><span>${T("Faces readable", "Лицата се распознаваат")}</span><b id="pl-face">–</b></div>
-      <div class="stat"><span>${T("Cameras", "Камери")}</span><b id="pl-cams">–</b></div>
-    </div></div>
+    <div class="card pl-stats"><div class="stat-row top" id="pl-statrow"></div></div>
     <div id="pl-panel" class="pl-panel"></div>
     <div class="grid2">
       <button class="btn" style="width:100%" onclick="savePlan()">${T("Save", "Зачувај")}</button>
@@ -6111,12 +6194,38 @@ function startPlanner(row, bgUrl) {
   svg.addEventListener("pointerup", planUp);
   svg.addEventListener("pointercancel", planUp);
   svg.addEventListener("wheel", (e) => { e.preventDefault(); planZoom(e.deltaY > 0 ? 1.12 : 0.89, planPt(e)); }, { passive: false });
+  planToolsRender();
   planFit();
   planTool("move");
+}
+// the tools: a house and a gate outside; rooms, doors and shelves inside
+const planToolList = () => planInside(pe.p)
+  ? [["move", T("Move", "Помести")], ["camera", T("Camera", "Камера")], ["room", T("Room", "Просторија")], ["wall", T("Wall", "Ѕид")],
+     ["door", T("Door", "Врата")], ["shelf", T("Shelf", "Полица")], ["mark", T("Place", "Место")]]
+  : [["move", T("Move", "Помести")], ["camera", T("Camera", "Камера")], ["house", T("House", "Куќа")], ["room", T("Room", "Просторија")],
+     ["wall", T("Wall", "Ѕид")], ["door", T("Gate, door", "Порта, врата")], ["area", T("Area", "Простор")], ["mark", T("Place", "Место")]];
+function planToolsRender() {
+  $("pl-tool").innerHTML = planToolList().map(([t, l]) =>
+    `<button class="chip ${pe.tool === t ? "on" : ""}" data-t="${t}" onclick="planTool('${t}')">${t === "move" ? "" : "+ "}${l}</button>`).join("");
+}
+// a plan of the outside or of the inside; one not drawn on yet starts afresh as the other
+function planKind(k) {
+  const p = pe.p;
+  if ((p.kind || "out") === k) return;
+  planRemember();
+  const fresh = !p.cams.length && !p.walls.length && !p.marks.length && p.shapes.length <= 1 && (!p.shapes[0] || p.shapes[0].id === "s1")
+    && (p.doors || []).every((d) => d.id === "d1");
+  if (fresh) pe.p = { ...(k === "in" ? planBlankIn() : planBlank()), bg: p.bg, night: p.night };
+  else { p.kind = k; if (k === "in") p.street = "none"; }
+  pe.sel = null;
+  planToolsRender();
+  planTool("move");
+  planFit();
 }
 const planCam = (id) => pe.p.cams.find((c) => String(c.id) === String(id));
 const planShape = (id) => pe.p.shapes.find((r) => String(r.id) === String(id));
 const planMark = (id) => pe.p.marks.find((m) => String(m.id) === String(id));
+const planDoor = (id) => (pe.p.doors || []).find((d) => String(d.id) === String(id));
 const planNewId = (pre) => pre + Date.now().toString(36) + Math.floor(Math.random() * 1000);
 function planRemember() {
   pe.hist.push(JSON.stringify({ p: pe.p, sel: pe.sel }));
@@ -6140,9 +6249,12 @@ function planTool(t) {
     move: T("Drag a camera to move it, its yellow dot to turn it · tap anything to change or remove it · drag the empty plan to pan", "Повлечи камера за да ја поместиш, жолтата точка за да ја свртиш · допри нешто за да го смениш или отстраниш · повлечи празно за да го поместиш планот"),
     house: T("Drag across the plan to draw the house (it blocks the view)", "Повлечи преку планот за да нацрташ куќа (ја попречува видливоста)"),
     area: T("Drag across the plan to draw a porch, parking or garden", "Повлечи преку планот за трем, паркинг или двор"),
+    room: T("Drag across the plan to draw a room — its walls block the view, a camera inside sees all of it", "Повлечи преку планот за просторија — ѕидовите го запираат погледот, камера внатре ја гледа цела"),
+    shelf: T("Drag across the plan to draw a shelf or cabinet (it blocks the view)", "Повлечи преку планот за полица или ормар (го запира погледот)"),
+    door: T("Tap on a wall where the door or gate is — the view goes through it", "Допри на ѕид каде е вратата или портата — погледот минува низ неа"),
     wall: T("Tap where the wall starts, then where it ends", "Допри каде почнува ѕидот, па каде завршува"),
     camera: T("Tap where the camera hangs", "Допри каде виси камерата"),
-    mark: T("Tap a place that matters: the gate, a door", "Допри важно место: порта, врата"),
+    mark: planInside(pe.p) ? T("Tap a place that matters: the entrance, the cash desk", "Допри важно место: влез, каса") : T("Tap a place that matters: the gate, a door", "Допри важно место: порта, врата"),
     scale: T("Tap two points whose distance you know", "Допри две точки чие растојание го знаеш"),
   }[t] || "";
   planRender();
@@ -6186,7 +6298,14 @@ function planDown(e) {
   }
   const [x, y] = planPt(e), k = (e.target.closest && e.target.closest("[data-k]")) ? e.target.closest("[data-k]").dataset.k : "";
   const t = pe.tool, p = pe.p;
-  if (t === "house" || t === "area") { pe.drag = { mode: "draw", x0: planSnap(x), y0: planSnap(y), kind: t === "house" ? "house" : "porch" }; return; }
+  if (t === "house" || t === "area" || t === "room" || t === "shelf") { pe.drag = { mode: "draw", x0: planSnap(x), y0: planSnap(y), kind: t === "area" ? "porch" : t }; return; }
+  if (t === "door") {
+    const q = planNearSeg(p, x, y, 1);
+    if (!q) { toast(T("Tap on a wall — the door goes in it", "Допри на ѕид — вратата оди во него")); return; }
+    planRemember();
+    const d = { id: planNewId("d"), x: q.x, y: q.y, a: Math.round(q.a), w: !planInside(p) && q.kind === "wall" ? 3 : 0.9 };
+    p.doors.push(d); pe.sel = "door:" + d.id; planTool("move"); return;
+  }
   if (t === "wall") {
     const q = [planSnap(x), planSnap(y)];
     if (!pe.wallStart) { pe.wallStart = q; $("pl-hint").textContent = T("Now tap where it ends · tap + Wall again to cancel", "Сега допри каде завршува · допри + Ѕид пак за откажи"); }
@@ -6198,13 +6317,13 @@ function planDown(e) {
     const a = pe.trayArticle ? state.stock.find((s) => s.id === pe.trayArticle) : null;
     const n = Math.max(0, ...p.cams.map((c) => c.n || 0)) + 1;
     const src = a ? [a.name, a.code, a.specs].join(" ") : "";
-    const c = { id: planNewId("c"), n, name: "", x: planSnap(x), y: planSnap(y), h: 90,
+    const c = { id: planNewId("c"), n, name: "", x: planSnap(x), y: planSnap(y), h: 90, mh: planWhere(p, x, y) === "yard" && !planInside(p) ? 2.7 : 2.6,
       lens: a ? planLensOf(src) : 2.8, mp: a ? planMpOf(camOf(a).mp) : 4, ir: 30, article_id: a ? a.id : null, model: a ? a.name : "" };
     p.cams.push(c); pe.sel = "cam:" + c.id; planTool("move"); return;
   }
   if (t === "mark") {
     planRemember();
-    const m = { id: planNewId("m"), label: p.marks.length ? "" : "Порта", x: planSnap(x), y: planSnap(y) };
+    const m = { id: planNewId("m"), label: p.marks.length ? "" : planInside(p) ? "Влез" : "Порта", x: planSnap(x), y: planSnap(y) };
     p.marks.push(m); pe.sel = "mark:" + m.id; planTool("move"); return;
   }
   if (t === "scale") {
@@ -6221,6 +6340,7 @@ function planDown(e) {
   else if (kind === "wall") { pe.sel = "wall:" + id; }
   else if (kind === "wend") { planRemember(); pe.drag = { mode: "wend", i: Number(id), e: Number(end) }; }
   else if (kind === "mark") { planRemember(); pe.sel = "mark:" + id; pe.drag = { mode: "mark", id }; }
+  else if (kind === "door") { planRemember(); pe.sel = "door:" + id; pe.drag = { mode: "door", id }; }
   else { pe.sel = null; pe.drag = { mode: "pan", sx: e.clientX, sy: e.clientY, v0: { ...pe.view } }; }
   planRender();
 }
@@ -6245,6 +6365,11 @@ function planMove(e) {
     else if (d.mode === "rsz") { const r = planShape(d.id); r.w = Math.max(0.5, planSnap(x - r.x)); r.h = Math.max(0.5, planSnap(y - r.y)); }
     else if (d.mode === "wend") { p.walls[d.i][d.e] = [planSnap(x), planSnap(y)]; }
     else if (d.mode === "mark") { const m = planMark(d.id); m.x = planSnap(x); m.y = planSnap(y); }
+    else if (d.mode === "door") {
+      // a door slides along the walls; off them it waits where the finger is
+      const dr = planDoor(d.id), q = planNearSeg({ ...p, doors: [] }, x, y, 1.2);
+      if (q) Object.assign(dr, { x: q.x, y: q.y, a: Math.round(q.a) }); else Object.assign(dr, { x, y });
+    }
     else if (d.mode === "draw") { d.x1 = planSnap(x); d.y1 = planSnap(y); }
   }
   if (!planRaf) planRaf = requestAnimationFrame(() => { planRaf = 0; planRender(true); });
@@ -6255,7 +6380,7 @@ function planUp(e) {
   const d = pe.drag;
   if (d && d.mode === "pinch" && pe.ptrs.size) return;
   pe.drag = null;
-  if (d && /^(cam|rot|rect|rsz|wend|mark)$/.test(d.mode) && pe.hist.length && JSON.stringify(JSON.parse(pe.hist[pe.hist.length - 1]).p) === JSON.stringify(pe.p)) {
+  if (d && /^(cam|rot|rect|rsz|wend|mark|door)$/.test(d.mode) && pe.hist.length && JSON.stringify(JSON.parse(pe.hist[pe.hist.length - 1]).p) === JSON.stringify(pe.p)) {
     pe.hist.pop(); $("pl-undo").disabled = !pe.hist.length;
   }
   if (d && d.mode === "draw" && d.x1 !== undefined) {
@@ -6278,9 +6403,12 @@ function planRender(light) {
   const d = pe.drag, temp = d && d.mode === "draw" && d.x1 !== undefined
     ? { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) } : null;
   svg.innerHTML = planSvgInner(pe.p, { clean: pe.client, sel: pe.sel, wallStart: pe.wallStart, temp, bgUrl: pe.bgUrl, marks: st.marks, scalePts: pe.scalePts });
-  $("pl-seen").textContent = st.seen + "%";
-  $("pl-face").textContent = st.face + "%";
-  $("pl-cams").textContent = pe.p.cams.length;
+  const tiles = [st.yard ? [T("Yard seen", "Се гледа од дворот"), st.seen + "%", "pl-seen"] : null,
+    st.rooms ? [T("Rooms seen", "Се гледа од просториите"), st.seenIn + "%", "pl-seenin"] : null,
+    [T("Faces readable", "Лицата се распознаваат"), st.face + "%", "pl-face"], [T("Cameras", "Камери"), pe.p.cams.length, "pl-cams"]].filter(Boolean);
+  const row = $("pl-statrow");
+  row.style.gridTemplateColumns = `repeat(${tiles.length},minmax(0,1fr))`;
+  row.innerHTML = tiles.map(([l, v, id]) => `<div class="stat"><span>${l}</span><b id="${id}">${v}</b></div>`).join("");
   if (pe.bgDirty || JSON.stringify(pe.p) !== pe.saved || [...pe.photos.values()].some((x) => x.dirty)) sheetDirty = true;
   $("pl-night").classList.toggle("on", !!pe.p.night);
   if (!light) { planTray(); planPanel(st); }
@@ -6329,14 +6457,22 @@ function planPanel(st) {
   }
   if (kind === "rect" && planShape(id)) {
     const r = planShape(id);
+    const kinds = (planInside(p) ? PLAN_KINDS_IN : PLAN_KINDS_OUT).concat(r.kind).filter((x, i, a) => a.indexOf(x) === i);
+    const about = { house: T("A house blocks what the cameras see; a camera inside it sees nothing outside but through a door.", "Куќата го запира погледот; камера внатре гледа надвор само низ врата."),
+      room: T("A room's walls block the view; a camera inside sees all of it. Add doors with + Door.", "Ѕидовите на просторијата го запираат погледот; камера внатре ја гледа цела. Додај врати со + Врата."),
+      shelf: T("A shelf or cabinet blocks the view behind it.", "Полица или ормар го запира погледот зад себе.") }[r.kind]
+      || T("An area is marked on the plan; cameras see across it.", "Просторот е означен; камерите гледаат преку него.");
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(r.label || PLAN_KINDS[r.kind][langMk() ? 1 : 0])} · ${planM(r.w)} × ${planM(r.h)} m</b>${rm}</div>
-      <div class="chips">${Object.keys(PLAN_KINDS).map((kk) => `<button class="chip ${r.kind === kk ? "on" : ""}" onclick="planSet('kind','${kk}')">${T(PLAN_KINDS[kk][0], PLAN_KINDS[kk][1])}</button>`).join("")}</div>
-      <p class="muted" style="font-size:12.5px;margin:0">${r.kind === "house" ? T("A house blocks what the cameras see.", "Куќата ја попречува видливоста.") : T("An area is marked on the plan; cameras see across it.", "Просторот е означен; камерите гледаат преку него.")} ${T("Drag the yellow corner to change its size.", "Повлечи го жолтиот агол за големина.")}</p>
+      <div class="chips">${kinds.map((kk) => `<button class="chip ${r.kind === kk ? "on" : ""}" onclick="planSet('kind','${kk}')">${T(PLAN_KINDS[kk][0], PLAN_KINDS[kk][1])}</button>`).join("")}</div>
+      <p class="muted" style="font-size:12.5px;margin:0">${about} ${T("Drag the yellow corner to change its size.", "Повлечи го жолтиот агол за големина.")}</p>
+      ${r.kind === "room" ? `<div class="chips wrap" style="margin-top:8px">${PLAN_ROOMS.map(([en, mkn]) => `<button class="chip sm ${r.label === mkn ? "on" : ""}" onclick="planSet('label','${mkn}')">${T(en, mkn)}</button>`).join("")}</div>` : ""}
       <label>${T("Name on the plan (opt.)", "Име на планот (опц.)")}</label><input id="pl-rlabel" value="${esc(r.label || "")}" oninput="planSet('label',this.value)">
       <div class="grid2"><div><label>${T("Width", "Ширина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.w}" oninput="planSetNum('w',Math.max(0.5,parseFloat(this.value)||0.5))"></div>
         <div><label>${T("Depth", "Длабочина")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" step="0.25" value="${r.h}" oninput="planSetNum('h',Math.max(0.5,parseFloat(this.value)||0.5))"></div></div>
       ${r.kind === "house" ? `<label>${T("Height to the roof, for 3D", "Висина до покривот, за 3D")} <span style="text-transform:none">(m)</span></label>
-        <input type="number" inputmode="decimal" step="0.5" min="2" max="60" value="${r.hgt ?? 6}" oninput="planSetNum('hgt',Math.max(2,parseFloat(this.value)||6))">` : ""}`;
+        <input type="number" inputmode="decimal" step="0.5" min="2" max="60" value="${r.hgt ?? 6}" oninput="planSetNum('hgt',Math.max(2,parseFloat(this.value)||6))">` : ""}
+      ${r.kind === "shelf" ? `<label>${T("Height, for 3D", "Висина, за 3D")} <span style="text-transform:none">(m)</span></label>
+        <input type="number" inputmode="decimal" step="0.1" min="0.3" max="6" value="${r.hgt ?? 2}" oninput="planSetNum('hgt',Math.max(0.3,parseFloat(this.value)||2))">` : ""}`;
     return;
   }
   if (kind === "wall" && p.walls[Number(id)]) {
@@ -6345,27 +6481,42 @@ function planPanel(st) {
       <p class="muted" style="font-size:12.5px;margin:0">${T("The cameras cannot see through it. Drag its yellow ends to move them; drawn by mistake? Remove — Undo brings it back.", "Камерите не гледаат низ него. Повлечи ги жолтите краеви; по грешка? Отстрани — Врати го враќа.")}</p>`;
     return;
   }
+  if (kind === "door" && planDoor(id)) {
+    const d = planDoor(id), widths = planInside(p) ? [0.8, 0.9, 1.2, 1.8] : [0.9, 1.2, 3, 4, 5];
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${d.w >= 2.5 ? T("Gate", "Порта") : T("Door", "Врата")} · ${planM(d.w)} m</b>${rm}</div>
+      <div class="chips">${widths.concat(d.w).filter((x, i, a) => a.indexOf(x) === i).map((w) => `<button class="chip ${d.w === w ? "on" : ""}" onclick="planDoorW(${w})">${planM(w)} m</button>`).join("")}</div>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 0">${T("An opening in the wall: the cameras see through it. Drag it along the wall to move it.", "Отвор во ѕидот: камерите гледаат низ него. Повлечи го по ѕидот за да го поместиш.")}</p>`;
+    return;
+  }
   if (kind === "mark" && planMark(id)) {
     const m = planMark(id), l = (st.marks.find((x) => x.m.id === m.id) || {}).l ?? 0;
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(m.label || T("Place", "Место"))} · <span class="pl-lv${l}">${planLvEn(l)}</span></b>${rm}</div>
-      <div class="chips">${PLAN_MARKS.map(([en, mk]) => `<button class="chip ${m.label === mk ? "on" : ""}" onclick="planSet('label','${mk}')">${T(en, mk)}</button>`).join("")}</div>
+      <div class="chips">${(planInside(p) ? PLAN_MARKS_IN : PLAN_MARKS).map(([en, mk]) => `<button class="chip ${m.label === mk ? "on" : ""}" onclick="planSet('label','${mk}')">${T(en, mk)}</button>`).join("")}</div>
       <label>${T("Name (the client sees it)", "Име (го гледа клиентот)")}</label><input id="pl-mlabel" value="${esc(m.label || "")}" oninput="planSet('label',this.value)">`;
     return;
   }
   // nothing chosen: the plan itself
   const o = state.offers.find((x) => x.id === pe.row.offer_id);
   const clients = state.clients.filter((c) => c.active !== false || c.id === pe.row.client_id).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  el.innerHTML = `<label>${T("Client", "Клиент")}</label>
+  const inside = planInside(p);
+  el.innerHTML = `<label>${T("This plan is", "Овој план е")}</label>
+    <div class="chips"><button class="chip ${inside ? "" : "on"}" onclick="planKind('out')">${T("Outside — house and yard", "Надвор — куќа и двор")}</button>
+      <button class="chip ${inside ? "on" : ""}" onclick="planKind('in')">${T("Inside — rooms", "Внатре — простории")}</button></div>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 0">${inside ? T("Rooms, doors and shelves; only the rooms are counted. A house with a yard as well? Choose Outside and draw its rooms inside it.",
+      "Простории, врати и полици; се бројат само просториите. Куќа и со двор? Избери Надвор и нацртај ги просториите во неа.")
+      : T("Cameras inside the house as well? Draw its rooms in it with + Room, and doors with + Gate, door. For a shop, an office or a flat alone, choose Inside.",
+        "Камери и внатре во куќата? Нацртај ги просториите во неа со + Просторија и вратите со + Порта, врата. За продавница, канцеларија или стан, избери Внатре.")}</p>
+    <label>${T("Client", "Клиент")}</label>
     <select id="pl-client" onchange="planClient(this.value)">
       <option value="">${T("— not linked to a client —", "— не е врзан за клиент —")}</option>
       ${clients.map((c) => `<option value="${c.id}" ${c.id === pe.row.client_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
     </select>
     <label>${T("Plan name", "Име на планот")}</label><input id="pl-title" value="${esc(pe.row.title || "")}" oninput="pe.row.title=this.value;sheetDirty=true" placeholder="${T("e.g. House and yard", "пр. Куќа и двор")}">
-    <div class="grid2"><div><label>${T("Plot width", "Ширина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.w}" onchange="planPlot('w',this.value)"></div>
-      <div><label>${T("Plot depth", "Длабочина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.h}" onchange="planPlot('h',this.value)"></div></div>
-    <label>${T("The street is", "Улицата е")}</label>
+    <div class="grid2"><div><label>${inside ? T("Width", "Ширина") : T("Plot width", "Ширина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.w}" onchange="planPlot('w',this.value)"></div>
+      <div><label>${inside ? T("Depth", "Длабочина") : T("Plot depth", "Длабочина на плацот")} <span style="text-transform:none">(m)</span></label><input type="number" inputmode="decimal" value="${p.h}" onchange="planPlot('h',this.value)"></div></div>
+    ${inside ? "" : `<label>${T("The street is", "Улицата е")}</label>
     <div class="chips">${[["bottom", T("Below", "Долу")], ["top", T("Above", "Горе")], ["left", T("Left", "Лево")], ["right", T("Right", "Десно")], ["none", T("None", "Нема")]]
-      .map(([v, l]) => `<button class="chip ${(p.street || "none") === v ? "on" : ""}" onclick="planSet0('street','${v}')">${l}</button>`).join("")}</div>
+      .map(([v, l]) => `<button class="chip ${(p.street || "none") === v ? "on" : ""}" onclick="planSet0('street','${v}')">${l}</button>`).join("")}</div>`}
     <label>${T("Photo or satellite picture under the plan", "Фотографија или сателитска слика под планот")}</label>
     ${pe.bgUrl ? `<div class="row" style="gap:8px;flex-wrap:wrap">
         <input type="range" min="0.15" max="1" step="0.05" value="${p.bg ? p.bg.opacity ?? 0.6 : 0.6}" oninput="planBgOpacity(this.value)" style="flex:1;min-width:120px" aria-label="${T("How strong the picture shows", "Колку се гледа сликата")}">
@@ -6398,6 +6549,7 @@ function planSetNum(k, v) {
   t[k] = v;
   planRender(typing);
 }
+function planDoorW(w) { const d = planDoor(String(pe.sel).split(":")[1]); if (!d) return; planRemember(); d.w = w; planRender(); }
 function planInOffer() { pe.row.in_offer = pe.row.in_offer === false; sheetDirty = true; planPanel(planStats(pe.p)); }
 function planSet0(k, v) { planRemember(); pe.p[k] = v; planFit(); }
 function planPlot(k, v) {
@@ -6416,6 +6568,7 @@ function planRemoveSel() {
   if (kind === "rect") p.shapes = p.shapes.filter((r) => String(r.id) !== id);
   if (kind === "wall") p.walls.splice(Number(id), 1);
   if (kind === "mark") p.marks = p.marks.filter((m) => String(m.id) !== id);
+  if (kind === "door") p.doors = (p.doors || []).filter((d) => String(d.id) !== id);
   pe.sel = null;
   planRender();
 }
@@ -6963,7 +7116,11 @@ function p3Label(text, bg, fg, h = 0.8) {
 }
 // what does not move while aiming: the ground, the houses, the walls
 function p3Scene() {
-  const { THREE } = p3, p = pe.p, night = !!p.night;
+  const { THREE } = p3, p = pe.p, night = !!p.night, inside = planInside(p);
+  const houses = (p.shapes || []).some((r) => r.kind === "house"), rooms = (p.shapes || []).some((r) => r.kind === "room");
+  // with rooms drawn, the roof starts off: the rooms are what there is to see
+  if (p3.roof === undefined) p3.roof = !rooms;
+  const roof = p3.roof || !houses;
   if (p3.scene) p3Dispose(p3.scene);
   const scene = new THREE.Scene();
   const sky = night ? 0x1B2433 : 0xDCE8F5;
@@ -6978,7 +7135,7 @@ function p3Scene() {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x + w / 2, lift, y + h / 2); scene.add(m); return m;
   };
-  flat(-400, -400, p.w + 800, p.h + 800, lam(night ? 0x3A4A3A : 0xB3CB9E), 0);
+  flat(-400, -400, p.w + 800, p.h + 800, lam(inside ? (night ? 0x2A2E35 : 0xD3D7DC) : night ? 0x3A4A3A : 0xB3CB9E), 0);
   const st = p.street, sw = 3;
   if (st && st !== "none") {
     const r = st === "bottom" ? [-40, p.h, p.w + 80, sw] : st === "top" ? [-40, -sw, p.w + 80, sw] : st === "left" ? [-sw, -40, sw, p.h + 80] : [p.w, -40, sw, p.h + 80];
@@ -6988,11 +7145,13 @@ function p3Scene() {
     const tex = new THREE.TextureLoader().load(pe.bgUrl, () => p3Draw());
     flat(p.bg.x, p.bg.y, p.bg.w, p.bg.h, lam(0xFFFFFF, { map: tex, transparent: true, opacity: p.bg.opacity ?? 0.6 }), 0.04);
   }
-  for (const r of p.shapes || []) if (r.kind !== "house") flat(r.x, r.y, r.w, r.h, lam(0xE6E2DA), 0.06);
+  for (const r of p.shapes || []) if (!planBlocks(r.kind)) flat(r.x, r.y, r.w, r.h, lam(0xE6E2DA), 0.06);
+  // floors: the rooms', and a house's with its roof off
+  if (!roof) for (const r of p.shapes || []) if (r.kind === "house") flat(r.x, r.y, r.w, r.h, lam(0xE2DACB), 0.045);
+  for (const r of p.shapes || []) if (r.kind === "room") flat(r.x, r.y, r.w, r.h, lam(0xEADFCB), 0.05);
   const edge = new THREE.LineBasicMaterial({ color: 0x5B6472 });
-  const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[0, 0], [p.w, 0], [p.w, p.h], [0, p.h]].map(([x, z]) => new THREE.Vector3(x, 0.12, z))), edge);
-  scene.add(line);
-  for (const r of p.shapes || []) if (r.kind === "house") {
+  if (!inside) scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[0, 0], [p.w, 0], [p.w, p.h], [0, p.h]].map(([x, z]) => new THREE.Vector3(x, 0.12, z))), edge));
+  if (roof) for (const r of p.shapes || []) if (r.kind === "house") {
     const H = r.hgt || 6, box = new THREE.Mesh(new THREE.BoxGeometry(r.w, H, r.h), lam(0xFBF6EE));
     box.position.set(r.x + r.w / 2, H / 2, r.y + r.h / 2); scene.add(box);
     const ed = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), edge); ed.position.copy(box.position); scene.add(ed);
@@ -7005,13 +7164,22 @@ function p3Scene() {
     else roof.position.set(r.x + r.w / 2, H, r.y - 0.3);
     scene.add(roof);
   }
-  const wh = p.wallH ?? 2;
-  for (const [[ax, ay], [bx, by]] of p.walls || []) {
-    const len = Math.hypot(bx - ax, by - ay);
+  // every wall, with the doors cut out: rooms', a house's with its roof off, walls inside at room height, fences outside
+  const wh = p.wallH ?? 2, rh = p.roomH ?? 2.7, fence = lam(0x9AA3AE), inner = lam(0xF2EDE5);
+  for (const g of planSegsTagged(p)) {
+    if (g.kind === "shelf" || (g.kind === "house" && roof)) continue;
+    const [ax, ay] = g.s, [bx, by] = g.e, len = Math.hypot(bx - ax, by - ay);
     if (len < 0.05) continue;
-    const w = new THREE.Mesh(new THREE.BoxGeometry(len, wh, 0.2), lam(0x9AA3AE));
-    w.position.set((ax + bx) / 2, wh / 2, (ay + by) / 2); w.rotation.y = -Math.atan2(by - ay, bx - ax);
+    const indoor = g.kind !== "wall" || planWhere(p, (ax + bx) / 2, (ay + by) / 2) !== "yard" || inside;
+    const h = indoor ? rh : wh;
+    const w = new THREE.Mesh(new THREE.BoxGeometry(len, h, indoor ? 0.14 : 0.2), indoor ? inner : fence);
+    w.position.set((ax + bx) / 2, h / 2, (ay + by) / 2); w.rotation.y = -Math.atan2(by - ay, bx - ax);
     scene.add(w);
+  }
+  for (const r of p.shapes || []) if (r.kind === "shelf") {
+    const H = r.hgt ?? 2, box = new THREE.Mesh(new THREE.BoxGeometry(r.w, H, r.h), lam(0x9C8669));
+    box.position.set(r.x + r.w / 2, H / 2, r.y + r.h / 2); scene.add(box);
+    const ed = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), edge); ed.position.copy(box.position); scene.add(ed);
   }
   p3.scene = scene; p3.dyn = null;
   p3Dyn();
@@ -7082,11 +7250,17 @@ function p3Panel() {
     return;
   }
   $("p3-hint").textContent = T("Drag to turn · two fingers to zoom and move", "Повлечи за вртење · со два прста зумирај и помести");
-  el.innerHTML = `<div class="grid2"><div><label>${T("Walls, fences", "Ѕидови, огради")} <span style="text-transform:none">(m)</span></label>
-      <input type="number" inputmode="decimal" step="0.1" min="0.3" max="10" value="${pe.p.wallH ?? 2}" oninput="p3WallH(this.value)"></div>
-      <div><button class="btn sm ghost" style="width:100%;margin-top:30px" onclick="p3Snap()">${ICON.share}${T("Send picture", "Испрати слика")}</button></div></div>
-    <p class="muted" style="font-size:12.5px;margin-top:8px">${T("A house's height is set on the plan: tap the house. Tap a camera chip above to look through it and aim it.",
-      "Висината на куќата се поставува на планот: допри ја куќата. Допри камера горе за да гледаш низ неа и да ја насочиш.")}</p>
+  const p = pe.p, houses = (p.shapes || []).some((r) => r.kind === "house"), rooms = (p.shapes || []).some((r) => r.kind === "room");
+  const fields = [planInside(p) ? "" : `<div><label>${T("Walls, fences", "Ѕидови, огради")} <span style="text-transform:none">(m)</span></label>
+      <input type="number" inputmode="decimal" step="0.1" min="0.3" max="10" value="${p.wallH ?? 2}" oninput="p3WallH(this.value)"></div>`,
+    rooms || (houses && !p3.roof) ? `<div><label>${T("Rooms high", "Висина на простории")} <span style="text-transform:none">(m)</span></label>
+      <input type="number" inputmode="decimal" step="0.1" min="2" max="6" value="${p.roomH ?? 2.7}" oninput="p3RoomH(this.value)"></div>` : ""].filter(Boolean);
+  el.innerHTML = `${fields.length ? `<div class="grid2">${fields.join("")}</div>` : ""}
+    <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
+      ${houses ? `<button class="chip ${p3.roof ? "on" : ""}" onclick="p3Roof()">${T("Roof", "Покрив")} ${p3.roof ? T("on", "вклучен") : T("off", "исклучен")}</button>` : ""}
+      <button class="btn sm ghost" style="flex:1" onclick="p3Snap()">${ICON.share}${T("Send picture", "Испрати слика")}</button></div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">${houses ? T("A house's height is set on the plan: tap the house. ", "Висината на куќата се поставува на планот: допри ја куќата. ") : ""}${
+      T("Tap a camera above to look through it and aim it.", "Допри камера горе за да гледаш низ неа и да ја насочиш.")}</p>
     <div id="p3-file"></div>`;
 }
 function p3Lens(l) { planRemember(); planCam(p3.mode).lens = l; p3Dyn(); p3Mode(p3.mode); }
@@ -7096,6 +7270,14 @@ function p3WallH(v) {
   if (!(n >= 0.3 && n <= 10)) return;
   planTyping("wallH"); pe.p.wallH = n;
   p3Scene(); p3Draw();
+}
+// the roof off: into the house from above, its rooms and the cameras inside
+function p3Roof() { p3.roof = !p3.roof; p3Scene(); p3Own(); p3Panel(); p3Draw(); }
+function p3RoomH(v) {
+  const n = parseFloat(v);
+  if (!(n >= 2 && n <= 6)) return;
+  planTyping("roomH"); pe.p.roomH = n;
+  p3Scene(); p3Own(); p3Draw();
 }
 function p3Resize() {
   if (!p3) return;
