@@ -571,6 +571,15 @@ a.btn{text-decoration:none;display:block;text-align:center}
 .pl-zoom button{min-width:38px;height:38px;padding:0 10px;border-radius:10px;background:var(--card);border:1px solid var(--line);font-weight:700;font-size:15px}
 .pl-stats{margin:10px 0 0}
 .pl-trayrow{display:flex;gap:8px;align-items:center;overflow-x:auto;padding:6px 0 0}
+.pl-trayrow.wrap{flex-wrap:wrap;overflow:visible}
+/* the alarm's devices: a grid, every one in sight */
+.al-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(56px,1fr));gap:6px;margin-top:6px}
+.al-tile{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding:7px 3px 6px;min-height:58px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:11px;font-weight:600;line-height:1.15;text-align:center}
+.al-tile span{overflow-wrap:break-word;hyphens:auto}
+.al-tile .al-ico{margin:0}
+.al-tile.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.al-tile:active{opacity:.75}
 .pl-panel{margin-top:6px}
 .pl-panel .chips{margin-top:2px}
 .pl-reads{display:grid;grid-template-columns:14px 1fr auto;gap:6px 8px;align-items:center;margin:12px 0 8px;font-size:13.5px}
@@ -6064,6 +6073,16 @@ function alarmTag(d, R) {
     + `<text x="${f(cx)}" y="${f(cy + fs * 0.36)}" font-size="${f(fs)}" text-anchor="middle" fill="${t.col}" font-family="IBM Plex Mono, monospace" font-weight="700" pointer-events="none">${esc(s)}</text>`;
 }
 // a small badge on its own, for a button or a line of text
+// short names, for the grid of devices: every one in sight at once, none to scroll for
+const ALARM_SHORT = { pir: ["Motion", "Движење"], contact: ["Contact", "Контакт"], siren_out: ["Siren out", "Сирена надвор"], siren_in: ["Siren in", "Сирена внатре"],
+  keypad: ["Keypad", "Тастатура"], panel: ["Panel", "Централа"], glass: ["Glass", "Стакло"], smoke: ["Smoke", "Чад"], curtain: ["Curtain", "Завеса"],
+  outpir: ["Outdoor", "Надвор"], beam: ["Beam", "Бариера"], panic: ["Panic", "Паника"], flood: ["Water", "Вода"] };
+const alarmShort = (ty) => { const s = ALARM_SHORT[ty]; return s ? T(s[0], s[1]) : alarmName(ty); };
+// the devices as a grid of tiles: to place one, or (forType) to change a device's type
+const alarmGrid = (cur, forType) => `<div class="al-grid">${ALARM_PICK.map((ty) => {
+  const a = `class="al-tile ${cur === ty ? "on" : ""}" title="${esc(alarmName(ty))}" aria-pressed="${cur === ty}"`, inner = `${alarmIcon(ty, 26)}<span>${alarmShort(ty)}</span>`;
+  return forType ? `<button ${a} onclick="planAlarmType('${ty}')">${inner}</button>` : `<button ${a} onclick="planAlarmPick('${ty}')">${inner}</button>`;
+}).join("")}</div>`;
 const alarmIcon = (type, px = 18) => `<svg class="al-ico" viewBox="-13 -13 26 26" width="${px}" height="${px}" aria-hidden="true">${alarmBadge(type, 0, 0, 11.4, 0, { flat: true })}</svg>`;
 // what a detector covers: a fan or a circle, cut where the walls stop it
 function alarmPoly(d, S) {
@@ -6831,10 +6850,9 @@ function planTray() {
     }
     const left = [...want].map(([id, n]) => ({ a: state.stock.find((x) => x.id === id), n: n - pe.p.alarm.filter((d) => d.article_id === id).length })).filter((x) => x.n > 0);
     const dev = pe.tool === "device" && !pe.trayArticle;
-    el.innerHTML = `${left.length ? `<div class="pl-trayrow"><span class="muted nw">${T("On the offer", "Во понудата")}:</span>${left.map(({ a, n }) =>
+    el.innerHTML = `${left.length ? `<div class="pl-trayrow wrap"><span class="muted nw">${T("On the offer", "Во понудата")}:</span>${left.map(({ a, n }) =>
         `<button class="chip ${pe.trayArticle === a.id ? "on" : ""}" onclick="planAlarmArticle('${a.id}')">${esc(a.name)} × ${n}</button>`).join("")}</div>` : ""}
-      <div class="pl-trayrow">${ALARM_PICK.map((ty) => `<button class="chip sm ${dev && pe.alarmType === ty ? "on" : ""}" onclick="planAlarmPick('${ty}')">
-        ${alarmIcon(ty)}${alarmName(ty)}</button>`).join("")}</div>`;
+      ${alarmGrid(dev ? pe.alarmType : null, false)}`;
     return;
   }
   const want = new Map();
@@ -6926,7 +6944,7 @@ function planPanel(st) {
       keypad: T("By the main door, inside, on the way in.", "Покрај главната врата, внатре, на патот при влегување."),
       panel: T("Out of sight, in a cupboard or storage room.", "Скриена, во ормар или магацин.") }[d.type] || "";
     el.innerHTML = `<div class="row" style="justify-content:space-between"><b>${alarmName(d.type)}${zoned ? ` · ${T("zone", "зона")} ${d.n ?? "–"}` : ""}${d.model ? ` <span class="muted" style="font-weight:400">· ${esc(d.model)}</span>` : ""}</b>${rm}</div>
-      <div class="chips wrap" style="margin-top:6px">${ALARM_PICK.map((ty) => `<button class="chip sm ${d.type === ty ? "on" : ""}" onclick="planAlarmSet('type','${ty}')">${alarmIcon(ty)}${alarmName(ty)}</button>`).join("")}</div>
+      ${alarmGrid(d.type, true)}
       <label>${T("Where", "Каде")}</label><input id="pl-aname" value="${esc(d.name || "")}" oninput="planAlarmSet('name',this.value)" placeholder="${T("e.g. Hall, Front door", "пр. Ходник, Влезна врата")}">
       ${planProductPick(d.article_id, "al")}
       ${zoned ? `<div class="grid2"><div><label>${T("Zone number", "Број на зона")}</label><input type="number" inputmode="numeric" min="1" max="999" value="${d.n ?? ""}" oninput="planAlarmNum('n',parseInt(this.value,10))"></div>
@@ -7039,6 +7057,7 @@ function planLensSwitched(c) {
     if (c.ir === 10) c.ir = 30;
   }
 }
+function planAlarmType(ty) { planAlarmSet("type", ty); }
 function planAlarmSel(id) { pe.sel = "al:" + id; planRender(); }
 function planAlarmSet(k, v) {
   const d = planAlarm(String(pe.sel).split(":")[1]);
